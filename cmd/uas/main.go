@@ -60,7 +60,7 @@ func main() {
 	case "list":
 		err = runList(ctx, os.Stdout, args)
 	case "system":
-		err = runSystem(os.Stdout, args)
+		err = runSystem(ctx, os.Stdout, args)
 	case "settings":
 		err = runSettings(os.Stdout, args)
 	case "help", "-h", "-help", "--help":

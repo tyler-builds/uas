@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/flatpak"
+	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/recommend"
 	"github.com/tyler-builds/uas/internal/client/run"
@@ -34,7 +35,7 @@ type env struct {
 }
 
 // loadEnv reads settings and detects the system. scope, if set, overrides the Flatpak scope setting.
-func loadEnv(scope string) (*env, error) {
+func loadEnv(ctx context.Context, scope string) (*env, error) {
 	path, err := settings.Path()
 	if err != nil {
 		return nil, err
@@ -60,10 +61,25 @@ func loadEnv(scope string) (*env, error) {
 		e.backends[catalog.SourceFlathub] = &flatpak.Backend{Runner: run.Exec{}, Path: e.platform.Flatpak,
 			Scope: s.FlatpakScope}
 	}
+	// Layering needs an image-based system. Package-based Fedora (dnf) is outside the Bazzite slice.
+	if e.platform.Atomic && e.platform.RPMOSTree != "" && e.platform.FedoraRelease() > 0 {
+		e.backends[catalog.SourceFedora] = rpmostree.New(ctx, run.Exec{}, e.platform.RPMOSTree, "rpm",
+			e.platform.FedoraRelease())
+	}
 	return e, nil
 }
 
-func (e *env) available(s catalog.SourceID) bool { return e.backends[s] != nil }
+// available reports whether this system can install l.
+func (e *env) available(l catalog.Listing) bool {
+	b := e.backends[l.Source]
+	return b != nil && b.Supports(l)
+}
+
+// needsRestart reports whether changes from source take effect only after a restart.
+func (e *env) needsRestart(s catalog.SourceID) bool {
+	r, ok := e.backends[s].(backend.Restarter)
+	return ok && r.NeedsRestart()
+}
 
 // installed lists installed apps from every backend, sorted by name.
 func (e *env) installed(ctx context.Context) ([]backend.InstalledApp, error) {
@@ -96,7 +112,7 @@ func runInstall(ctx context.Context, args []string) error {
 	if len(ids) != 1 {
 		return errors.New("install: give exactly one app ID (see \"uas search\")")
 	}
-	e, err := loadEnv(*scope)
+	e, err := loadEnv(ctx, *scope)
 	if err != nil {
 		return err
 	}
@@ -120,7 +136,7 @@ func runInstall(ctx context.Context, args []string) error {
 		return err
 	}
 	for _, a := range installed {
-		if a.Source == l.Source && a.Ref == l.Ref {
+		if a.Matches(l) {
 			fmt.Printf("%s is already installed (%s).\n", app.Name, a.Scope)
 			return nil
 		}
@@ -141,6 +157,10 @@ func runInstall(ctx context.Context, args []string) error {
 			fmt.Println("Installs for all users. Flatpak will ask for your password.")
 		}
 	}
+	if l.Source == catalog.SourceFedora {
+		fmt.Println("Adds the package to your system image (layering). It takes effect after a restart.")
+		fmt.Println("Layered packages can hold up system updates if they conflict with a new image.")
+	}
 	if !*yes {
 		ok, err := confirm("Install?")
 		if err != nil || !ok {
@@ -157,6 +177,9 @@ func runInstall(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("Installed %s.\n", app.Name)
+	if e.needsRestart(l.Source) {
+		fmt.Println("Restart your computer to finish.")
+	}
 	return nil
 }
 
@@ -178,6 +201,7 @@ func runUpdate(ctx context.Context, args []string) error {
 func runOnInstalled(ctx context.Context, cmd, verb string, args []string,
 	action func(context.Context, backend.Backend, backend.InstalledApp, func(backend.Progress)) error) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	catalogPath := catalogFlag(fs)
 	scope := fs.String("scope", "", "pick the copy in this scope when an app is installed more than once")
 	yes := fs.Bool("y", false, "do not ask for confirmation")
 	ids, err := parseArgs(fs, args)
@@ -187,7 +211,7 @@ func runOnInstalled(ctx context.Context, cmd, verb string, args []string,
 	if len(ids) != 1 {
 		return fmt.Errorf("%s: give exactly one app ID (see \"uas list\")", cmd)
 	}
-	e, err := loadEnv("")
+	e, err := loadEnv(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -195,9 +219,11 @@ func runOnInstalled(ctx context.Context, cmd, verb string, args []string,
 	if err != nil {
 		return err
 	}
+	names := installNames(ctx, *catalogPath, ids[0])
 	var matches []backend.InstalledApp
 	for _, a := range installed {
-		if a.AppID == ids[0] && (*scope == "" || a.Scope == *scope) {
+		if (names[a.AppID] || names[a.Ref] || (a.Package != "" && names[a.Package])) &&
+			(*scope == "" || a.Scope == *scope) {
 			matches = append(matches, a)
 		}
 	}
@@ -230,7 +256,32 @@ func runOnInstalled(ctx context.Context, cmd, verb string, args []string,
 		return err
 	}
 	fmt.Printf("%s: done.\n", verb)
+	if e.needsRestart(a.Source) {
+		fmt.Println("Restart your computer to finish.")
+	}
 	return nil
+}
+
+// installNames returns every name an installed copy of the app may go by: the ID given, plus the refs and
+// package names of its catalog listings. The catalog is optional here; without it only the ID is used.
+func installNames(ctx context.Context, catalogPath, id string) map[string]bool {
+	names := map[string]bool{id: true}
+	db, err := catalog.Open(catalogPath)
+	if err != nil {
+		return names
+	}
+	defer db.Close()
+	app, err := db.App(ctx, id)
+	if err != nil {
+		return names
+	}
+	for _, l := range app.Listings {
+		names[l.Ref] = true
+		if l.Package != "" {
+			names[l.Package] = true
+		}
+	}
+	return names
 }
 
 func runList(ctx context.Context, w io.Writer, args []string) error {
@@ -241,7 +292,7 @@ func runList(ctx context.Context, w io.Writer, args []string) error {
 	} else if len(rest) > 0 {
 		return errors.New("list: takes no arguments")
 	}
-	e, err := loadEnv("")
+	e, err := loadEnv(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -264,7 +315,11 @@ func runList(ctx context.Context, w io.Writer, args []string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tID\tVERSION\tSOURCE\tSCOPE")
 	for _, a := range apps {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", truncate(a.Name, 30), a.AppID, a.Version, a.Origin, a.Scope)
+		scope := a.Scope
+		if a.Pending {
+			scope += " (after restart)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", truncate(a.Name, 30), a.AppID, a.Version, a.Origin, scope)
 	}
 	return tw.Flush()
 }

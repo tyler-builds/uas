@@ -1,10 +1,13 @@
 // Package merge combines listings from different sources into apps.
 //
-// Today listings merge only when they share an AppStream ID. Matching on upstream repo and homepage URLs comes
-// with the sources that need it (Homebrew, COPR, GitHub).
+// Listings merge when they share an AppStream ID. Groups that are still separate then merge when they have the
+// same name and the same homepage or source-code URL, come from different sources, and the match is
+// unambiguous (exactly two groups share the key). That catches distros that use old-style IDs such as
+// "rednotebook" for the app Flathub calls "app.rednotebook.RedNotebook".
 package merge
 
 import (
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -32,6 +35,9 @@ func Merge(listings []catalog.Listing) []catalog.App {
 		groups[key] = append(groups[key], l)
 	}
 
+	order = linkByURL(groups, order, func(l catalog.Listing) string { return l.Homepage })
+	order = linkByURL(groups, order, func(l catalog.Listing) string { return l.VCSURL })
+
 	apps := make([]catalog.App, 0, len(groups))
 	seen := map[string]bool{}
 	for _, key := range order {
@@ -47,6 +53,81 @@ func Merge(listings []catalog.Listing) []catalog.App {
 	sort.Slice(apps, func(i, j int) bool { return apps[i].ID < apps[j].ID })
 	return apps
 }
+
+// linkByURL merges pairs of groups that share a name and a URL picked by urlOf. It returns the new group order.
+func linkByURL(groups map[string][]catalog.Listing, order []string, urlOf func(catalog.Listing) string) []string {
+	byKey := map[string][]string{}
+	for _, g := range order {
+		keys := map[string]bool{}
+		for _, l := range groups[g] {
+			if u := normalizeURL(urlOf(l)); u != "" && l.Name != "" {
+				keys[strings.ToLower(strings.TrimSpace(l.Name))+"\x00"+u] = true
+			}
+		}
+		for k := range keys {
+			byKey[k] = append(byKey[k], g)
+		}
+	}
+	merged := map[string]bool{}
+	for _, g := range order {
+		for _, l := range groups[g] {
+			u := normalizeURL(urlOf(l))
+			if u == "" || merged[g] {
+				continue
+			}
+			pair := byKey[strings.ToLower(strings.TrimSpace(l.Name))+"\x00"+u]
+			if len(pair) != 2 || merged[pair[0]] || merged[pair[1]] {
+				continue
+			}
+			a, b := pair[0], pair[1]
+			if !disjointSources(groups[a], groups[b]) {
+				continue
+			}
+			groups[a] = append(groups[a], groups[b]...)
+			delete(groups, b)
+			merged[a], merged[b] = true, true
+		}
+	}
+	var out []string
+	for _, g := range order {
+		if _, ok := groups[g]; ok {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+func disjointSources(a, b []catalog.Listing) bool {
+	seen := map[catalog.SourceID]bool{}
+	for _, l := range a {
+		seen[l.Source] = true
+	}
+	for _, l := range b {
+		if seen[l.Source] {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeURL reduces a URL to host and path, so "http://www.example.org/app/" and
+// "https://example.org/app" compare equal. Bare hosts of big code forges are too generic to identify an app.
+func normalizeURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+	path := strings.TrimSuffix(strings.ToLower(u.Path), "/")
+	path = strings.TrimSuffix(path, ".git")
+	if path == "" && genericHosts[host] {
+		return ""
+	}
+	return host + path
+}
+
+var genericHosts = map[string]bool{"github.com": true, "gitlab.com": true, "sourceforge.net": true,
+	"codeberg.org": true, "invent.kde.org": true, "gitlab.gnome.org": true}
 
 func groupKey(l catalog.Listing) string {
 	if id := normalizeAppStreamID(l.AppStreamID); id != "" {

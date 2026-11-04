@@ -11,9 +11,9 @@ func TestChoose(t *testing.T) {
 		{Source: catalog.SourceFlathub, Ref: "flathub-ref"},
 		{Source: catalog.SourceFedora, Ref: "fedora-ref", Verified: true},
 	}}
-	all := func(catalog.SourceID) bool { return true }
-	onlyFlathub := func(s catalog.SourceID) bool { return s == catalog.SourceFlathub }
-	none := func(catalog.SourceID) bool { return false }
+	all := func(catalog.Listing) bool { return true }
+	onlyFlathub := func(l catalog.Listing) bool { return l.Source == catalog.SourceFlathub }
+	none := func(catalog.Listing) bool { return false }
 
 	// A verified listing beats a higher-precedence unverified one.
 	if c, err := Choose(app, all, ""); err != nil || c.Listing.Ref != "fedora-ref" {

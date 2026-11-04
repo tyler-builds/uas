@@ -41,7 +41,7 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 			return nil, fmt.Errorf("flathub: %w", err)
 		}
 	}
-	r, err := fetch.OpenMaybeGzip(name)
+	r, err := fetch.OpenDecompressed(name)
 	if err != nil {
 		return nil, fmt.Errorf("flathub: %w", err)
 	}

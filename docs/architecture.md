@@ -54,8 +54,12 @@ require them.
 All endpoints below need confirming during the first spike.
 
 - **Flathub:** AppStream XML from the Flathub repo, plus the Flathub API for verified status and install counts.
-- **Fedora:** AppStream data for the current release (`appstream-data`), joined to repo metadata for versions.
-  Only components with AppStream entries (desktop apps, add-ons) are kept, not libraries.
+- **Fedora:** Fedora ships its AppStream data inside the `appstream-data` RPM, not in repo metadata, so the
+  fetcher reads the release and updates repos' `primary.xml` for package versions, then extracts the AppStream
+  XML from that RPM (a small built-in RPM/cpio reader). It indexes the two newest releases on the mirror,
+  because Bazzite can have the next release staged before it boots it. Each listing carries a `distro`
+  (such as `fedora-45`) and a `package` name. Only components whose package is in the repos are kept. Icons
+  are only in AppStream's icon tarballs, so Fedora-only apps have no icon until icons are mirrored to R2.
 - **COPR:** COPR API v3. Only projects with successful builds for `fedora-<N>-x86_64`.
 - **Homebrew:** `formulae.brew.sh` JSON API plus install analytics. Formulae that build on Linux only.
 - **GitHub:** GraphQL API. A curated seed list plus discovery searches for repos whose latest release has a
@@ -74,7 +78,9 @@ Listings are linked into one `App` when, in order of confidence:
    source URLs).
 3. They share a normalized homepage URL.
 
-Links below a confidence threshold are not merged; they appear as separate apps. Each merge records why it happened,
+Rules 2 and 3 use the app name plus the URL, merge only groups from different sources, and only when exactly
+two groups share the key, so ambiguous cases (Fedora's `ardour8` and `ardour9`) stay separate. Bare forge
+hosts such as `github.com` don't count as a homepage. With Flathub and Fedora 44/45, 581 apps merge. Each merge records why it happened,
 so wrong merges can be debugged and overridden with a manual overrides file in the repo.
 
 ### Trust scoring
@@ -162,6 +168,11 @@ type Backend interface {
   `~/.local/share/uas/appimages`, and their `.desktop` file and icon are read from the squashfs in Go, without
   running the AppImage. `.flatpak` bundles go to the flatpak backend and `.rpm` files go to rpm-ostree.
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
+  New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
+  backend reads that deployment's release (from the kernel version in its image metadata) and only offers
+  listings for it. It refuses packages already in the image (`rpm -q`), lists layered packages with a
+  "takes effect after restart" flag, and `update` explains that layered packages update with the system.
+  Bazzite's polkit rules let `wheel` users layer without a password.
 - **copr:** Writes the `.repo` file to a temp file, shows the user what will be added, then runs
   `pkexec install -m 0644 <tmp> /etc/yum.repos.d/...`, then hands off to rpmostree. A custom polkit policy isn't
   possible here because `/usr` is read-only, so the prompt uses pkexec's generic wording.
@@ -249,7 +260,7 @@ uas/
 2. **First install:** platform detection, flatpak backend, `uas install`, `remove`, `update`, `list`,
    `system`, `settings`. Done.
 3. **Hosting:** signing, Worker + R2, Actions cron, `uas refresh`. Done.
-4. **Fedora + rpm-ostree:** layering, reboot-needed state.
+4. **Fedora + rpm-ostree:** layering, reboot-needed state. Done.
 5. **Homebrew.**
 6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling.

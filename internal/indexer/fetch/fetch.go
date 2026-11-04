@@ -3,19 +3,26 @@ package fetch
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 )
@@ -81,6 +88,9 @@ func Get(ctx context.Context, client *http.Client, rawURL, cacheDir string) (str
 
 	switch resp.StatusCode {
 	case http.StatusNotModified:
+		// Mark the copy as used, so PruneCache keeps it.
+		now := time.Now()
+		_ = os.Chtimes(dataPath, now, now)
 		return dataPath, nil
 	case http.StatusOK:
 	default:
@@ -117,20 +127,59 @@ func Get(ctx context.Context, client *http.Client, rawURL, cacheDir string) (str
 	return dataPath, nil
 }
 
-// OpenMaybeGzip opens a file and transparently decompresses it if it is gzip-compressed.
-func OpenMaybeGzip(name string) (io.ReadCloser, error) {
+// PruneCache deletes cached downloads (and their metadata) that no run has used for maxAge. Sources such as
+// Fedora name files by content hash, so without pruning the cache grows with every update.
+func PruneCache(dir string, maxAge time.Duration) (int, error) {
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || strings.HasSuffix(p, ".meta.json") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().Before(cutoff) {
+			if err := os.Remove(p); err != nil {
+				return err
+			}
+			os.Remove(p + ".meta.json")
+			removed++
+		}
+		return nil
+	})
+	return removed, err
+}
+
+// OpenDecompressed opens a file and transparently decompresses it if it is gzip- or zstd-compressed.
+func OpenDecompressed(name string) (io.ReadCloser, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	br := bufio.NewReader(f)
-	magic, err := br.Peek(2)
+	magic, err := br.Peek(4)
 	if err != nil && err != io.EOF {
 		f.Close()
 		return nil, err
 	}
-	if len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+	switch {
+	case len(magic) >= 2 && magic[0] == 0x1f && magic[1] == 0x8b:
 		zr, err := gzip.NewReader(br)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		return readCloser{Reader: zr, close: func() error { zr.Close(); return f.Close() }}, nil
+	case bytes.Equal(magic, []byte{0x28, 0xb5, 0x2f, 0xfd}):
+		zr, err := zstd.NewReader(br, zstd.WithDecoderMaxMemory(256<<20))
 		if err != nil {
 			f.Close()
 			return nil, err

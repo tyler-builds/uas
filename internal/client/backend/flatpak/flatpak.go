@@ -37,6 +37,11 @@ type Backend struct {
 // Source implements backend.Backend.
 func (b *Backend) Source() catalog.SourceID { return catalog.SourceFlathub }
 
+// Supports implements backend.Backend.
+func (b *Backend) Supports(l catalog.Listing) bool {
+	return l.Source == catalog.SourceFlathub && refPattern.MatchString(l.Ref)
+}
+
 // Installed implements backend.Backend. It lists apps from every installation, user and system.
 func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error) {
 	out, err := b.Runner.Run(ctx, b.Path,

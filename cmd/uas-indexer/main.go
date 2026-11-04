@@ -12,10 +12,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tyler-builds/uas/internal/indexer"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/fedora"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/flathub"
 	"github.com/tyler-builds/uas/internal/indexer/publish"
 	"github.com/tyler-builds/uas/internal/manifest"
@@ -30,6 +33,8 @@ func main() {
 		"(needs $UAS_SIGNING_KEY and $UAS_UPLOAD_TOKEN)")
 	publishDir := flag.String("publish-dir", "", "after building, publish into this local directory (needs $UAS_SIGNING_KEY)")
 	keep := flag.Int("keep", 3, "number of published catalogs to keep")
+	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
+	sources := flag.String("sources", "flathub,fedora", "comma-separated sources to index")
 	keygen := flag.String("keygen", "", "write a new signing key to this file, print its public key, and exit")
 	flag.Parse()
 	if *keygen != "" {
@@ -72,9 +77,26 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	releases, err := parseInts(*fedoraReleases)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "uas-indexer: -fedora-releases:", err)
+		os.Exit(2)
+	}
 	client := &http.Client{Timeout: 10 * time.Minute}
-	fetchers := []fetch.Fetcher{
-		&flathub.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "flathub"), Arch: *arch, File: *flathubFile},
+	available := map[string]fetch.Fetcher{
+		"flathub": &flathub.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "flathub"), Arch: *arch,
+			File: *flathubFile},
+		"fedora": &fedora.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "fedora"), Arch: *arch,
+			Releases: releases, Log: log},
+	}
+	var fetchers []fetch.Fetcher
+	for _, name := range strings.Split(*sources, ",") {
+		f, ok := available[strings.TrimSpace(name)]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "uas-indexer: unknown source %q\n", name)
+			os.Exit(2)
+		}
+		fetchers = append(fetchers, f)
 	}
 
 	start := time.Now()
@@ -84,6 +106,11 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("catalog written", "path", *out, "apps", info.Apps, "took", time.Since(start).Round(time.Millisecond))
+	if n, err := fetch.PruneCache(*cache, 3*24*time.Hour); err != nil {
+		log.Warn("pruning the download cache failed", "err", err)
+	} else if n > 0 {
+		log.Info("pruned download cache", "files", n)
+	}
 
 	if store != nil {
 		m, err := publish.Publish(ctx, store, *out, info, publish.Options{Key: signingKey, Keep: *keep, Log: log})
@@ -120,6 +147,21 @@ func generateKey(path string) error {
 	fmt.Printf("private key written to %s\npublic key: %s\nkey id:     %s\n", path,
 		base64.StdEncoding.EncodeToString(public), manifest.KeyID(public))
 	return nil
+}
+
+func parseInts(s string) ([]int, error) {
+	var out []int
+	for _, f := range strings.Split(s, ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		n, err := strconv.Atoi(f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func defaultCacheDir() string {

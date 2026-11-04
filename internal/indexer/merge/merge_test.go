@@ -42,3 +42,34 @@ func TestMergeByAppStreamID(t *testing.T) {
 		t.Errorf("Notes = %+v", apps[2])
 	}
 }
+
+func TestMergeByNameAndURL(t *testing.T) {
+	apps := Merge([]catalog.Listing{
+		{Source: catalog.SourceFlathub, Ref: "app/app.rednotebook.RedNotebook/x86_64/stable",
+			AppStreamID: "app.rednotebook.RedNotebook", Name: "RedNotebook", Homepage: "https://rednotebook.app"},
+		{Source: catalog.SourceFedora, Ref: "fedora-45/rednotebook", AppStreamID: "rednotebook",
+			Name: "RedNotebook", Homepage: "http://www.rednotebook.app/"},
+		// Ambiguous: two Fedora apps match the one Flathub app, so nothing merges.
+		{Source: catalog.SourceFlathub, Ref: "app/org.ardour.Ardour/x86_64/stable", AppStreamID: "org.ardour.Ardour",
+			Name: "Ardour", Homepage: "https://ardour.org"},
+		{Source: catalog.SourceFedora, Ref: "fedora-45/ardour8", AppStreamID: "ardour8", Name: "Ardour",
+			Homepage: "https://ardour.org"},
+		{Source: catalog.SourceFedora, Ref: "fedora-45/ardour9", AppStreamID: "ardour9", Name: "Ardour",
+			Homepage: "https://ardour.org"},
+		// Same source: two Flathub apps are never merged with each other.
+		{Source: catalog.SourceFlathub, Ref: "app/org.example.A/x86_64/stable", AppStreamID: "org.example.A",
+			Name: "Tool", VCSURL: "https://github.com/example/tool"},
+		{Source: catalog.SourceFlathub, Ref: "app/org.example.B/x86_64/stable", AppStreamID: "org.example.B",
+			Name: "Tool", VCSURL: "https://github.com/example/tool"},
+		// A bare forge host does not identify an app.
+		{Source: catalog.SourceFedora, Ref: "fedora-45/tool", AppStreamID: "tool", Name: "Tool",
+			Homepage: "https://github.com/"},
+	})
+	ids := map[string]int{}
+	for _, a := range apps {
+		ids[a.ID] = len(a.Listings)
+	}
+	if ids["app.rednotebook.RedNotebook"] != 2 || len(ids) != 7 {
+		t.Errorf("apps = %v", ids)
+	}
+}

@@ -4,7 +4,10 @@
 // that finds an unknown schema version refuses it and waits for a matching catalog.
 package catalog
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // SchemaVersion is the version of the catalog database layout. Bump it on any incompatible change.
 const SchemaVersion = 1
@@ -75,7 +78,15 @@ type Listing struct {
 
 	// Runtime is the Flatpak runtime the app needs, if any.
 	Runtime string `json:"runtime,omitempty"`
+
+	// Package is the name of the package to install, for package-based sources such as Fedora.
+	Package string `json:"package,omitempty"`
+	// Distro limits the listing to one distribution release, such as "fedora-45". Empty means any.
+	Distro string `json:"distro,omitempty"`
 }
+
+// FedoraDistro returns the Distro value for a Fedora release.
+func FedoraDistro(release int) string { return fmt.Sprintf("fedora-%d", release) }
 
 // App is one application, combining the listings that describe it across sources.
 type App struct {

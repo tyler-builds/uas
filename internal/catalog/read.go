@@ -85,7 +85,7 @@ func (d *DB) search(ctx context.Context, match, exactName string, limit int) ([]
 	// An exact name match always comes first.
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT a.id, a.name, a.summary, a.kind, a.icon_url,
-		       (SELECT group_concat(source, ',') FROM listings l WHERE l.app_id = a.id),
+		       (SELECT group_concat(DISTINCT source) FROM listings l WHERE l.app_id = a.id),
 		       (SELECT max(verified) FROM listings l WHERE l.app_id = a.id)
 		FROM apps_fts
 		JOIN apps a ON a.id = apps_fts.app_id

@@ -14,19 +14,19 @@ type Choice struct {
 	Reason  string
 }
 
-// Choose picks a listing of app that one of the available sources can install. If want is set, only that
-// source is considered.
+// Choose picks a listing of app that this system can install, as decided by available. If want is set, only
+// that source is considered.
 //
 // The default order is the catalog's source precedence (Flathub first on Bazzite, since it needs no reboot
 // and is sandboxed), with verified listings ahead of unverified ones. Trust scores will refine this once
 // sources with weaker guarantees (COPR, GitHub) are added.
-func Choose(app *catalog.App, available func(catalog.SourceID) bool, want catalog.SourceID) (Choice, error) {
+func Choose(app *catalog.App, available func(catalog.Listing) bool, want catalog.SourceID) (Choice, error) {
 	var candidates []catalog.Listing
 	for _, l := range app.Listings {
 		if want != "" && l.Source != want {
 			continue
 		}
-		if available(l.Source) {
+		if available(l) {
 			candidates = append(candidates, l)
 		}
 	}

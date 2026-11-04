@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,10 +10,11 @@ import (
 	"text/tabwriter"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/settings"
 )
 
-func runSystem(w io.Writer, args []string) error {
+func runSystem(ctx context.Context, w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("system", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print as JSON")
 	if rest, err := parseArgs(fs, args); err != nil {
@@ -20,7 +22,7 @@ func runSystem(w io.Writer, args []string) error {
 	} else if len(rest) > 0 {
 		return errors.New("system: takes no arguments")
 	}
-	e, err := loadEnv("")
+	e, err := loadEnv(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -67,7 +69,11 @@ func runSystem(w io.Writer, args []string) error {
 	fmt.Fprintln(w, "\nSources uas can install from:")
 	for _, s := range catalog.SourcePrecedence {
 		state := "not supported yet"
-		if e.available(s) {
+		switch b := e.backends[s].(type) {
+		case nil:
+		case *rpmostree.Backend:
+			state = fmt.Sprintf("ready (layering onto Fedora %d)", b.Release)
+		default:
 			state = "ready"
 		}
 		fmt.Fprintf(w, "  %-9s %s\n", s, state)

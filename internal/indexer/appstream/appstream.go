@@ -22,6 +22,7 @@ type Component struct {
 	Description string // Markdown
 	Developer   string
 	License     string
+	PkgName     string            // the package that provides the component, in distro catalogs
 	URLs        map[string]string // by type: homepage, bugtracker, vcs-browser, ...
 	Icons       []Icon
 	Categories  []string
@@ -177,6 +178,7 @@ type xComponent struct {
 	Summaries       []xText       `xml:"summary"`
 	Descriptions    []xInner      `xml:"description"`
 	License         string        `xml:"project_license"`
+	PkgNames        []string      `xml:"pkgname"`
 	DeveloperNames  []xText       `xml:"developer>name"`
 	LegacyDeveloper []xText       `xml:"developer_name"`
 	Icons           []xIcon       `xml:"icon"`
@@ -203,6 +205,9 @@ func (x *xComponent) convert() (*Component, error) {
 	}
 	if c.Developer == "" {
 		c.Developer = pickText(x.LegacyDeveloper)
+	}
+	if len(x.PkgNames) > 0 {
+		c.PkgName = strings.TrimSpace(x.PkgNames[0])
 	}
 	for _, d := range x.Descriptions {
 		if d.Lang != "" {
