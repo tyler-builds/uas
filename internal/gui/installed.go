@@ -139,7 +139,7 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 		}
 
 		row := ui.Div().Row().Align(ui.Center).Gap(space5).PaddingX(space6).PaddingY(space4).
-			Radius(radiusL).Background(t.Surface).Border(1, t.Border).
+			Radius(radiusL).Background(t.Surface).
 			Child(a.appIcon(ctx, icon, 56, name)).
 			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 				Child(ui.Text(name).FontSize(17).Semibold().Truncate()).

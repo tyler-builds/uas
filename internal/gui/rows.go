@@ -60,7 +60,7 @@ func reachText(r catalog.SearchResult) (icon *icons.Icon, text, tip string) {
 func (a *App) appCard(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 	t := ctx.Theme()
 	return clickable(ctx, ui.Div().Row().Align(ui.Center).Gap(space4).Padding(space5).Height(ui.Px(128)).
-		Radius(radiusL).Background(t.Surface).Border(1, t.Border).MinWidth(ui.Px(0)),
+		Radius(radiusL).Background(t.Surface).MinWidth(ui.Px(0)),
 		r.Name, func() { a.openApp(r.ID) }).
 		Child(a.appIcon(ctx, r.IconURL, 60, r.Name)).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
@@ -79,8 +79,7 @@ func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult, installed insta
 		updated = "Updated " + r.Updated.Local().Format("Jan 2, 2006")
 	}
 	row := ui.Div().Row().Align(ui.Center).Gap(space5).PaddingX(space6).PaddingY(space4).
-		Radius(radiusL).Background(t.Surface).Border(1, t.Border).
-		Hover(ui.Style{BorderColor: t.Accent.Alpha(0.7)}).
+		Radius(radiusL).Background(t.Surface).Hover(ui.Style{Background: t.SurfaceHover}).
 		Child(ui.Div().Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }).
 			Child(a.appIcon(ctx, r.IconURL, 72, r.Name))).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).

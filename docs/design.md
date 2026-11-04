@@ -5,7 +5,7 @@ components instead of raw sizes and colors.
 
 ## Layout
 
-- **Sidebar:** the uas mark, then Home, Search and Sources; a "Categories" group (Development, Games,
+- **Sidebar:** 42px items; the selected one is marked by its fill alone, with no bar. The uas mark, then Home, Search and Sources; a "Categories" group (Development, Games,
   Graphics, Internet, Multimedia, Productivity, System, Utilities); a "Library" group with Installed and
   Updates and their counts; the catalog's freshness at the bottom.
 - **Top bar:** a back button when there is somewhere to go back to, a pill-shaped search field (typing
@@ -15,7 +15,7 @@ components instead of raw sizes and colors.
 
 ## Pages
 
-- **Home:** a featured banner with geometric art drawn on a canvas, "Popular Apps" and "New & Updated" rows
+- **Home:** a 220px featured banner with geometric art drawn on a canvas, "Popular Apps" and "New & Updated" rows
   of cards (new means recently released among apps with at least 50,000 installs a year), and "Browse by
   Source" tiles with app counts.
 - **Search:** source filter chips (All, Flathub, Fedora, Homebrew, COPR, GitHub), a sort menu, and result
@@ -41,6 +41,9 @@ components instead of raw sizes and colors.
   Flathub blue with an open package, Fedora violet with layers (its installs layer onto the system image),
   Homebrew amber with a beer mug, COPR rose with a hammer (packages built by the project owner), GitHub gray
   with a branch. A Flathub-verified publisher gets a green shield. Hovering any of them explains it.
+
+- **Surfaces:** cards, rows and tiles are one flat color with no border, lighter than the page (the light
+  theme's page is a soft gray so white cards stand out). Hovering lightens a clickable one.
 
 ## Tokens
 

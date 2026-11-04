@@ -137,12 +137,12 @@ func (a *App) detailHeader(ctx *ui.Context, app *catalog.App, available []catalo
 		if chooseErr != nil {
 			msg = chooseErr.Error()
 		}
-		install = ui.Div().Width(ui.Px(240)).Child(ui.Alert("Not available here").Warning().Description(msg))
+		install = ui.Div().Width(ui.Px(220)).Child(ui.Alert("Not available here").Warning().Description(msg))
 	} else {
 		install = a.installArea(ctx, app, available, chosen, listing)
 	}
 	return ui.Div().Row().Gap(space6).Align(ui.Center).
-		Child(ui.Div().Size(ui.Px(140), ui.Px(140)).Radius(32).Background(t.Surface).Border(1, t.Border).Center().
+		Child(ui.Div().Size(ui.Px(140), ui.Px(140)).Radius(32).Background(t.Surface).Center().
 			Shrink(0).Child(a.appIcon(ctx, app.IconURL, 104, app.Name))).
 		Child(ui.Div().Column().Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(app.Name).FontSize(36).Bold()).
@@ -203,7 +203,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 			}
 			return ui.Text(v)
 		})
-	col := ui.Div().Column().Gap(space3).Width(ui.Px(250)).Shrink(0).Child(action).Child(picker)
+	col := ui.Div().Column().Gap(space3).Width(ui.Px(200)).Shrink(0).Child(action).Child(picker)
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).

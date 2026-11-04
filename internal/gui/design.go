@@ -60,7 +60,7 @@ var darkPalette = palette{
 }
 
 var lightPalette = palette{
-	background: "#f4f6f8", panel: "#eceff3", surface: "#ffffff", surfaceHover: "#f1f4f7", surfaceActive: "#e6eaef",
+	background: "#eceff3", panel: "#e4e8ed", surface: "#ffffff", surfaceHover: "#f6f8fa", surfaceActive: "#d9dee5",
 	border: "#dfe3e8", borderStrong: "#c8ced6",
 	text: "#111418", textMuted: "#5b6472", textSubtle: "#8a919c",
 	accent: "#0d9488", accentHover: "#0f766e", accentActive: "#115e59", accentText: "#ffffff", link: "#0f766e",
@@ -90,9 +90,9 @@ func buildTheme(t *ui.Theme, p palette) *ui.Theme {
 
 	t.Sidebar = ui.SidebarStyle{
 		Pane:         ui.Style{Background: h(p.panel)},
-		Item:         ui.Style{Radius: radiusS, FontSize: 14},
+		Item:         ui.Style{Radius: radiusS, FontSize: 14, MinHeight: ui.Px(42)},
 		ItemSelected: ui.Style{Background: h(p.surfaceActive), TextColor: h(p.text), FontWeight: ui.FontSemibold},
-		Indicator:    ui.Style{Background: h(p.accent)},
+		Indicator:    ui.Style{Clear: ui.ClearBackground}, // the fill alone marks the selected item
 		Heading:      ui.Style{TextColor: h(p.textSubtle), FontSize: 11},
 	}
 	t.Buttons.Primary = ui.ButtonStyle{Root: ui.Style{FontWeight: ui.FontSemibold}}
@@ -125,13 +125,13 @@ func caption(ctx *ui.Context, s string) *ui.TextElement {
 // card is the standard container: a raised surface with a hairline border.
 func card(ctx *ui.Context) *ui.DivElement {
 	t := ctx.Theme()
-	return ui.Div().Column().Gap(space3).Padding(space5).Radius(radiusL).Background(t.Surface).Border(1, t.Border)
+	return ui.Div().Column().Gap(space3).Padding(space5).Radius(radiusL).Background(t.Surface)
 }
 
 // clickable makes a card or row behave as a button: pointer, hover lift, focus and Enter or Space.
 func clickable(ctx *ui.Context, d *ui.DivElement, name string, onClick func()) *ui.DivElement {
 	t := ctx.Theme()
-	return d.Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover, BorderColor: t.BorderStrong}).
+	return d.Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
 		Role(access.RoleButton).Label(name).TabIndex(0).OnClick(onClick)
 }
 

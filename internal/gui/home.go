@@ -98,16 +98,15 @@ func (a *App) featured(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	}).Absolute().Inset(0).Size(ui.Full, ui.Full).AccessHidden() // a canvas is 300x150 unless sized
 	// The art is a background layer; the words and the button sit on top as real elements, so assistive
 	// technology reads them (a canvas is exposed as one image).
-	return ui.Div().Height(ui.Px(300)).Radius(radiusXL).ClipContent().Border(1, t.Border).
+	return ui.Div().Height(ui.Px(220)).Radius(radiusXL).ClipContent().
 		Child(art2).
-		Child(ui.Div().Column().Justify(ui.Center).Gap(space3).PaddingX(space8 + 8).Height(ui.Full).
+		Child(ui.Div().Column().Justify(ui.Center).Gap(space2).PaddingX(space8 + 8).Height(ui.Full).
 			Child(ui.Text("FEATURED").FontSize(12).Semibold().TextColor(t.TextMuted)).
 			Child(ui.Div().Column().
 				Child(display("Every app for " + system + ".")).
 				Child(display("One store."))).
-			Child(ui.Div().MaxWidth(ui.Px(600)).Child(ui.Text("Flathub, Fedora, Homebrew, COPR and GitHub: " +
-				compactThousands(info.Apps) + " apps, searched, ranked and checked in one place.").FontSize(16).
-				TextColor(t.TextMuted))).
+			Child(ui.Text(compactThousands(info.Apps) + " apps from Flathub, Fedora, Homebrew, COPR and GitHub, " +
+				"checked and ranked in one place.").FontSize(15).TextColor(t.TextMuted)).
 			Child(ui.Div().Row().MarginTop(space2).Child(a.featuredButton(ctx))))
 }
 
@@ -141,7 +140,7 @@ func (a *App) sourceTiles(ctx *ui.Context, cols int) ui.Element {
 		s := s
 		c := sourceColor(ctx, s)
 		grid = grid.Child(clickable(ctx, ui.Div().Row().Align(ui.Center).Gap(space4).Padding(space5).
-			Radius(radiusL).Background(t.Surface).Border(1, t.Border), s.Name(),
+			Radius(radiusL).Background(t.Surface), s.Name(),
 			func() { a.open(view{page: pageSource, arg: string(s)}) }).
 			Tooltip(sourceTips[s]).
 			Child(ui.Div().Size(ui.Px(48), ui.Px(48)).Radius(radiusM).Background(c.Alpha(0.15)).Center().
