@@ -220,7 +220,8 @@ func verifiedTag(ctx *ui.Context) ui.Element {
 // sourceTags shows where an app is available, and whether its publisher is verified. With max above zero,
 // sources past max collapse into a "+n".
 func sourceTags(ctx *ui.Context, sources []catalog.SourceID, verified bool, max int) ui.Element {
-	row := ui.Div().Row().Align(ui.Center).Gap(space4).MinWidth(ui.Px(0))
+	// The tags keep their width; whatever sits beside them (such as the developer) gives way instead.
+	row := ui.Div().Row().Align(ui.Center).Gap(space4).Shrink(0)
 	for i, s := range sources {
 		if max > 0 && i == max {
 			rest := make([]string, 0, len(sources)-max)

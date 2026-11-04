@@ -51,6 +51,9 @@ func TestShots(t *testing.T) {
 		{"detail-narrow", func(a *App) {}, 1900, "org.darktable.Darktable", 1100},
 		{"search", func(a *App) { a.query.Set("editor"); a.search.Set("editor"); a.goTo(view{page: pageSearch}) }, 1100, "", 0},
 		{"sources", func(a *App) { a.goTo(view{page: pageSources}) }, 1300, "", 0},
+		// At the default window width, a row with several sources, a verified mark and a long developer name.
+		{"search-narrow", func(a *App) { a.query.Set("discord"); a.search.Set("discord"); a.goTo(view{page: pageSearch}) },
+			800, "", 1180},
 		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 820, "", 0},
 		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, "", 0},
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
