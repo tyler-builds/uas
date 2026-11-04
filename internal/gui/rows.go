@@ -84,16 +84,23 @@ func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult, installed insta
 			Child(a.appIcon(ctx, r.IconURL, 72, r.Name))).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }). // Details is the keyboard way in
-			Child(ui.Div().Row().Align(ui.Center).Gap(space2).MinWidth(ui.Px(0)).
-				Child(ui.Div().Shrink(0).MaxWidth(ui.Px(360)).Child(ui.Text(r.Name).FontSize(18).Semibold().Truncate())).
-				Child(ui.If(r.Developer != "", ui.Div().MinWidth(ui.Px(0)).Tooltip("Developer: "+r.Developer).
-					Child(ui.Text("by "+r.Developer).FontSize(13).TextColor(t.TextMuted).Truncate())))).
+			Child(ui.Text(r.Name).FontSize(18).Semibold().Truncate()).
 			Child(ui.Text(r.Summary).FontSize(15).TextColor(t.TextMuted).Truncate()).
-			Child(ui.Div().MarginTop(space2).Child(sourceTags(ctx, r.Sources, r.Verified, 0)))).
+			Child(ui.Div().Row().Align(ui.Center).Gap(space4).MarginTop(space2).MinWidth(ui.Px(0)).
+				Child(sourceTags(ctx, r.Sources, r.Verified, 0)).
+				Child(ui.If(r.Developer != "", developerTag(ctx, r.Developer))))).
 		Child(ui.Div().Column().Gap(space2).Width(ui.Px(200)).Shrink(0).
 			Child(statLine(ctx, reachIcon, reach, reachTip)).
 			Child(statLine(ctx, icons.Clock, updated, "")))
 	return row.Child(a.rowActions(ctx, r, installed)).Key("row:" + r.ID)
+}
+
+// developerTag is who makes an app, after its sources in a result row.
+func developerTag(ctx *ui.Context, dev string) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().Row().Align(ui.Center).Gap(6).MinWidth(ui.Px(0)).Tooltip("Developer: " + dev).
+		Child(ui.Icon(icons.User).Size(14).Color(t.TextMuted)).
+		Child(ui.Text(dev).FontSize(13).TextColor(t.TextMuted).Truncate())
 }
 
 // rowActions is the Install (or Installed) button and the Details link of a result row.
