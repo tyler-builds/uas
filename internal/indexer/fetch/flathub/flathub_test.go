@@ -40,7 +40,7 @@ func TestParse(t *testing.T) {
 		{"License", b.License, "MPL-2.0"},
 		{"Homepage", b.Homepage, "https://example.org/"},
 		{"VCSURL", b.VCSURL, "https://github.com/example/browser"},
-		{"IconURL", b.IconURL, "https://example.org/icons/128@2.png"},
+		{"IconURL", b.IconURL, "https://example.org/icons/128.png"},
 		{"Version", b.Version, "2.0.0"},
 		{"VerifiedAs", b.VerifiedAs, "example.org"},
 		{"Runtime", b.Runtime, "org.freedesktop.Platform/x86_64/25.08"},
@@ -73,6 +73,9 @@ func TestParse(t *testing.T) {
 	n := listings[1]
 	if n.Kind != catalog.KindDesktopApp || n.Developer != "Sample Dev" || n.Verified {
 		t.Errorf("legacy component = %+v", n)
+	}
+	if want := "https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/org.example.Notes.png"; n.IconURL != want {
+		t.Errorf("cached icon URL = %q, want %q", n.IconURL, want)
 	}
 	if n.Ref != "app/org.example.Notes.desktop/x86_64/stable" {
 		t.Errorf("Ref without bundle = %q", n.Ref)

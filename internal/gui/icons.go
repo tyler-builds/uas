@@ -64,6 +64,12 @@ func (l *iconLoader) load(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound && strings.Contains(url, "/128x128@2/") {
+		// Catalogs built before uas preferred scale-1 icons can point at high-DPI icons Flathub doesn't
+		// have; its scale-1 icon sits next to it.
+		resp.Body.Close()
+		return l.load(ctx, strings.Replace(url, "/128x128@2/", "/128x128/", 1))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}

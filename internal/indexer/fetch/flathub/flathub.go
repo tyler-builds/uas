@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -59,6 +60,22 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 		}
 	}
 	return listings, nil
+}
+
+// cachedIconFormat is where Flathub serves the icons its catalog lists as cached: architecture, width,
+// height and file name.
+const cachedIconFormat = "https://dl.flathub.org/repo/appstream/%s/icons/%dx%d/%s"
+
+var iconFileName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.png$`)
+
+// cachedIconURL is the URL of a component's largest cached icon, for apps whose catalog entry has no remote
+// icon (Firefox, among others).
+func cachedIconURL(c *appstream.Component, arch string) string {
+	ic, ok := c.BestCachedIcon()
+	if !ok || ic.Width <= 0 || !iconFileName.MatchString(ic.Value) {
+		return ""
+	}
+	return fmt.Sprintf(cachedIconFormat, arch, ic.Width, ic.Width, ic.Value)
 }
 
 // PopularURL lists apps with their installs in the last month, most popular first.
@@ -157,6 +174,9 @@ func toListing(c *appstream.Component, arch string) (catalog.Listing, bool) {
 		Categories:  c.Categories,
 		Keywords:    c.Keywords,
 		Runtime:     c.Bundle.Runtime,
+	}
+	if l.IconURL == "" {
+		l.IconURL = cachedIconURL(c, arch)
 	}
 	for _, s := range c.Screenshots {
 		l.Screenshots = append(l.Screenshots, catalog.Screenshot{URL: s.Source, ThumbURL: s.Thumbnail,

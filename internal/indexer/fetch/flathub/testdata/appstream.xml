@@ -64,6 +64,9 @@
   <component type="desktop">
     <id>org.example.Notes.desktop</id>
     <name>Notes</name>
+    <icon type="cached" width="64" height="64">org.example.Notes.png</icon>
+    <icon type="cached" width="128" height="128">org.example.Notes.png</icon>
+    <icon type="cached" width="128" height="128" scale="2">org.example.Notes.png</icon>
     <summary>Write things down</summary>
     <developer_name>Sample Dev</developer_name>
     <releases>

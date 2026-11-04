@@ -62,19 +62,37 @@ type Bundle struct {
 	Runtime string
 }
 
-// BestRemoteIcon returns the URL of the largest remote icon, or "" if there is none.
+// BestRemoteIcon returns the URL of the largest remote icon at scale 1, or of the largest one at any scale if
+// there is none at scale 1, or "" if there is no remote icon.
+//
+// Scale 1 comes first because catalogs list high-DPI icons that their servers don't always have: in November
+// 2026 about a quarter of Flathub's 128x128@2 icon URLs returned 404, while every 128x128 one tried was there.
 func (c *Component) BestRemoteIcon() string {
-	best, bestSize := "", 0
+	best, bestSize, bestHiDPI := "", 0, true
 	for _, ic := range c.Icons {
 		if ic.Type != "remote" {
 			continue
 		}
-		size := ic.Width * max(ic.Scale, 1)
-		if size > bestSize || best == "" {
-			best, bestSize = ic.Value, size
+		hiDPI := ic.Scale > 1
+		better := best == "" || (bestHiDPI && !hiDPI) || (hiDPI == bestHiDPI && ic.Width > bestSize)
+		if better {
+			best, bestSize, bestHiDPI = ic.Value, ic.Width, hiDPI
 		}
 	}
 	return best
+}
+
+// BestCachedIcon returns the largest scale-1 cached icon: one that the catalog's publisher serves next to
+// the catalog, by name and size.
+func (c *Component) BestCachedIcon() (Icon, bool) {
+	var best Icon
+	found := false
+	for _, ic := range c.Icons {
+		if ic.Type == "cached" && ic.Scale <= 1 && ic.Value != "" && (!found || ic.Width > best.Width) {
+			best, found = ic, true
+		}
+	}
+	return best, found
 }
 
 // Latest returns the newest release.
