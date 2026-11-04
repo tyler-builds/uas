@@ -58,8 +58,9 @@ const (
 )
 
 // MediaVersion changes whenever what enrich reads changes, so cached facts and cached GitHub results made
-// the old way are not reused. 2: the right desktop entry when an image has several.
-const MediaVersion = 2
+// the old way are not reused. 2: the right desktop entry when an image has several. 3: only the app's own
+// metainfo, not a bundled library's.
+const MediaVersion = 3
 
 // IconDir is where enrich keeps icons, under MediaDir. The publisher uploads them from here.
 func IconDir(mediaDir string) string { return filepath.Join(mediaDir, "icons") }

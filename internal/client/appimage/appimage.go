@@ -130,7 +130,8 @@ func fromFS(fsys fs.FS) (*Info, error) {
 	if len(desktops) == 0 {
 		return nil, errors.New("appimage: no .desktop file at the image root")
 	}
-	info := &Info{Desktop: desktops[pickDesktop(fsys, names, desktops)]}
+	pick := pickDesktop(fsys, names, desktops)
+	info := &Info{Desktop: desktops[pick]}
 
 	var candidates []string
 	if icon := info.Desktop["Icon"]; icon != "" && !strings.ContainsAny(icon, "/\\") {
@@ -147,7 +148,7 @@ func fromFS(fsys fs.FS) (*Info, error) {
 			break
 		}
 	}
-	info.Metainfo = findMetainfo(fsys)
+	info.Metainfo = findMetainfo(fsys, names[pick])
 	return info, nil
 }
 
@@ -176,18 +177,31 @@ func pickDesktop(fsys fs.FS, names []string, desktops []map[string]string) int {
 	return 0
 }
 
-// findMetainfo returns the first AppStream metainfo file in the image, or nil.
-func findMetainfo(fsys fs.FS) []byte {
+// findMetainfo returns the AppStream metainfo of the app whose desktop entry is desktop, or nil. AppImages
+// often bundle the metainfo of libraries they carry, so a file counts only if it is named after the desktop
+// entry or names it as its launchable.
+func findMetainfo(fsys fs.FS, desktop string) []byte {
+	base := strings.ToLower(strings.TrimSuffix(desktop, ".desktop"))
 	for _, dir := range []string{"usr/share/metainfo", "usr/share/appdata"} {
 		entries, err := fs.ReadDir(fsys, dir)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
-			if n := e.Name(); strings.HasSuffix(n, ".metainfo.xml") || strings.HasSuffix(n, ".appdata.xml") {
-				if b, err := readFile(fsys, dir+"/"+n, maxMetainfo); err == nil {
-					return b
-				}
+			n := e.Name()
+			id, ok := strings.CutSuffix(n, ".metainfo.xml")
+			if !ok {
+				id, ok = strings.CutSuffix(n, ".appdata.xml")
+			}
+			if !ok {
+				continue
+			}
+			b, err := readFile(fsys, dir+"/"+n, maxMetainfo)
+			if err != nil {
+				continue
+			}
+			if strings.EqualFold(id, base) || bytes.Contains(b, []byte(">"+desktop+"<")) {
+				return b
 			}
 		}
 	}

@@ -32,7 +32,7 @@ func TestFromFS(t *testing.T) {
 		"example-notes.desktop": {Data: []byte(desktop)},
 		"example-notes.png":     {Data: png},
 		"AppRun":                {Data: []byte("#!/bin/sh")},
-		"usr/share/metainfo/org.example.Notes.metainfo.xml": {Data: []byte("<component/>")},
+		"usr/share/metainfo/example-notes.metainfo.xml": {Data: []byte("<component/>")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -178,5 +178,25 @@ func TestSeveralDesktopFiles(t *testing.T) {
 	})
 	if err != nil || info.Desktop["Name"] != "Wine" {
 		t.Errorf("name = %q, %v", info.Desktop["Name"], err)
+	}
+}
+
+// TestMetainfoOfTheApp ignores a bundled library's metainfo.
+func TestMetainfoOfTheApp(t *testing.T) {
+	info, err := fromFS(fstest.MapFS{
+		"Performous.desktop":                         {Data: []byte("[Desktop Entry]\nName=Performous\n")},
+		"usr/share/metainfo/libgphoto2.metainfo.xml": {Data: []byte("<component><id>libgphoto2</id></component>")},
+		"usr/share/metainfo/org.performous.Performous.metainfo.xml": {Data: []byte(
+			"<component><launchable type=\"desktop-id\">Performous.desktop</launchable></component>")},
+	})
+	if err != nil || !bytes.Contains(info.Metainfo, []byte("Performous.desktop")) {
+		t.Errorf("metainfo = %q, %v", info.Metainfo, err)
+	}
+	info, err = fromFS(fstest.MapFS{
+		"wine.desktop": {Data: []byte("[Desktop Entry]\nName=Wine\n")},
+		"usr/share/metainfo/libgphoto2.metainfo.xml": {Data: []byte("<component/>")},
+	})
+	if err != nil || info.Metainfo != nil {
+		t.Errorf("a library's metainfo was used: %q, %v", info.Metainfo, err)
 	}
 }
