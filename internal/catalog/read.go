@@ -99,7 +99,7 @@ func orderBy(o Order) string {
 	return ""
 }
 
-const resultColumns = `a.id, a.name, a.summary, a.kind, a.icon_url,
+const resultColumns = `a.id, a.name, a.summary, a.developer, a.kind, a.icon_url,
 	(SELECT group_concat(DISTINCT source) FROM listings l WHERE l.app_id = a.id),
 	(SELECT max(verified) FROM listings l WHERE l.app_id = a.id),
 	a.popularity, a.stars, a.updated,
@@ -219,7 +219,7 @@ func scanResults(rows *sql.Rows) ([]SearchResult, error) {
 		var kind, sources string
 		var updated int64
 		var refs sql.NullString
-		if err := rows.Scan(&r.ID, &r.Name, &r.Summary, &kind, &r.IconURL, &sources, &r.Verified,
+		if err := rows.Scan(&r.ID, &r.Name, &r.Summary, &r.Developer, &kind, &r.IconURL, &sources, &r.Verified,
 			&r.Popularity, &r.Stars, &updated, &refs); err != nil {
 			return nil, err
 		}

@@ -84,7 +84,10 @@ func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult, installed insta
 			Child(a.appIcon(ctx, r.IconURL, 72, r.Name))).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }). // Details is the keyboard way in
-			Child(ui.Text(r.Name).FontSize(18).Semibold().Truncate()).
+			Child(ui.Div().Row().Align(ui.Center).Gap(space2).MinWidth(ui.Px(0)).
+				Child(ui.Div().Shrink(0).MaxWidth(ui.Px(360)).Child(ui.Text(r.Name).FontSize(18).Semibold().Truncate())).
+				Child(ui.If(r.Developer != "", ui.Div().MinWidth(ui.Px(0)).Tooltip("Developer: "+r.Developer).
+					Child(ui.Text("by "+r.Developer).FontSize(13).TextColor(t.TextMuted).Truncate())))).
 			Child(ui.Text(r.Summary).FontSize(15).TextColor(t.TextMuted).Truncate()).
 			Child(ui.Div().MarginTop(space2).Child(sourceTags(ctx, r.Sources, r.Verified, 0)))).
 		Child(ui.Div().Column().Gap(space2).Width(ui.Px(200)).Shrink(0).

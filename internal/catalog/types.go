@@ -214,13 +214,16 @@ type BuildInfo struct {
 
 // SearchResult is one row of search output.
 type SearchResult struct {
-	ID       string     `json:"id"`
-	Name     string     `json:"name"`
-	Summary  string     `json:"summary"`
-	Kind     Kind       `json:"kind"`
-	IconURL  string     `json:"icon_url,omitempty"`
-	Sources  []SourceID `json:"sources"`
-	Verified bool       `json:"verified"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	// Developer is who makes the app, as its sources name them ("The Godot Engine Community"), or the
+	// GitHub account for a GitHub-only app.
+	Developer string     `json:"developer,omitempty"`
+	Kind      Kind       `json:"kind"`
+	IconURL   string     `json:"icon_url,omitempty"`
+	Sources   []SourceID `json:"sources"`
+	Verified  bool       `json:"verified"`
 	// Popularity is the app's yearly installs (see App.Popularity), Stars its GitHub stars, and Updated the
 	// date of the newest release of any of its listings.
 	Popularity int       `json:"popularity,omitempty"`
