@@ -57,6 +57,10 @@ const (
 	maxScreenshots = 4
 )
 
+// MediaVersion changes whenever what enrich reads changes, so cached facts and cached GitHub results made
+// the old way are not reused. 2: the right desktop entry when an image has several.
+const MediaVersion = 2
+
 // IconDir is where enrich keeps icons, under MediaDir. The publisher uploads them from here.
 func IconDir(mediaDir string) string { return filepath.Join(mediaDir, "icons") }
 
@@ -104,7 +108,7 @@ func (f *Fetcher) factsFor(ctx context.Context, l catalog.Listing) (fc facts, fr
 	if len(l.Assets) > 0 {
 		key = l.Assets[0].URL
 	}
-	sum := sha256.Sum256([]byte("v2|" + key)) // v2: the right desktop entry when an image has several
+	sum := sha256.Sum256([]byte(fmt.Sprintf("v%d|%s", MediaVersion, key)))
 	cache := filepath.Join(f.MediaDir, "facts", hex.EncodeToString(sum[:])+".json")
 	now := time.Now()
 	if raw, err := os.ReadFile(cache); err == nil && json.Unmarshal(raw, &fc) == nil {
