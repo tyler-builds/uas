@@ -5,6 +5,7 @@ package gui
 // stays consistent.
 
 import (
+	"github.com/tyler-builds/jamb/access"
 	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
 
@@ -170,12 +171,14 @@ var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
 }
 
+// sourceIcons give each source a mark: a Flatpak box, layers for packages layered onto the system image,
+// Homebrew's beer mug, a hammer for COPR's owner-built packages, and a branch for GitHub releases.
 var sourceIcons = map[catalog.SourceID]*icons.Icon{
-	catalog.SourceFlathub:  icons.Box,
+	catalog.SourceFlathub:  icons.PackageOpen,
 	catalog.SourceFedora:   icons.Layers,
-	catalog.SourceHomebrew: icons.Terminal,
-	catalog.SourceCOPR:     icons.Wrench,
-	catalog.SourceGitHub:   icons.Code,
+	catalog.SourceHomebrew: icons.Beer,
+	catalog.SourceCOPR:     icons.Hammer,
+	catalog.SourceGitHub:   icons.GitBranch,
 }
 
 func tintColor(ctx *ui.Context, t tint) ui.Color {
@@ -197,23 +200,41 @@ func pill(ctx *ui.Context, label string, c ui.Color, tip string) ui.Element {
 	return p
 }
 
+// sourcePill is a source's name as a labeled pill, for places that explain the marks (Settings).
 func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
 	return pill(ctx, s.Name(), tintColor(ctx, sourceTints[s]), sourceTips[s])
 }
 
-func verifiedPill(ctx *ui.Context) ui.Element {
-	return pill(ctx, "Verified", ctx.Theme().Success, "Flathub has confirmed that the publisher is the app's own "+
-		"developer, through the developer's website or code-hosting account")
+// verifiedTip explains the verified mark.
+const verifiedTip = "Flathub has confirmed that the publisher is the app's own developer, through the " +
+	"developer's website or code-hosting account"
+
+// mark is a small tinted square with an icon: a compact badge whose name shows on hover and is read by
+// assistive technology.
+func mark(ctx *ui.Context, icon *icons.Icon, c ui.Color, name, tip string, size float32) ui.Element {
+	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.3).Background(c.Alpha(0.15)).Center().Shrink(0).
+		Role(access.RoleImage).Label(name).Tooltip(name + ": " + tip).
+		Child(ui.Icon(icon).Size(size * 0.58).Color(c))
 }
 
-// sourcePills shows where an app is available, each pill explaining its source on hover.
-func sourcePills(ctx *ui.Context, sources []catalog.SourceID, verified bool) ui.Element {
-	row := ui.Div().Row().Gap(space1 + 2).Shrink(0).Wrap()
+// sourceMark is a source's icon in its color.
+func sourceMark(ctx *ui.Context, s catalog.SourceID, size float32) ui.Element {
+	return mark(ctx, sourceIcons[s], tintColor(ctx, sourceTints[s]), s.Name(), sourceTips[s], size)
+}
+
+// verifiedMark is the shield shown for a Flathub-verified publisher.
+func verifiedMark(ctx *ui.Context, size float32) ui.Element {
+	return mark(ctx, icons.ShieldCheck, ctx.Theme().Success, "Verified publisher", verifiedTip, size)
+}
+
+// sourceMarks shows where an app is available, and the verified shield, as icons.
+func sourceMarks(ctx *ui.Context, sources []catalog.SourceID, verified bool, size float32) ui.Element {
+	row := ui.Div().Row().Align(ui.Center).Gap(space1 + 2).Shrink(0)
 	for _, s := range sources {
-		row = row.Child(sourcePill(ctx, s))
+		row = row.Child(sourceMark(ctx, s, size))
 	}
 	if verified {
-		row = row.Child(verifiedPill(ctx))
+		row = row.Child(verifiedMark(ctx, size))
 	}
 	return row
 }

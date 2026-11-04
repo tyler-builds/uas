@@ -138,7 +138,7 @@ func (a *App) detailHero(ctx *ui.Context, app *catalog.App) ui.Element {
 	if app.License != "" {
 		chips = chips.Child(statChip(ctx, icons.Scale, app.License, "license", ""))
 	}
-	chips = chips.Child(statChip(ctx, icons.Layers, fmt.Sprint(len(app.Listings)), sourcesNoun(len(app.Listings)),
+	chips = chips.Child(statChip(ctx, icons.Boxes, fmt.Sprint(len(app.Listings)), sourcesNoun(len(app.Listings)),
 		"How many listings of this app uas found across its sources"))
 
 	return hero(ctx).Padding(space8).Gap(space6).
@@ -148,7 +148,7 @@ func (a *App) detailHero(ctx *ui.Context, app *catalog.App) ui.Element {
 				Child(display(app.Name)).
 				Child(ui.If(app.Developer != "", ui.Text("by "+app.Developer).FontSize(14).TextColor(t.TextMuted))).
 				Child(ui.Text(app.Summary).FontSize(16)).
-				Child(ui.Div().MarginTop(space1).Child(sourcePills(ctx, sources, verified))))).
+				Child(ui.Div().MarginTop(space1).Child(sourceMarks(ctx, sources, verified, 28))))).
 		Child(chips)
 }
 

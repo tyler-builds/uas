@@ -237,7 +237,7 @@ func (a *App) appCard(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 		Child(ui.Div().Row().Align(ui.Start).Gap(space3).
 			Child(a.iconTile(ctx, r.IconURL, 56, r.Name)).
 			Child(ui.Spacer()).
-			Child(ui.If(r.Verified, verifiedPill(ctx)))).
+			Child(ui.If(r.Verified, verifiedMark(ctx, 26)))).
 		Child(ui.Div().Column().Gap(space1).
 			Child(ui.Text(r.Name).FontSize(16).Semibold().Truncate()).
 			Child(ui.Text(r.Summary).FontSize(13).TextColor(t.TextMuted).MaxLines(2))).
@@ -245,26 +245,8 @@ func (a *App) appCard(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 		Child(ui.Div().Row().Align(ui.Center).Gap(space2).
 			Child(reach(ctx, r)).
 			Child(ui.Spacer()).
-			Child(compactSourcePills(ctx, r.Sources))).
+			Child(sourceMarks(ctx, r.Sources, false, 24))).
 		Key("row:" + r.ID)
-}
-
-// compactSourcePills shows the first source and a count of the others, to fit a card.
-func compactSourcePills(ctx *ui.Context, sources []catalog.SourceID) ui.Element {
-	row := ui.Div().Row().Gap(space1 + 2).Shrink(0)
-	if len(sources) == 0 {
-		return row
-	}
-	row = row.Child(sourcePill(ctx, sources[0]))
-	if more := sources[1:]; len(more) > 0 {
-		names := make([]string, len(more))
-		for i, s := range more {
-			names[i] = s.Name()
-		}
-		row = row.Child(pill(ctx, fmt.Sprintf("+%d", len(more)), ctx.Theme().TextMuted,
-			"Also on "+strings.Join(names, " and ")))
-	}
-	return row
 }
 
 // appRow is one app in a list.
@@ -278,7 +260,7 @@ func (a *App) appRow(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 		Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(r.Name).FontSize(15).Semibold().Truncate()).
 			Child(ui.Text(r.Summary).FontSize(13).TextColor(t.TextMuted).Truncate())).
-		Child(sourcePills(ctx, r.Sources, r.Verified)).
+		Child(sourceMarks(ctx, r.Sources, r.Verified, 26)).
 		Child(stats(ctx, r)).
 		Key("row:" + r.ID)
 }

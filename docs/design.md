@@ -10,9 +10,12 @@ components instead of raw sizes and colors.
 - **Themes:** `gui.Themes()` returns a light and a dark theme built over jamb's, so every built-in widget
   (buttons, selects, the sidebar, dialogs, toasts) picks up the palette. The window follows the system's
   light or dark mode.
-- **Source colors:** each source has a color, used for its pill everywhere: Flathub blue, Fedora violet,
-  Homebrew amber, COPR teal, GitHub gray. Status colors: success green ("Verified", "Ready", good trust),
-  warning amber, danger red.
+- **Source marks:** each source has a color and an icon, shown as a small tinted square: Flathub blue with an
+  open package, Fedora violet with layers (its installs layer onto the system image), Homebrew amber with a
+  beer mug, COPR teal with a hammer (packages built by the project owner), GitHub gray with a branch. A
+  Flathub-verified publisher gets a green shield. Each mark names itself on hover and to screen readers.
+  Settings shows the same sources as labeled pills, which doubles as the legend. Status colors: success
+  green ("Verified", "Ready", good trust), warning amber, danger red.
 
 ## Tokens
 
@@ -27,7 +30,9 @@ components instead of raw sizes and colors.
 - `card`: the standard raised surface (16 radius, hairline border, 20 padding).
 - `hero`: a card tinted with the soft brand gradient, for the top of Discover and app pages.
 - `sectionHeader`: title, optional caption, controls on the right.
-- `pill` / `sourcePill` / `verifiedPill` / `statusPill`: small tinted labels with a dot and a tooltip.
+- `mark` / `sourceMark` / `verifiedMark` / `sourceMarks`: icon-only badges with a tooltip and an
+  accessible name, used in lists, cards, app headers and Installed.
+- `pill` / `sourcePill` / `statusPill`: small tinted labels with a dot, for places that spell things out.
 - `statChip`: icon, value and label, such as "2.9M installs a year".
 - `iconTile`: frames any app icon on a surface tile so odd shapes line up.
 - `meter`: a thin bar, used in the trust breakdown.

@@ -162,7 +162,7 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp) ui.Element 
 			Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 				Child(ui.Text(name).FontSize(15).Semibold().Truncate()).
 				Child(ui.Div().Row().Gap(space2).Align(ui.Center).
-					Child(sourcePill(ctx, in.Source)).
+					Child(sourceMark(ctx, in.Source, 20)).
 					Child(caption(ctx, strings.Join(meta, " · "))))).
 			Child(ui.If(in.Pending, pill(ctx, "After restart", t.Warning,
 				"Layered into the system image; it takes effect at the next restart")))
