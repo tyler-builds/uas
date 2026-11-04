@@ -161,13 +161,11 @@ func TestGitHubInstallAsksWithTrustScore(t *testing.T) {
 	u.ByRole(access.RoleTextField, "Search apps").Type("tool")
 	u.Advance(searchDebounce + 10*time.Millisecond)
 	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
-	u.Click("row:github:example/tool")
+	clickButton(u, "Details")
 	waitText(t, u, "detail:github:example/tool", "Trust score")
 
-	clickButton(u, "Install")
-	if a.confirm.Peek() == nil {
-		t.Fatal("no confirmation for an unreviewed source")
-	}
+	clickButton(u, "Install") // the row's Install button installs from the recommended source
+	u.WaitFor("the confirmation", func() bool { return a.confirm.Peek() != nil })
 	if apps, _ := gh.Installed(context.Background()); len(apps) != 0 {
 		t.Fatal("installed before the user confirmed")
 	}
@@ -204,7 +202,7 @@ func TestUpdateShownOnlyWhenAvailable(t *testing.T) {
 	fp.installed = []backend.InstalledApp{{Source: catalog.SourceFlathub, Ref: ref, AppID: "org.example.Notes",
 		Name: "Notes", Version: "1.0", Scope: "user"}}
 	fp.available = []backend.AvailableUpdate{{Ref: ref, Scope: "user", Version: "1.1"}}
-	a.page.Set(pageInstalled)
+	a.goTo(view{page: pageUpdates})
 	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
 	defer u.Close()
 

@@ -164,7 +164,7 @@ func runSearch(ctx context.Context, w io.Writer, args []string) error {
 	default:
 		return fmt.Errorf("search: unknown -sort %q", *sortBy)
 	}
-	results, err := db.Search(ctx, strings.Join(words, " "), *limit, order)
+	results, err := db.Search(ctx, strings.Join(words, " "), catalog.SearchOptions{Order: order, Limit: *limit})
 	if err != nil {
 		return err
 	}

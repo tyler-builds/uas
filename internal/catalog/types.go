@@ -226,4 +226,13 @@ type SearchResult struct {
 	Popularity int       `json:"popularity,omitempty"`
 	Stars      int       `json:"stars,omitempty"`
 	Updated    time.Time `json:"updated,omitzero"`
+	// Refs identify the app's listings, so a list can tell which apps are installed.
+	Refs []ListingRef `json:"refs,omitempty"`
+}
+
+// ListingRef identifies a listing without its details.
+type ListingRef struct {
+	Source  SourceID `json:"source"`
+	Ref     string   `json:"ref"`
+	Package string   `json:"package,omitempty"`
 }

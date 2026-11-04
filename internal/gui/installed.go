@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,44 +14,17 @@ import (
 	"github.com/tyler-builds/uas/internal/client/backend"
 )
 
-// installedPage lists what is installed, from every source.
+// installedPage lists everything installed, from every source.
 func (a *App) installedPage(ctx *ui.Context) ui.Element {
-	t := ctx.Theme()
 	res := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
 	ups := a.updates(ctx)
-	var withUpdates, rest []backend.InstalledApp
-	for _, in := range res.Data {
-		if _, ok := ups.Data[in.Key()]; ok {
-			withUpdates = append(withUpdates, in)
-		} else {
-			rest = append(rest, in)
-		}
-	}
-	sub := "Everything installed from every source"
-	switch {
-	case ups.Loading:
-		sub = "Checking for updates…"
-	case len(res.Data) > 0 && len(withUpdates) == 0:
-		sub = fmt.Sprintf("%d apps, all up to date", len(res.Data))
-	case len(res.Data) > 0:
-		sub = fmt.Sprintf("%d apps, %s", len(res.Data), updatesNoun(len(withUpdates)))
-	}
-	refresh := ui.Button("Refresh").Icon(icons.RefreshCw).Secondary().Small().
-		Loading(res.Fetching || ups.Fetching).
-		OnClick(func() {
-			res.Refetch()
-			ups.Refetch()
-		})
-	page := ui.Div().Column().Gap(space6).Padding(space8).MaxWidth(ui.Px(1180)).
-		Child(ui.Div().Row().Align(ui.End).Gap(space3).
-			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-				Child(title("Installed")).
-				Child(muted(ctx, sub))).
-			Child(refresh))
-
+	page := pageBody(listMaxWidth).
+		Child(a.listHeader(ctx, icons.Download, ui.Color{}, "Installed",
+			"Everything installed from every source. Packages layered onto the system image update with the system.",
+			a.refreshButton(ctx, res, ups)))
 	switch {
 	case res.Loading:
-		return scroll(page.Child(ui.Skeleton().Height(ui.Px(64))).Child(ui.Skeleton().Height(ui.Px(64))))
+		return scroll(page.Child(ui.Skeleton().Height(ui.Px(80))).Child(ui.Skeleton().Height(ui.Px(80))))
 	case res.Err != nil:
 		return scroll(page.Child(ui.Empty("Could not list installed apps").Icon(icons.TriangleAlert).
 			Description(errText(res.Err))))
@@ -60,53 +32,60 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 		return scroll(page.Child(ui.Empty("No apps installed yet").Icon(icons.Package).
 			Description("Apps you install from any source show up here.")))
 	}
-
-	if len(withUpdates) > 0 {
-		list := ui.Div().Column().Gap(2)
-		for _, in := range withUpdates {
-			list = list.Child(a.installedRow(ctx, in))
-		}
-		page = page.Child(card(ctx).Padding(space4).Border(1, t.Accent.Alpha(0.45)).
-			Child(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space2).
-				Child(ui.Div().Size(ui.Px(36), ui.Px(36)).Radius(radiusM).Background(t.AccentSoft).Center().
-					Child(ui.Icon(icons.Download).Size(18).Color(t.Accent))).
-				Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-					Child(heading(capitalize(updatesNoun(len(withUpdates))))).
-					Child(caption(ctx, "Newer versions from the apps' sources"))).
-				Child(ui.Button(updatesLabel(len(withUpdates))).Icon(icons.Download).Primary().
-					OnClick(func() { a.updateAll(ctx, withUpdates) }))).
-			Child(list))
+	list := ui.Div().Column().Gap(space3)
+	for _, in := range res.Data {
+		list = list.Child(a.installedRow(ctx, in, ups.Data))
 	}
-	if len(rest) > 0 {
-		list := ui.Div().Column().Gap(2).Padding(space2).Radius(radiusL).Background(t.Surface).Border(1, t.Border)
-		for _, in := range rest {
-			list = list.Child(a.installedRow(ctx, in))
-		}
-		page = page.Child(sectionHeader(ctx, "All apps",
-			"Packages layered onto the system image update with the system, not here")).Child(list)
-	}
-	return scroll(page)
+	return scroll(page.Child(muted(ctx, plural(len(res.Data), "app", "apps")+" installed")).Child(list))
 }
 
-func updatesNoun(n int) string {
-	if n == 1 {
-		return "1 update available"
+// updatesPage lists the installed apps that have updates, with Update all.
+func (a *App) updatesPage(ctx *ui.Context) ui.Element {
+	res := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	ups := a.updates(ctx)
+	var with []backend.InstalledApp
+	for _, in := range res.Data {
+		if _, ok := ups.Data[in.Key()]; ok {
+			with = append(with, in)
+		}
 	}
-	return fmt.Sprintf("%d updates available", n)
+	actions := ui.Div().Row().Gap(space2).
+		Child(ui.If(len(with) > 0, ui.Button(updatesLabel(len(with))).Icon(icons.Download).Primary().
+			OnClick(func() { a.updateAll(ctx, with) }))).
+		Child(a.refreshButton(ctx, res, ups))
+	page := pageBody(listMaxWidth).
+		Child(a.listHeader(ctx, icons.RefreshCw, ui.Color{}, "Updates",
+			"Newer versions from Flathub, Homebrew and GitHub. Layered packages update with the system (ujust update).",
+			actions))
+	switch {
+	case res.Loading || ups.Loading:
+		return scroll(page.Child(ui.Skeleton().Height(ui.Px(80))))
+	case len(with) == 0:
+		return scroll(page.Child(ui.Empty("Everything is up to date").Icon(icons.CircleCheck).
+			Description("uas checks for updates every ten minutes while it runs.")))
+	}
+	list := ui.Div().Column().Gap(space3)
+	for _, in := range with {
+		list = list.Child(a.installedRow(ctx, in, ups.Data))
+	}
+	return scroll(page.Child(list))
 }
 
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
+// refreshButton checks again for installed apps and updates.
+func (a *App) refreshButton(ctx *ui.Context, res ui.QueryResult[[]backend.InstalledApp],
+	ups ui.QueryResult[map[string]string]) ui.Element {
+	return ui.Button("Refresh").Icon(icons.RefreshCw).Secondary().Loading(res.Fetching || ups.Fetching).
+		OnClick(func() {
+			res.Refetch()
+			ups.Refetch()
+		})
 }
 
 func updatesLabel(n int) string {
 	if n == 1 {
 		return "Update 1 app"
 	}
-	return "Update " + strconv.Itoa(n) + " apps"
+	return fmt.Sprintf("Update %d apps", n)
 }
 
 // updateAll updates the apps one after another in the background.
@@ -125,7 +104,7 @@ func (a *App) updateAll(ctx *ui.Context, apps []backend.InstalledApp) {
 }
 
 // installedRow is one installed app, matched to the catalog for its icon and page when possible.
-func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp) ui.Element {
+func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[string]string) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
 		match := ui.Query(ctx, a.key("resolve", in.AppID), func(c context.Context) (*catalog.App, error) {
@@ -139,52 +118,56 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp) ui.Element 
 			}
 			return app, nil
 		}, ui.QueryStaleTime(time.Hour))
-		name, icon, appID := in.Name, "", in.AppID
+		name, icon, appID, summary := in.Name, "", in.AppID, ""
 		if app := match.Data; app != nil {
-			name, icon, appID = app.Name, app.IconURL, app.ID
+			name, icon, appID, summary = app.Name, app.IconURL, app.ID, app.Summary
 		}
 		_, busy := a.running(appID)
+
 		var meta []string
-		if in.Origin != "" && in.Origin != string(in.Source) && in.Origin != "flathub" && in.Origin != "homebrew" {
-			meta = append(meta, in.Origin)
+		if in.Version != "" {
+			meta = append(meta, "Version "+in.Version)
 		}
-		if in.Scope == "system" {
+		switch in.Scope {
+		case "system":
 			meta = append(meta, "for all users")
-		} else if in.Scope == "user" {
+		case "user":
 			meta = append(meta, "for you")
 		}
-		if in.Version != "" {
-			meta = append(meta, in.Version)
+		if in.Origin == "local file" {
+			meta = append(meta, "installed from a file")
 		}
-		row := ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space3).PaddingY(space2).Radius(radiusM).
-			Hover(ui.Style{Background: t.SurfaceHover}).
-			Child(a.iconTile(ctx, icon, 44, name)).
-			Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-				Child(ui.Text(name).FontSize(15).Semibold().Truncate()).
-				Child(ui.Div().Row().Gap(space2).Align(ui.Center).
-					Child(sourceMark(ctx, in.Source, 20)).
+
+		row := ui.Div().Row().Align(ui.Center).Gap(space5).PaddingX(space6).PaddingY(space4).
+			Radius(radiusL).Background(t.Surface).Border(1, t.Border).
+			Child(a.appIcon(ctx, icon, 56, name)).
+			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(ui.Text(name).FontSize(17).Semibold().Truncate()).
+				Child(ui.If(summary != "", ui.Text(summary).FontSize(14).TextColor(t.TextMuted).Truncate())).
+				Child(ui.Div().Row().Align(ui.Center).Gap(space4).MarginTop(space1).
+					Child(sourceTag(ctx, in.Source)).
 					Child(caption(ctx, strings.Join(meta, " · "))))).
-			Child(ui.If(in.Pending, pill(ctx, "After restart", t.Warning,
-				"Layered into the system image; it takes effect at the next restart")))
-		if match.Data != nil {
-			row = row.Child(ui.Button("Details").Ghost().Small().OnClick(func() { a.selected.Set(appID) }))
-		}
-		if version, ok := a.updates(ctx).Data[in.Key()]; ok {
+			Child(ui.If(in.Pending, statusChip(ctx, "After restart", t.Warning)))
+
+		actions := ui.Div().Row().Align(ui.Center).Gap(space2).Shrink(0)
+		if version, ok := ups[in.Key()]; ok {
 			label := "Update"
 			if version != "" {
 				label = "Update to " + version
 			}
-			row = row.Child(ui.Button(label).Primary().Small().Loading(busy).OnClick(func() {
+			actions = actions.Child(ui.Button(label).Icon(icons.Download).Primary().Loading(busy).OnClick(func() {
 				a.startJob(ctx, appID, "Updating "+name, false, name+" is up to date",
 					func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 			}))
 		}
-		if in.Origin == "local file" {
-			// Installed from a downloaded file outside uas; rpm-ostree removes it by package name.
-			return row.Child(ui.Text("Installed from a file").FontSize(12).TextColor(t.TextMuted))
+		if match.Data != nil {
+			actions = actions.Child(linkButton(ctx, "Details", icons.ChevronRight, func() { a.openApp(appID) }))
 		}
-		return row.Child(ui.Button("Remove").Secondary().Small().Disabled(busy).OnClick(func() {
-			a.removing.Set(&removal{app: in, name: name})
-		}))
+		if in.Origin != "local file" {
+			actions = actions.Child(ui.Button("Remove").Secondary().Disabled(busy).OnClick(func() {
+				a.removing.Set(&removal{app: in, name: name})
+			}))
+		}
+		return row.Child(actions)
 	}).Key("installed:" + string(in.Source) + "|" + in.Scope + "|" + in.Ref)
 }

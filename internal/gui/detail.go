@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"slices"
 	"strings"
 	"time"
 
@@ -32,6 +31,9 @@ type removal struct {
 // listingKey identifies a listing among an app's listings.
 func listingKey(l catalog.Listing) string { return string(l.Source) + "|" + l.Ref }
 
+// detailMaxWidth is how wide an app page grows.
+const detailMaxWidth = 1240
+
 // detailPage shows one app.
 func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
@@ -42,12 +44,11 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			}
 			return db.Resolve(c, id)
 		})
-		back := ui.Div().Row().Child(ui.Button("Back").Icon(icons.ArrowLeft).Ghost().Small().
-			OnClick(func() { a.selected.Set("") }))
-		page := ui.Div().Column().Gap(space6).Padding(space8).MaxWidth(ui.Px(1040)).Child(back)
+		page := pageBody(detailMaxWidth).Gap(space6)
 		switch {
 		case res.Loading:
-			return scroll(page.Child(ui.Skeleton().Height(ui.Px(96))).Child(ui.Skeleton().Height(ui.Px(240))))
+			return scroll(page.Child(ui.Skeleton().Height(ui.Px(150))).Child(ui.Skeleton().Height(ui.Px(90))).
+				Child(ui.Skeleton().Height(ui.Px(320))))
 		case res.Err != nil:
 			return scroll(page.Child(ui.Empty("Could not open this app").Icon(icons.TriangleAlert).
 				Description(errText(res.Err))))
@@ -72,107 +73,87 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			}
 		}
 
-		page = page.Child(a.detailHero(ctx, app))
+		page = page.
+			Child(a.detailHeader(ctx, app, available, chosen, listing, chooseErr)).
+			Child(ui.Div().Height(ui.Px(1)).Background(ctx.Theme().Border)).
+			Child(statsStrip(ctx, app, listing)).
+			Child(ui.Div().Height(ui.Px(1)).Background(ctx.Theme().Border))
 
-		if len(available) == 0 {
-			msg := "None of this app's sources can be installed on this system."
-			if chooseErr != nil {
-				msg = chooseErr.Error()
-			}
-			page = page.Child(ui.Alert("Not available here").Warning().Description(msg))
-		} else {
-			page = page.Child(a.installBox(ctx, app, available, chosen, listing, choice.Reason,
-				listingKey(choice.Listing)))
-		}
-
-		if listing.Trust != nil {
-			page = page.Child(trustPanel(ctx, listing))
-		}
+		main := ui.Div().Column().Gap(space6).MinWidth(ui.Px(0))
 		if len(app.Screenshots) > 0 {
-			page = page.Child(sectionHeader(ctx, "Screenshots", ""))
 			shots := ui.Div().Row().Gap(space4).ScrollX().PaddingBottom(space2)
 			for i, s := range app.Screenshots {
-				if i == 3 {
+				if i == 4 {
 					break
 				}
 				url := s.ThumbURL
 				if url == "" {
 					url = s.URL
 				}
-				shots = shots.Child(a.screenshot(url, 420, s.Caption))
+				shots = shots.Child(a.screenshot(url, 440, s.Caption))
 			}
-			page = page.Child(shots)
+			main = main.Child(shots)
 		}
 		if app.Description != "" {
-			page = page.Child(sectionHeader(ctx, "About", "")).
-				Child(card(ctx).Padding(space6).Child(markdown.View(app.Description).Key("desc:" + app.ID).
-					Label("Description").OnLink(openURL)))
+			main = main.Child(heading("About This App")).
+				Child(markdown.View(app.Description).Key("desc:" + app.ID).Label("Description").OnLink(openURL))
 		}
-		page = page.Child(sectionHeader(ctx, "Details", "")).Child(a.details(ctx, app))
+		if listing.Trust != nil {
+			main = main.Child(trustPanel(ctx, listing))
+		}
+		side := a.sidePanel(ctx, app, listing, choice, chosen.Get() == listingKey(choice.Listing))
+
+		w, _ := ctx.WindowSize()
+		if w-sidebarWidth > 1000 {
+			// Grow and Basis(0) only beside the side panel: in a column, jamb collapses a Basis(0) child to no
+			// height (see jamb-notes.md).
+			page = page.Child(ui.Div().Row().Gap(space8).Align(ui.Start).
+				Child(main.Grow(1).Basis(ui.Px(0))).
+				Child(ui.Div().Width(ui.Px(280)).Shrink(0).Child(side)))
+		} else {
+			page = page.Child(main).Child(side)
+		}
 		return scroll(page)
 	}).Key("detail:" + id)
 }
 
-// detailHero is the top of an app page: the icon, the name, where it comes from and its key numbers.
-func (a *App) detailHero(ctx *ui.Context, app *catalog.App) ui.Element {
+// detailHeader is the icon, name, summary and tags, with Install and the source picker on the right.
+func (a *App) detailHeader(ctx *ui.Context, app *catalog.App, available []catalog.Listing,
+	chosen *ui.Signal[string], listing catalog.Listing, chooseErr error) ui.Element {
 	t := ctx.Theme()
-	var sources []catalog.SourceID
-	verified := false
-	for _, l := range app.Listings {
-		if !slices.Contains(sources, l.Source) {
-			sources = append(sources, l.Source)
+	tags := ui.Div().Row().Wrap().Gap(space2)
+	for i, c := range app.Categories {
+		if i == 3 {
+			break
 		}
-		verified = verified || l.Verified
+		tags = tags.Child(chip(ctx, categoryName(c)))
 	}
-	chips := ui.Div().Row().Wrap().Gap(space2)
-	switch {
-	case app.Popularity > 0:
-		chips = chips.Child(statChip(ctx, icons.TrendingUp, compact(app.Popularity), "installs a year",
-			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year"))
-	case app.Stars > 0:
-		chips = chips.Child(statChip(ctx, icons.Star, compact(app.Stars), "GitHub stars", ""))
+	if app.Developer != "" {
+		tags = tags.Child(chip(ctx, app.Developer))
 	}
-	if !app.Updated.IsZero() {
-		chips = chips.Child(statChip(ctx, icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "latest release", ""))
+	var install ui.Element
+	if len(available) == 0 {
+		msg := "None of this app's sources can be installed on this system."
+		if chooseErr != nil {
+			msg = chooseErr.Error()
+		}
+		install = ui.Div().Width(ui.Px(240)).Child(ui.Alert("Not available here").Warning().Description(msg))
+	} else {
+		install = a.installArea(ctx, app, available, chosen, listing)
 	}
-	if app.License != "" {
-		chips = chips.Child(statChip(ctx, icons.Scale, app.License, "license", ""))
-	}
-	chips = chips.Child(statChip(ctx, icons.Boxes, fmt.Sprint(len(app.Listings)), sourcesNoun(len(app.Listings)),
-		"How many listings of this app uas found across its sources"))
-
-	return hero(ctx).Padding(space8).Gap(space6).
-		Child(ui.Div().Row().Gap(space6).Align(ui.Center).
-			Child(ui.Div().Shadow(ui.ShadowMd).Radius(28).Child(a.iconTile(ctx, app.IconURL, 112, app.Name))).
-			Child(ui.Div().Column().Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-				Child(display(app.Name)).
-				Child(ui.If(app.Developer != "", ui.Text("by "+app.Developer).FontSize(14).TextColor(t.TextMuted))).
-				Child(ui.Text(app.Summary).FontSize(16)).
-				Child(ui.Div().MarginTop(space1).Child(sourceMarks(ctx, sources, verified, 28))))).
-		Child(chips)
+	return ui.Div().Row().Gap(space6).Align(ui.Center).
+		Child(ui.Div().Size(ui.Px(140), ui.Px(140)).Radius(32).Background(t.Surface).Border(1, t.Border).Center().
+			Shrink(0).Child(a.appIcon(ctx, app.IconURL, 104, app.Name))).
+		Child(ui.Div().Column().Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Text(app.Name).FontSize(36).Bold()).
+			Child(ui.Text(app.Summary).FontSize(18).TextColor(t.TextMuted)).
+			Child(ui.Div().MarginTop(space2).Child(tags))).
+		Child(install)
 }
 
-func sourcesNoun(n int) string {
-	if n == 1 {
-		return "source listing"
-	}
-	return "source listings"
-}
-
-// scroll puts a page in a scrolling column that fills the content area, centered up to its MaxWidth.
-//
-// The centering is a row with Justify(Center) and a growing page, not Align(Center) on the column: under
-// Align(Center), jamb sizes the page to its content, measures rows that use Basis(0) at no width, and the
-// page ends up far taller than its content (see jamb-notes.md).
-func scroll(page *ui.DivElement) ui.Element {
-	return ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).ScrollY().
-		Child(ui.Div().Row().Justify(ui.Center).Child(page.Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))))
-}
-
-// installBox is the source picker and the install, update and remove buttons.
-func (a *App) installBox(ctx *ui.Context, app *catalog.App, available []catalog.Listing, chosen *ui.Signal[string],
-	listing catalog.Listing, reason, recommended string) ui.Element {
-	t := ctx.Theme()
+// installArea is the big Install button, or the installed state, over the source picker.
+func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog.Listing, chosen *ui.Signal[string],
+	listing catalog.Listing) ui.Element {
 	installed := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
 	var copy *backend.InstalledApp
 	for _, in := range installed.Data {
@@ -181,66 +162,233 @@ func (a *App) installBox(ctx *ui.Context, app *catalog.App, available []catalog.
 			copy = &in
 		}
 	}
+	job, busy := a.running(app.ID)
+	big := ui.ButtonStyle{Root: ui.Style{Height: ui.Px(48), FontSize: 16, Radius: 10}}
+
+	var action ui.Element
+	switch {
+	case installed.Loading:
+		// Disabled as well as Loading: a loading button exposes no busy state to assistive technology.
+		action = ui.Button("Install").Primary().Large().Width(ui.Full).Styles(big).Loading(true).Disabled(true)
+	case copy != nil:
+		in := *copy
+		action = ui.Div().Column().Gap(space2).
+			Child(ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space2).Height(ui.Px(48)).Radius(10).
+				Background(ctx.Theme().AccentSoft).
+				Child(ui.Icon(icons.CircleCheck).Size(18).Color(ctx.Theme().Accent)).
+				Child(ui.Text(installedLabel(in)).FontSize(15).Semibold())).
+			Child(ui.Div().Row().Gap(space2).
+				Child(ui.Div().Grow(1).Basis(ui.Px(0)).Child(a.updateControl(ctx, in, app.ID, app.Name, busy))).
+				Child(ui.Button("Remove").Secondary().Disabled(busy).OnClick(func() {
+					a.removing.Set(&removal{app: in, name: app.Name})
+				})))
+	default:
+		action = ui.Button("Install").Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
+			Loading(busy).OnClick(func() { a.requestInstall(ctx, app, listing) })
+	}
 
 	opts := make([]ui.Option[string], 0, len(available))
 	for _, l := range available {
 		opts = append(opts, ui.Option[string]{Value: listingKey(l), Label: listingLabel(l)})
 	}
-	picker := ui.Select(chosen, opts...).Label("Install from").Width(ui.Px(340))
-
-	job, busy := a.running(app.ID)
-	var action ui.Element
-	switch {
-	case installed.Loading:
-		// Disabled as well as Loading: a loading button exposes no busy state to assistive technology.
-		action = ui.Button("Install").Primary().Loading(true).Disabled(true)
-	case copy != nil:
-		in := *copy
-		row := ui.Div().Row().Gap(8).Align(ui.Center).
-			Child(ui.BadgeText(installedLabel(in)).Variant(ui.BadgeSuccess).StatusDot()).
-			Child(a.updateControl(ctx, in, app.ID, app.Name, busy))
-		action = row.Child(ui.Button("Remove").Danger().Disabled(busy).OnClick(func() {
-			a.removing.Set(&removal{app: in, name: app.Name})
-		}))
-	default:
-		action = ui.Button("Install").Primary().Icon(icons.Download).Loading(busy).OnClick(func() {
-			a.requestInstall(ctx, app, listing)
+	picker := ui.Select(chosen, opts...).Label("Install from").Small().Width(ui.Full).
+		RenderValue(func(opt ui.Option[string], _ ui.PartState) ui.Element {
+			v := opt.Value
+			for _, l := range available {
+				if listingKey(l) == v {
+					return ui.Div().Row().Align(ui.Center).Gap(space2).
+						Child(ui.Icon(sourceIcons[l.Source]).Size(16).Color(sourceColor(ctx, l.Source))).
+						Child(ui.Text(listingLabel(l)).FontSize(13).Truncate())
+				}
+			}
+			return ui.Text(v)
 		})
+	col := ui.Div().Column().Gap(space3).Width(ui.Px(250)).Shrink(0).Child(action).Child(picker)
+	if busy {
+		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
+			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
+			Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(caption(ctx, job.status).Truncate())))
+	}
+	return col
+}
+
+// statsStrip is the row of key figures under the header, split by dividers.
+func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.Element {
+	t := ctx.Theme()
+	type stat struct {
+		icon         *icons.Icon
+		value, label string
+		color        ui.Color
+		tip          string
+	}
+	var stats []stat
+	switch {
+	case app.Popularity > 0:
+		stats = append(stats, stat{icons.Download, compact(app.Popularity), "Installs a year", t.TextMuted,
+			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year"})
+	case app.Stars > 0:
+		stats = append(stats, stat{icons.Star, compact(app.Stars), "GitHub stars", t.TextMuted, ""})
+	}
+	if !app.Updated.IsZero() {
+		stats = append(stats, stat{icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "Latest release", t.TextMuted, ""})
+	}
+	if listing.Version != "" {
+		stats = append(stats, stat{icons.Tag, shortVersion(listing.Version), "Version", t.TextMuted, listing.Version})
+	}
+	switch {
+	case listing.Verified:
+		stats = append(stats, stat{icons.ShieldCheck, "Verified", "Publisher", t.Success, verifiedTip})
+	case listing.Trust != nil:
+		c := t.Success
+		if listing.Trust.Score < 50 {
+			c = t.Danger
+		} else if listing.Trust.Score < 70 {
+			c = t.Warning
+		}
+		stats = append(stats, stat{icons.ShieldCheck, fmt.Sprintf("%d / 100", listing.Trust.Score), "Trust score", c,
+			"How well kept the project is; see the breakdown below"})
+	case listing.Source != "":
+		stats = append(stats, stat{sourceIcons[listing.Source], listing.Source.Name(), "Source",
+			sourceColor(ctx, listing.Source), sourceTips[listing.Source]})
+	}
+	row := ui.Div().Row().Align(ui.Center).PaddingY(space2)
+	for i, s := range stats {
+		if i > 0 {
+			row = row.Child(ui.Div().Width(ui.Px(1)).Height(ui.Px(44)).Background(t.Border))
+		}
+		cell := ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space3).Grow(1).Basis(ui.Px(0)).
+			MinWidth(ui.Px(0)).
+			Child(ui.Icon(s.icon).Size(22).Color(s.color)).
+			Child(ui.Div().Column().Gap(2).
+				Child(ui.Text(s.value).FontSize(17).Semibold()).
+				Child(muted(ctx, s.label)))
+		if s.tip != "" {
+			cell = cell.Tooltip(s.tip)
+		}
+		row = row.Child(cell)
+	}
+	return row
+}
+
+// shortVersion trims distro release suffixes, so "5.6.1-3.fc45" shows as "5.6.1".
+func shortVersion(v string) string {
+	if i := strings.IndexByte(v, '-'); i > 0 && strings.ContainsAny(v[:i], ".") {
+		return v[:i]
+	}
+	return v
+}
+
+// sidePanel lists the source, category, license and developer, the install notes, and Report an Issue.
+func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listing, choice recommend.Choice,
+	recommended bool) ui.Element {
+	t := ctx.Theme()
+	field := func(label string, value ui.Element) ui.Element {
+		return ui.Div().Column().Gap(space1).Child(muted(ctx, label)).Child(value)
+	}
+	panel := ui.Div().Column().Gap(space5)
+	if listing.Source != "" {
+		panel = panel.Child(field("Source", ui.Div().Row().Align(ui.Center).Gap(space2).
+			Child(ui.Icon(sourceIcons[listing.Source]).Size(20).Color(sourceColor(ctx, listing.Source))).
+			Child(ui.Text(listing.Source.Name()).FontSize(17).Semibold())))
+	}
+	if c := mainCategory(app.Categories); c != "" {
+		panel = panel.Child(field("Category", ui.Text(c).FontSize(17).Semibold()))
+	}
+	if app.License != "" {
+		panel = panel.Child(field("License", ui.Div().Tooltip(app.License).
+			Child(ui.Text(licenseName(app.License)).FontSize(17).Semibold())))
+	}
+	if app.Developer != "" {
+		dev := ui.Element(ui.Text(app.Developer).FontSize(17).Semibold())
+		if web := app.Homepage; strings.HasPrefix(web, "http") {
+			dev = linkButton(ctx, app.Developer, icons.ExternalLink, func() { openURL(web) })
+		}
+		panel = panel.Child(field("Developer", dev))
 	}
 
-	box := card(ctx).Gap(space4).Padding(space6).
-		Child(sectionHeader(ctx, "Install", "Pick where to install it from; uas preselects the best fit for this system")).
-		Child(ui.Div().Row().Gap(space3).Align(ui.End).Wrap().Child(picker).Child(action))
+	notes := ui.Div().Column().Gap(space2)
 	note := func(icon *icons.Icon, color ui.Color, text string) ui.Element {
 		return ui.Div().Row().Gap(space2).Align(ui.Start).
 			Child(ui.Div().PaddingTop(1).Child(ui.Icon(icon).Size(15).Color(color))).
 			Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(ui.Text(text).FontSize(13)))
 	}
-	notes := ui.Div().Column().Gap(space2)
-	if chosen.Get() == recommended && reason != "" {
-		notes = notes.Child(note(icons.Sparkles, t.Accent, "Recommended: "+reason+"."))
-	} else if reason != "" {
-		for _, l := range available {
-			if listingKey(l) == recommended {
-				notes = notes.Child(note(icons.Sparkles, t.Accent, "uas recommends "+listingLabel(l)+": "+reason+"."))
-			}
+	if choice.Reason != "" {
+		if recommended {
+			notes = notes.Child(note(icons.Sparkles, t.Accent, "Recommended: "+choice.Reason+"."))
+		} else {
+			notes = notes.Child(note(icons.Sparkles, t.Accent, "uas recommends "+listingLabel(choice.Listing)+": "+
+				choice.Reason+"."))
 		}
 	}
 	for _, n := range a.s.InstallNotes(listing) {
 		notes = notes.Child(note(icons.Info, t.TextMuted, n))
 	}
-	box = box.Child(notes)
-	box = box.Child(a.whyPanel(ctx, app, listing))
-	if busy {
-		box = box.Child(ui.Div().Row().Gap(8).Align(ui.Center).
-			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
-			Child(ui.Text(job.status).FontSize(13).Truncate()))
+	panel = panel.Child(card(ctx).Gap(space3).Padding(space4).Child(notes).Child(a.whyPanel(ctx, app, listing)))
+
+	bugs := ""
+	for _, l := range app.Listings {
+		if strings.HasPrefix(l.BugTracker, "http") {
+			bugs = l.BugTracker
+			break
+		}
 	}
-	return box
+	links := ui.Div().Column().Gap(space2)
+	if bugs != "" {
+		links = links.Child(ui.Button("Report an Issue").Icon(icons.Flag).Secondary().Width(ui.Full).
+			Tooltip(bugs).OnClick(func() { openURL(bugs) }))
+	}
+	if strings.HasPrefix(app.VCSURL, "http") {
+		vcs := app.VCSURL
+		links = links.Child(ui.Button("Source Code").Icon(icons.Code).Ghost().Width(ui.Full).Tooltip(vcs).
+			OnClick(func() { openURL(vcs) }))
+	}
+	return panel.Child(links)
 }
 
-// updateControl is an Update button when the app has an update, "Up to date" when its source says it has
-// none, and nothing for sources that can't tell (layered packages update with the system).
+// mainCategory is the first of an app's categories that the sidebar has, or its first category.
+func mainCategory(cats []string) string {
+	for _, c := range cats {
+		for _, n := range navCategories {
+			if n.key == c {
+				return n.label
+			}
+		}
+	}
+	if len(cats) > 0 {
+		return cats[0]
+	}
+	return ""
+}
+
+// licenseName makes an SPDX expression readable: "LicenseRef-proprietary=https://..." is "Proprietary".
+func licenseName(l string) string {
+	switch {
+	case strings.HasPrefix(l, "LicenseRef-proprietary"):
+		return "Proprietary"
+	case strings.HasPrefix(l, "LicenseRef-"):
+		return "Custom license"
+	}
+	return l
+}
+
+// categoryName is the sidebar's word for an AppStream category, or the category itself.
+func categoryName(c string) string {
+	for _, n := range navCategories {
+		if n.key == c {
+			return n.label
+		}
+	}
+	return c
+}
+
+// statusChip is a small colored label, such as a trust verdict.
+func statusChip(ctx *ui.Context, label string, c ui.Color) ui.Element {
+	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(10).Height(ui.Px(24)).Radius(12).Shrink(0).
+		Background(c.Alpha(0.14)).
+		Child(ui.Div().Size(ui.Px(6), ui.Px(6)).Radius(3).Background(c)).
+		Child(ui.Text(label).FontSize(12).Semibold().TextColor(c))
+}
+
 func (a *App) updateControl(ctx *ui.Context, in backend.InstalledApp, jobID, name string, busy bool) ui.Element {
 	if !a.canCheck(in) {
 		return ui.Div()
@@ -392,8 +540,8 @@ func (a *App) removeDialog(ctx *ui.Context) ui.Element {
 			a.removing.Set(nil)
 			in := r.app
 			id := in.AppID
-			if a.selected.Peek() != "" {
-				id = a.selected.Peek()
+			if v := a.history.Peek()[len(a.history.Peek())-1]; v.page == pageApp {
+				id = v.arg // the job shows on the app page it was started from
 			}
 			a.startJob(ctx, id, "Removing "+r.name, a.s.NeedsRestart(in.Source), r.name+" is removed",
 				func(c context.Context, p func(backend.Progress)) error { return a.s.Remove(c, in, p) })
@@ -426,7 +574,7 @@ func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 				Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 					Child(heading("Trust score")).
-					Child(pill(ctx, verdict, color, ""))).
+					Child(statusChip(ctx, verdict, color))).
 				Child(muted(ctx, what))))
 	grid := ui.Div().Grid(ui.Px(220), ui.Fr(1), ui.Px(52)).Gap(space4).Align(ui.Center)
 	for _, sg := range tr.Signals {
@@ -446,34 +594,6 @@ func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 }
 
 // details lists the app's license and links.
-func (a *App) details(ctx *ui.Context, app *catalog.App) ui.Element {
-	t := ctx.Theme()
-	rows := card(ctx).Gap(0).Padding(space2)
-	add := func(icon *icons.Icon, label string, value ui.Element) {
-		rows = rows.Child(ui.Div().Row().Gap(space3).Align(ui.Center).PaddingX(space3).MinHeight(ui.Px(44)).
-			Child(ui.Icon(icon).Size(16).Color(t.TextMuted)).
-			Child(ui.Text(label).Width(ui.Px(120)).TextColor(t.TextMuted).FontSize(13)).
-			Child(value))
-	}
-	if app.License != "" {
-		add(icons.Scale, "License", ui.Text(app.License).FontSize(13))
-	}
-	if app.Developer != "" {
-		add(icons.Users, "Developer", ui.Text(app.Developer).FontSize(13))
-	}
-	for _, u := range []struct {
-		icon       *icons.Icon
-		label, url string
-	}{{icons.Globe, "Website", app.Homepage}, {icons.Code, "Source code", app.VCSURL}} {
-		if strings.HasPrefix(u.url, "https://") || strings.HasPrefix(u.url, "http://") {
-			url := u.url
-			add(u.icon, u.label, ui.Button(url).Ghost().Small().Icon(icons.ArrowUpRight).OnClick(func() { openURL(url) }))
-		}
-	}
-	add(icons.Hash, "App ID", ui.Text(app.ID).FontSize(13).Mono())
-	return rows
-}
-
 // openURL opens a web link in the default browser.
 func openURL(url string) {
 	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {

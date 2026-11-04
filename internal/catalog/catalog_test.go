@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestSearch(t *testing.T) {
 	ctx := context.Background()
 	ids := func(q string) []string {
 		t.Helper()
-		rs, err := db.Search(ctx, q, 10, OrderRelevance)
+		rs, err := db.Search(ctx, q, SearchOptions{Order: OrderRelevance, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +94,7 @@ func TestSearch(t *testing.T) {
 		t.Errorf("empty query = %q", got)
 	}
 
-	rs, err := db.Search(ctx, "browser", 10, OrderRelevance)
+	rs, err := db.Search(ctx, "browser", SearchOptions{Order: OrderRelevance, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,14 +181,14 @@ func TestBrowse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	rs, err := db.Browse(context.Background(), "Game", 10, OrderPopular)
+	rs, err := db.Browse(context.Background(), BrowseQuery{Category: "Game", Order: OrderPopular, Limit: 10, AppsOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rs) != 2 || rs[0].ID != "b.Big" || rs[1].ID != "a.Small" {
 		t.Errorf("Game = %+v", rs)
 	}
-	if rs, _ := db.Browse(context.Background(), "", 10, OrderRelevance); len(rs) != 3 {
+	if rs, _ := db.Browse(context.Background(), BrowseQuery{Category: "", Order: OrderRelevance, Limit: 10, AppsOnly: true}); len(rs) != 3 {
 		t.Errorf("all = %+v", rs)
 	}
 }
@@ -218,20 +219,62 @@ func TestOrders(t *testing.T) {
 	}
 	ctx := context.Background()
 	for order, want := range map[Order]string{OrderPopular: "b,c,a", OrderUpdated: "a,c,b", OrderName: "b,c,a"} {
-		rs, err := db.Search(ctx, "editor", 10, order)
+		rs, err := db.Search(ctx, "editor", SearchOptions{Order: order, Limit: 10})
 		if err != nil || ids(rs) != want {
 			t.Errorf("Search by %s = %s, %v; want %s", order, ids(rs), err, want)
 		}
-		rs, err = db.Browse(ctx, "", 10, order)
+		rs, err = db.Browse(ctx, BrowseQuery{Category: "", Order: order, Limit: 10, AppsOnly: true})
 		if err != nil || ids(rs) != want {
 			t.Errorf("Browse by %s = %s, %v; want %s", order, ids(rs), err, want)
 		}
 	}
-	rs, _ := db.Browse(ctx, "", 10, OrderPopular)
+	rs, _ := db.Browse(ctx, BrowseQuery{Category: "", Order: OrderPopular, Limit: 10, AppsOnly: true})
 	if rs[1].Stars != 900 || !rs[0].Updated.Equal(day(1)) || rs[0].Popularity != 500 {
 		t.Errorf("result details = %+v", rs[:2])
 	}
 	if a, _ := db.App(ctx, "c"); a.Stars != 900 || !a.Updated.Equal(day(2)) {
 		t.Errorf("App = %+v", a)
+	}
+}
+
+func TestSourceFiltersAndCounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	apps := []App{
+		{ID: "a", Kind: KindDesktopApp, Name: "Alpha editor", IconURL: "i", Popularity: 5000, Listings: []Listing{
+			{Source: SourceFlathub, Ref: "app/a/x86_64/stable", Name: "Alpha"},
+			{Source: SourceFedora, Ref: "fedora-45/alpha", Package: "alpha", Name: "Alpha"}}},
+		{ID: "homebrew:beta", Kind: KindConsoleApp, Name: "beta editor", Popularity: 10, Listings: []Listing{
+			{Source: SourceHomebrew, Ref: "beta", Package: "beta", Name: "beta"}}},
+	}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	if rs, _ := db.Search(ctx, "editor", SearchOptions{Source: SourceHomebrew}); len(rs) != 1 || rs[0].ID != "homebrew:beta" {
+		t.Errorf("search by source = %+v", rs)
+	}
+	// Source pages list console tools too; browsing pages keep desktop apps with icons.
+	if rs, _ := db.Browse(ctx, BrowseQuery{Source: SourceHomebrew}); len(rs) != 1 {
+		t.Errorf("browse homebrew = %+v", rs)
+	}
+	if rs, _ := db.Browse(ctx, BrowseQuery{AppsOnly: true}); len(rs) != 1 || rs[0].ID != "a" {
+		t.Errorf("browse apps only = %+v", rs)
+	}
+	if rs, _ := db.Browse(ctx, BrowseQuery{MinPopularity: 100}); len(rs) != 1 || rs[0].ID != "a" {
+		t.Errorf("browse min popularity = %+v", rs)
+	}
+	rs, _ := db.Browse(ctx, BrowseQuery{Source: SourceFedora})
+	if len(rs) != 1 || len(rs[0].Refs) != 2 || !slices.Contains(rs[0].Refs, ListingRef{Source: SourceFedora, Ref: "fedora-45/alpha", Package: "alpha"}) {
+		t.Errorf("refs = %+v", rs)
+	}
+	counts, err := db.SourceCounts(ctx)
+	if err != nil || counts[SourceFlathub] != 1 || counts[SourceFedora] != 1 || counts[SourceHomebrew] != 1 {
+		t.Errorf("counts = %v, %v", counts, err)
 	}
 }

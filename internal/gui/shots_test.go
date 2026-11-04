@@ -25,6 +25,9 @@ func TestShots(t *testing.T) {
 	if out == "" || path == "" {
 		t.Skip("set UAS_SHOTS and UAS_CATALOG")
 	}
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	light, dark := Themes()
 	fp := &fakeBackend{src: catalog.SourceFlathub, installed: []backend.InstalledApp{
 		{Source: catalog.SourceFlathub, Ref: "app/org.mozilla.firefox/x86_64/stable", AppID: "org.mozilla.firefox", Name: "Firefox", Version: "159.0.1", Scope: "system"},
@@ -39,11 +42,15 @@ func TestShots(t *testing.T) {
 		h        float32
 		selected string
 	}{
-		{"discover", func(a *App) {}, 1500, ""},
-		{"detail-github", func(a *App) {}, 1500, "github:adileo/squirreldisk"},
-		{"detail-darktable", func(a *App) {}, 1700, "org.darktable.Darktable"},
-		{"installed", func(a *App) { a.page.Set(pageInstalled) }, 820, ""},
-		{"settings", func(a *App) { a.page.Set(pageSettings) }, 1100, ""},
+		{"home", func(a *App) {}, 1250, ""},
+		{"detail-github", func(a *App) {}, 1400, "github:adileo/squirreldisk"},
+		{"detail-darktable", func(a *App) {}, 1400, "org.darktable.Darktable"},
+		{"detail-vscode", func(a *App) {}, 1100, "com.visualstudio.code"},
+		{"search", func(a *App) { a.query.Set("editor"); a.search.Set("editor"); a.goTo(view{page: pageSearch}) }, 1100, ""},
+		{"sources", func(a *App) { a.goTo(view{page: pageSources}) }, 1300, ""},
+		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 820, ""},
+		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, ""},
+		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, ""},
 	}
 	for _, theme := range []struct {
 		name string
@@ -59,9 +66,9 @@ func TestShots(t *testing.T) {
 			a.startup.Do(func() {})
 			sh.setup(a)
 			if sh.selected != "" {
-				a.selected.Set(sh.selected)
+				a.openApp(sh.selected)
 			}
-			u := uitest.New(t, a.Root, uitest.Size(1180, sh.h), uitest.Theme(theme.t))
+			u := uitest.New(t, a.Root, uitest.Size(1440, sh.h), uitest.Theme(theme.t))
 			for i := 0; i < 40; i++ {
 				u.Advance(100 * time.Millisecond)
 				time.Sleep(60 * time.Millisecond)

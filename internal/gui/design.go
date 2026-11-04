@@ -1,10 +1,13 @@
 package gui
 
-// The uas design system: the brand palette as jamb themes, a type and spacing scale, and the small set of
-// components every page is built from. Pages should use these rather than raw sizes and colors, so the app
-// stays consistent.
+// The uas design system: the palette as jamb themes, a type and spacing scale, and the components every page
+// is built from. Pages use these rather than raw sizes and colors, so the app stays consistent. See
+// docs/design.md.
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/tyler-builds/jamb/access"
 	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
@@ -25,45 +28,45 @@ const (
 
 // Corner radii.
 const (
-	radiusS  = 8  // buttons, inputs, pills
-	radiusM  = 12 // rows, icon tiles
-	radiusL  = 16 // cards
-	radiusXL = 22 // hero panels
+	radiusS  = 8  // buttons, inputs, chips
+	radiusM  = 12 // rows, tiles
+	radiusL  = 14 // cards
+	radiusXL = 20 // the featured banner
 )
 
-// palette is the brand's colors for one mode.
+// palette is the colors for one mode: charcoal surfaces with a teal accent.
 type palette struct {
 	dark bool
 
 	background, panel, surface, surfaceHover, surfaceActive string
 	border, borderStrong                                    string
 	text, textMuted, textSubtle                             string
-	accent, accentHover, accentActive, link                 string
+	accent, accentHover, accentActive, accentText, link     string
 	success, warning, danger                                string
 	scrollbar, scrim                                        string
-	// brandFrom and brandTo are the brand gradient's ends: violet to cyan.
-	brandFrom, brandTo string
+	// art is the colors of the featured banner's shapes, darkest first.
+	art [3]string
 }
 
 var darkPalette = palette{
 	dark:       true,
-	background: "#0c0e13", panel: "#11141b", surface: "#171b24", surfaceHover: "#1e2330", surfaceActive: "#252b3a",
-	border: "#242a36", borderStrong: "#333a4a",
-	text: "#eceef4", textMuted: "#a3aaba", textSubtle: "#6d7487",
-	accent: "#7c6cff", accentHover: "#8e80ff", accentActive: "#6b5af0", link: "#a49bff",
+	background: "#16181d", panel: "#121418", surface: "#1e2128", surfaceHover: "#252932", surfaceActive: "#2c313b",
+	border: "#2a2e37", borderStrong: "#3a3f4a",
+	text: "#eef0f3", textMuted: "#a2a8b4", textSubtle: "#6e7480",
+	accent: "#2dd4bf", accentHover: "#5eead4", accentActive: "#14b8a6", accentText: "#042f2e", link: "#5eead4",
 	success: "#34d399", warning: "#fbbf24", danger: "#f87171",
-	scrollbar: "#3a4153", scrim: "#05060acc",
-	brandFrom: "#7c6cff", brandTo: "#22d3ee",
+	scrollbar: "#3a3f4a", scrim: "#05060acc",
+	art: [3]string{"#0f3b3f", "#14706a", "#2dd4bf"},
 }
 
 var lightPalette = palette{
-	background: "#f5f6fa", panel: "#eceef5", surface: "#ffffff", surfaceHover: "#f1f3f8", surfaceActive: "#e6e9f1",
-	border: "#e0e3ec", borderStrong: "#c9cedb",
-	text: "#12141a", textMuted: "#586173", textSubtle: "#8a91a1",
-	accent: "#6650f5", accentHover: "#5843ea", accentActive: "#4b37d6", link: "#5843ea",
+	background: "#f4f6f8", panel: "#eceff3", surface: "#ffffff", surfaceHover: "#f1f4f7", surfaceActive: "#e6eaef",
+	border: "#dfe3e8", borderStrong: "#c8ced6",
+	text: "#111418", textMuted: "#5b6472", textSubtle: "#8a919c",
+	accent: "#0d9488", accentHover: "#0f766e", accentActive: "#115e59", accentText: "#ffffff", link: "#0f766e",
 	success: "#047857", warning: "#b45309", danger: "#dc2626",
 	scrollbar: "#c3c8d4", scrim: "#0f121c59",
-	brandFrom: "#6650f5", brandTo: "#0891b2",
+	art: [3]string{"#b8ebe4", "#5fd1c3", "#14b8a6"},
 }
 
 // Themes returns the uas light and dark themes, built over jamb's so every widget picks them up.
@@ -79,48 +82,40 @@ func buildTheme(t *ui.Theme, p palette) *ui.Theme {
 	t.Border, t.BorderStrong = h(p.border), h(p.borderStrong)
 	t.Text, t.TextMuted, t.TextSubtle, t.Disabled = h(p.text), h(p.textMuted), h(p.textSubtle), h(p.textSubtle)
 	t.Accent, t.AccentHover, t.AccentActive = h(p.accent), h(p.accentHover), h(p.accentActive)
-	t.AccentText, t.Link, t.FocusRing = h("#ffffff"), h(p.link), h(p.link)
-	t.AccentSoft = h(p.accent).Alpha(0.16)
-	if !p.dark {
-		t.AccentSoft = h(p.accent).Alpha(0.10)
-	}
+	t.AccentText, t.Link, t.FocusRing = h(p.accentText), h(p.link), h(p.link)
+	t.AccentSoft = h(p.accent).Alpha(0.14)
 	t.Success, t.Warning, t.Danger = h(p.success), h(p.warning), h(p.danger)
 	t.Scrollbar, t.Scrim = h(p.scrollbar), h(p.scrim)
 	t.Radius, t.FontSize = radiusS, 14
 
 	t.Sidebar = ui.SidebarStyle{
 		Pane:         ui.Style{Background: h(p.panel)},
-		Item:         ui.Style{Radius: radiusS},
-		ItemSelected: ui.Style{Background: t.AccentSoft, TextColor: h(p.text), FontWeight: ui.FontSemibold},
+		Item:         ui.Style{Radius: radiusS, FontSize: 14},
+		ItemSelected: ui.Style{Background: h(p.surfaceActive), TextColor: h(p.text), FontWeight: ui.FontSemibold},
 		Indicator:    ui.Style{Background: h(p.accent)},
+		Heading:      ui.Style{TextColor: h(p.textSubtle), FontSize: 11},
 	}
+	t.Buttons.Primary = ui.ButtonStyle{Root: ui.Style{FontWeight: ui.FontSemibold}}
 	return t
 }
 
-// brandTo is the cyan end of the brand gradient; the violet end is the theme's accent.
-func brandTo(t *ui.Theme) ui.Color {
+// artColors returns the featured banner's shape colors for the theme in use.
+func artColors(t *ui.Theme) [3]ui.Color {
+	p := lightPalette
 	if t.Dark {
-		return ui.Hex(darkPalette.brandTo)
+		p = darkPalette
 	}
-	return ui.Hex(lightPalette.brandTo)
-}
-
-// brandGradient is the full-strength brand gradient, for the logo and other small marks.
-func brandGradient(t *ui.Theme) ui.Gradient { return ui.LinearGradient(135, t.Accent, brandTo(t)) }
-
-// softGradient tints hero panels with the brand colors.
-func softGradient(t *ui.Theme) ui.Gradient {
-	return ui.LinearGradient(120, t.Accent.Alpha(0.20), brandTo(t).Alpha(0.06))
+	return [3]ui.Color{ui.Hex(p.art[0]), ui.Hex(p.art[1]), ui.Hex(p.art[2])}
 }
 
 // Type scale.
-func display(s string) *ui.TextElement { return ui.Text(s).FontSize(30).Bold() }
-func title(s string) *ui.TextElement   { return ui.Text(s).FontSize(22).Semibold() }
-func heading(s string) *ui.TextElement { return ui.Text(s).FontSize(16).Semibold() }
-func body(s string) *ui.TextElement    { return ui.Text(s).FontSize(14) }
+func display(s string) *ui.TextElement { return ui.Text(s).FontSize(38).Bold() }
+func title(s string) *ui.TextElement   { return ui.Text(s).FontSize(26).Bold() }
+func heading(s string) *ui.TextElement { return ui.Text(s).FontSize(20).Semibold() }
+func subhead(s string) *ui.TextElement { return ui.Text(s).FontSize(16).Semibold() }
 
 func muted(ctx *ui.Context, s string) *ui.TextElement {
-	return ui.Text(s).FontSize(13).TextColor(ctx.Theme().TextMuted)
+	return ui.Text(s).FontSize(14).TextColor(ctx.Theme().TextMuted)
 }
 
 func caption(ctx *ui.Context, s string) *ui.TextElement {
@@ -133,18 +128,18 @@ func card(ctx *ui.Context) *ui.DivElement {
 	return ui.Div().Column().Gap(space3).Padding(space5).Radius(radiusL).Background(t.Surface).Border(1, t.Border)
 }
 
-// hero is a panel tinted with the soft brand gradient, for the top of a page.
-func hero(ctx *ui.Context) *ui.DivElement {
+// clickable makes a card or row behave as a button: pointer, hover lift, focus and Enter or Space.
+func clickable(ctx *ui.Context, d *ui.DivElement, name string, onClick func()) *ui.DivElement {
 	t := ctx.Theme()
-	return ui.Div().Column().Gap(space4).Padding(space8).Radius(radiusXL).BackgroundGradient(softGradient(t)).
-		Border(1, t.Border)
+	return d.Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover, BorderColor: t.BorderStrong}).
+		Role(access.RoleButton).Label(name).TabIndex(0).OnClick(onClick)
 }
 
-// sectionHeader is a section's title, an optional line under it, and controls on the right.
+// sectionHeader is a section's title with optional controls on the right, such as a "See all" link.
 func sectionHeader(ctx *ui.Context, titleText, sub string, trailing ...ui.Element) ui.Element {
 	left := ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(heading(titleText))
 	if sub != "" {
-		left = left.Child(caption(ctx, sub))
+		left = left.Child(muted(ctx, sub))
 	}
 	row := ui.Div().Row().Align(ui.End).Gap(space3).Child(left)
 	for _, el := range trailing {
@@ -153,21 +148,45 @@ func sectionHeader(ctx *ui.Context, titleText, sub string, trailing ...ui.Elemen
 	return row
 }
 
-// brandMark is the uas logo: the store icon on the brand gradient.
-func brandMark(ctx *ui.Context, size float32) ui.Element {
-	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.28).BackgroundGradient(brandGradient(ctx.Theme())).
-		Center().Shadow(ui.ShadowSm).
-		Child(ui.Icon(icons.Store).Size(size * 0.55).Color(ui.Hex("#ffffff")))
+// linkButton is text with an icon after it, such as "See all →". jamb buttons put their icon first, so this
+// is built from a focusable row.
+func linkButton(ctx *ui.Context, label string, icon *icons.Icon, onClick func()) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(space2).PaddingY(space1).Radius(radiusS).Shrink(0).
+		Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
+		Role(access.RoleButton).Label(label).TabIndex(0).OnClick(onClick).
+		Child(ui.Text(label).FontSize(14).TextColor(t.Text)).
+		Child(ui.Icon(icon).Size(16).Color(t.Text))
 }
 
-// tint is a source's color: a strong one for text and dots, by darkness.
+// chip is a rounded tag, such as a category on an app page.
+func chip(ctx *ui.Context, label string) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().PaddingX(space3 + 2).PaddingY(6).Radius(16).Background(t.SurfaceActive).Shrink(0).
+		Child(ui.Text(label).FontSize(14))
+}
+
+// filterChip is one choice of a row of filters; the selected one is filled with the accent.
+func filterChip(ctx *ui.Context, label string, selected bool, onClick func()) ui.Element {
+	t := ctx.Theme()
+	d := ui.Div().PaddingX(space4 + 2).Height(ui.Px(38)).Radius(19).Center().Shrink(0).
+		Cursor(ui.CursorPointer).Role(access.RoleButton).Label(label).TabIndex(0).OnClick(onClick).
+		AccessSelected(selected)
+	if selected {
+		return d.Background(t.Accent).Child(ui.Text(label).FontSize(14).Semibold().TextColor(t.AccentText))
+	}
+	return d.Background(t.Surface).Border(1, t.Border).Hover(ui.Style{Background: t.SurfaceHover}).
+		Child(ui.Text(label).FontSize(14))
+}
+
+// tint is a source's color, by darkness.
 type tint struct{ onDark, onLight string }
 
 var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceFlathub:  {"#7aa7ff", "#2459c7"},
 	catalog.SourceFedora:   {"#a99bff", "#5b45d9"},
 	catalog.SourceHomebrew: {"#fbbf4a", "#a15c00"},
-	catalog.SourceCOPR:     {"#3fd6b8", "#0b7a66"},
+	catalog.SourceCOPR:     {"#fb7185", "#be123c"},
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
 }
 
@@ -181,6 +200,20 @@ var sourceIcons = map[catalog.SourceID]*icons.Icon{
 	catalog.SourceGitHub:   icons.GitBranch,
 }
 
+// sourceTips explain each source in a sentence or two.
+var sourceTips = map[catalog.SourceID]string{
+	catalog.SourceFlathub: "On Flathub, the Flatpak app store. Flatpak apps run in a sandbox and install " +
+		"without a restart",
+	catalog.SourceFedora: "Packaged and signed by Fedora. Installing adds it to the system image " +
+		"(layering), which takes effect after a restart",
+	catalog.SourceHomebrew: "A Homebrew formula, mostly command-line tools. Installs for your user without " +
+		"a restart",
+	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage. No distribution reviews it; " +
+		"its page shows a trust score",
+	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
+		"and installing layers it into the system image",
+}
+
 func tintColor(ctx *ui.Context, t tint) ui.Color {
 	if ctx.Theme().Dark {
 		return ui.Hex(t.onDark)
@@ -188,70 +221,69 @@ func tintColor(ctx *ui.Context, t tint) ui.Color {
 	return ui.Hex(t.onLight)
 }
 
-// pill is a small tinted label with a dot, such as a source or a status.
-func pill(ctx *ui.Context, label string, c ui.Color, tip string) ui.Element {
-	p := ui.Div().Row().Align(ui.Center).Gap(5).PaddingX(9).Height(ui.Px(22)).Radius(11).Shrink(0).
-		Background(c.Alpha(0.14)).
-		Child(ui.Div().Size(ui.Px(6), ui.Px(6)).Radius(3).Background(c)).
-		Child(ui.Text(label).FontSize(11.5).Semibold().TextColor(c))
-	if tip != "" {
-		p = p.Tooltip(tip)
-	}
-	return p
-}
-
-// sourcePill is a source's name as a labeled pill, for places that explain the marks (Settings).
-func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
-	return pill(ctx, s.Name(), tintColor(ctx, sourceTints[s]), sourceTips[s])
-}
+func sourceColor(ctx *ui.Context, s catalog.SourceID) ui.Color { return tintColor(ctx, sourceTints[s]) }
 
 // verifiedTip explains the verified mark.
 const verifiedTip = "Flathub has confirmed that the publisher is the app's own developer, through the " +
 	"developer's website or code-hosting account"
 
-// mark is a small tinted square with an icon: a compact badge whose name shows on hover and is read by
-// assistive technology.
-func mark(ctx *ui.Context, icon *icons.Icon, c ui.Color, name, tip string, size float32) ui.Element {
-	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.3).Background(c.Alpha(0.15)).Center().Shrink(0).
-		Role(access.RoleImage).Label(name).Tooltip(name + ": " + tip).
-		Child(ui.Icon(icon).Size(size * 0.58).Color(c))
+// sourceTag is a source's icon in its color followed by its name, as the lists show where an app comes from.
+func sourceTag(ctx *ui.Context, s catalog.SourceID) ui.Element {
+	return ui.Div().Row().Align(ui.Center).Gap(6).Shrink(0).Tooltip(s.Name() + ": " + sourceTips[s]).
+		Child(ui.Icon(sourceIcons[s]).Size(15).Color(sourceColor(ctx, s))).
+		Child(ui.Text(s.Name()).FontSize(13).TextColor(ctx.Theme().TextMuted))
 }
 
-// sourceMark is a source's icon in its color.
-func sourceMark(ctx *ui.Context, s catalog.SourceID, size float32) ui.Element {
-	return mark(ctx, sourceIcons[s], tintColor(ctx, sourceTints[s]), s.Name(), sourceTips[s], size)
+// verifiedTag is the shield shown for a Flathub-verified publisher.
+func verifiedTag(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().Row().Align(ui.Center).Gap(6).Shrink(0).Tooltip("Verified publisher: " + verifiedTip).
+		Child(ui.Icon(icons.ShieldCheck).Size(15).Color(t.Success)).
+		Child(ui.Text("Verified").FontSize(13).TextColor(t.TextMuted))
 }
 
-// verifiedMark is the shield shown for a Flathub-verified publisher.
-func verifiedMark(ctx *ui.Context, size float32) ui.Element {
-	return mark(ctx, icons.ShieldCheck, ctx.Theme().Success, "Verified publisher", verifiedTip, size)
-}
-
-// sourceMarks shows where an app is available, and the verified shield, as icons.
-func sourceMarks(ctx *ui.Context, sources []catalog.SourceID, verified bool, size float32) ui.Element {
-	row := ui.Div().Row().Align(ui.Center).Gap(space1 + 2).Shrink(0)
-	for _, s := range sources {
-		row = row.Child(sourceMark(ctx, s, size))
+// sourceTags shows where an app is available, and whether its publisher is verified. With max above zero,
+// sources past max collapse into a "+n".
+func sourceTags(ctx *ui.Context, sources []catalog.SourceID, verified bool, max int) ui.Element {
+	row := ui.Div().Row().Align(ui.Center).Gap(space4).MinWidth(ui.Px(0))
+	for i, s := range sources {
+		if max > 0 && i == max {
+			rest := make([]string, 0, len(sources)-max)
+			for _, r := range sources[max:] {
+				rest = append(rest, r.Name())
+			}
+			row = row.Child(ui.Div().Tooltip("Also on " + strings.Join(rest, " and ")).
+				Child(caption(ctx, fmt.Sprintf("+%d", len(sources)-max))))
+			break
+		}
+		row = row.Child(sourceTag(ctx, s))
 	}
 	if verified {
-		row = row.Child(verifiedMark(ctx, size))
+		row = row.Child(verifiedTag(ctx))
 	}
 	return row
 }
 
-// statChip is an icon, a value and a label, such as "2.9M installs a year".
-func statChip(ctx *ui.Context, icon *icons.Icon, value, label, tip string) ui.Element {
+// sourcePill is a source's name as a labeled pill, for places that spell sources out (Settings).
+func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
+	c := sourceColor(ctx, s)
+	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(10).Height(ui.Px(26)).Radius(13).Shrink(0).
+		Background(c.Alpha(0.14)).Tooltip(sourceTips[s]).
+		Child(ui.Icon(sourceIcons[s]).Size(14).Color(c)).
+		Child(ui.Text(s.Name()).FontSize(12.5).Semibold().TextColor(c))
+}
+
+// statusPill is a short "Ready" or "Not available" status.
+func statusPill(ctx *ui.Context, ok bool, label string) ui.Element {
 	t := ctx.Theme()
-	c := ui.Div().Row().Align(ui.Center).Gap(space2).PaddingX(space3).PaddingY(space2).Radius(radiusM).
-		Background(t.Surface).Border(1, t.Border).
-		Child(ui.Icon(icon).Size(16).Color(t.TextMuted)).
-		Child(ui.Div().Column().
-			Child(ui.Text(value).FontSize(14).Semibold()).
-			Child(caption(ctx, label)))
-	if tip != "" {
-		c = c.Tooltip(tip)
+	c := t.TextMuted
+	if ok {
+		c = t.Success
 	}
-	return c
+	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(10).Height(ui.Px(24)).Radius(12).Shrink(0).
+		Background(c.Alpha(0.14)).
+		Child(ui.Div().Size(ui.Px(6), ui.Px(6)).Radius(3).Background(c)).
+		Child(ui.Text(label).FontSize(12).Semibold().TextColor(c))
 }
 
 // meter is a thin bar filled to frac (0 to 1) in color.
@@ -261,19 +293,64 @@ func meter(ctx *ui.Context, frac float64, color ui.Color) ui.Element {
 		Child(ui.Div().Width(ui.Percent(float32(frac * 100))).Height(ui.Full).Radius(3).Background(color))
 }
 
-// statusPill is a short "Ready" or "Not available" style status.
-func statusPill(ctx *ui.Context, ok bool, label string) ui.Element {
-	if ok {
-		return pill(ctx, label, ctx.Theme().Success, "")
+// statLine is an icon and a short figure, as the result rows show installs and release dates.
+func statLine(ctx *ui.Context, icon *icons.Icon, text, tip string) ui.Element {
+	t := ctx.Theme()
+	d := ui.Div().Row().Align(ui.Center).Gap(space2).Shrink(0).
+		Child(ui.Icon(icon).Size(16).Color(t.TextMuted)).
+		Child(ui.Text(text).FontSize(14).TextColor(t.TextMuted))
+	if tip != "" {
+		d = d.Tooltip(tip)
 	}
-	return pill(ctx, label, ctx.Theme().TextMuted, "")
+	return d
+}
+
+// brandMark is the uas logo: the store icon on a teal tile.
+func brandMark(ctx *ui.Context, size float32) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.28).
+		BackgroundGradient(ui.LinearGradient(135, t.Accent, t.AccentActive)).Center().
+		Child(ui.Icon(icons.Store).Size(size * 0.55).Color(t.AccentText))
 }
 
 // iconTile frames an app icon on a surface tile, so icons of any shape sit on a consistent base.
 func (a *App) iconTile(ctx *ui.Context, url string, size float32, name string) ui.Element {
 	t := ctx.Theme()
 	pad := size * 0.14
-	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size*0.24).Background(t.Surface).Border(1, t.Border).
+	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.24).Background(t.SurfaceActive).
 		Center().Shrink(0).
 		Child(a.appIcon(ctx, url, size-2*pad, name))
+}
+
+// compact formats a count like 1.2M or 34k.
+func compact(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return trimZero(fmt.Sprintf("%.1f", float64(n)/1e6)) + "M"
+	case n >= 10_000:
+		return fmt.Sprintf("%dk", n/1000)
+	case n >= 1000:
+		return trimZero(fmt.Sprintf("%.1f", float64(n)/1e3)) + "k"
+	}
+	return fmt.Sprint(n)
+}
+
+// compactThousands formats a count like 7,732.
+func compactThousands(n int) string {
+	s := fmt.Sprint(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
+func trimZero(s string) string { return strings.TrimSuffix(s, ".0") }
+
+func sourceLabel(s catalog.SourceID) string { return s.Name() }
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return compactThousands(n) + " " + many
 }

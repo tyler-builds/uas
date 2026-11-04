@@ -4,6 +4,7 @@ package gui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,28 +19,50 @@ import (
 	"github.com/tyler-builds/uas/internal/client/session"
 )
 
-// Pages of the sidebar.
+// Pages. A view is a page and its argument: the category key, the source, or the app ID.
 const (
-	pageDiscover  = "discover"
+	pageHome      = "home"
+	pageSearch    = "search"
+	pageSources   = "sources"
+	pageCategory  = "category"
+	pageSource    = "source"
+	pageApp       = "app"
 	pageInstalled = "installed"
+	pageUpdates   = "updates"
 	pageSettings  = "settings"
 )
+
+// view is one place in the app.
+type view struct {
+	page string
+	arg  string
+}
+
+// navKey is the sidebar key of a view, such as "category:Game".
+func (v view) navKey() string {
+	if v.arg != "" && v.page != pageApp {
+		return v.page + ":" + v.arg
+	}
+	return v.page
+}
 
 // App is the window's state.
 type App struct {
 	s *session.Session
 
-	page     *ui.Signal[string]
-	query    *ui.Signal[string] // the search field's text
-	search   *ui.Signal[string] // the query being searched, set after a pause in typing
-	category *ui.Signal[string] // the category browsed when there is no search; "" is Popular
-	// searchOrder and browseOrder sort search results and browsing; browsing has no relevance order.
-	searchOrder *ui.Signal[catalog.Order]
-	browseOrder *ui.Signal[catalog.Order]
-	selected    *ui.Signal[string] // the app whose page is open; "" shows the page list
-	jobs        *ui.Signal[map[string]job]
-	confirm     *ui.Signal[*pending] // an install waiting for the user's OK
-	removing    *ui.Signal[*removal] // a removal waiting for the user's OK
+	// history is the stack of views; the last one is shown. The sidebar starts a new stack.
+	history *ui.Signal[[]view]
+	navSel  *ui.Signal[string] // the sidebar's selected key
+
+	query        *ui.Signal[string] // the search field's text
+	search       *ui.Signal[string] // the query being searched, set after a pause in typing
+	searchSource *ui.Signal[catalog.SourceID]
+	searchOrder  *ui.Signal[catalog.Order]
+	browseOrder  *ui.Signal[catalog.Order]
+
+	jobs     *ui.Signal[map[string]job]
+	confirm  *ui.Signal[*pending] // an install waiting for the user's OK
+	removing *ui.Signal[*removal] // a removal waiting for the user's OK
 
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
@@ -54,20 +77,69 @@ type App struct {
 // New creates the app for a session.
 func New(s *session.Session) *App {
 	return &App{
-		s:           s,
-		page:        ui.NewSignal(pageDiscover),
-		query:       ui.NewSignal(""),
-		search:      ui.NewSignal(""),
-		category:    ui.NewSignal(""),
-		searchOrder: ui.NewSignal(catalog.OrderRelevance),
-		browseOrder: ui.NewSignal(catalog.OrderPopular),
-		selected:    ui.NewSignal(""),
-		jobs:        ui.NewSignal(map[string]job{}),
-		confirm:     ui.NewSignal[*pending](nil),
-		removing:    ui.NewSignal[*removal](nil),
-		catalogGen:  ui.NewSignal(0),
-		icons:       newIconLoader(),
+		s:            s,
+		history:      ui.NewSignal([]view{{page: pageHome}}),
+		navSel:       ui.NewSignal(pageHome),
+		query:        ui.NewSignal(""),
+		search:       ui.NewSignal(""),
+		searchSource: ui.NewSignal[catalog.SourceID](""),
+		searchOrder:  ui.NewSignal(catalog.OrderRelevance),
+		browseOrder:  ui.NewSignal(catalog.OrderPopular),
+		jobs:         ui.NewSignal(map[string]job{}),
+		confirm:      ui.NewSignal[*pending](nil),
+		removing:     ui.NewSignal[*removal](nil),
+		catalogGen:   ui.NewSignal(0),
+		icons:        newIconLoader(),
 	}
+}
+
+// current is the view on screen.
+func (a *App) current() view {
+	h := a.history.Get()
+	return h[len(h)-1]
+}
+
+// open goes to v, keeping the way back.
+func (a *App) open(v view) {
+	h := a.history.Peek()
+	if h[len(h)-1] == v {
+		return
+	}
+	a.history.Set(append(slices.Clone(h), v))
+	if v.page != pageApp {
+		a.navSel.Set(v.navKey())
+	}
+}
+
+// openApp shows an app's page.
+func (a *App) openApp(id string) { a.open(view{page: pageApp, arg: id}) }
+
+// goTo starts over at v, as the sidebar does.
+func (a *App) goTo(v view) {
+	a.history.Set([]view{v})
+	a.navSel.Set(v.navKey())
+}
+
+// back returns to the previous view.
+func (a *App) back() {
+	h := a.history.Peek()
+	if len(h) < 2 {
+		return
+	}
+	h = h[:len(h)-1]
+	a.history.Set(slices.Clone(h))
+	for i := len(h) - 1; i >= 0; i-- {
+		if h[i].page != pageApp {
+			a.navSel.Set(h[i].navKey())
+			break
+		}
+	}
+}
+
+// navView turns a sidebar key back into a view.
+func navView(key string) view {
+	page, arg, _ := strings.Cut(key, ":")
+	return view{page: page, arg: arg}
 }
 
 // catalog returns the open catalog, opening (and if needed downloading) it on first use. It runs off the
@@ -104,6 +176,9 @@ func (a *App) refreshCatalog(ctx context.Context) (refresh.Result, error) {
 	return res, nil
 }
 
+// sidebarWidth is the width of the navigation pane.
+const sidebarWidth = 236
+
 // Root renders the window.
 func (a *App) Root(ctx *ui.Context) ui.Element {
 	t := ctx.Theme()
@@ -126,48 +201,111 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 	case res.Loading:
 		content = ui.Div().Column().Center().Gap(space4).Grow(1).
 			Child(brandMark(ctx, 64)).
-			Child(heading("Getting the app catalog ready")).
+			Child(subhead("Getting the app catalog ready")).
 			Child(muted(ctx, "The first start downloads about 8 MB.")).
 			Child(ui.ProgressRing().Size(ui.RingMedium).Label("Loading the app catalog"))
 	case res.Err != nil:
 		content = ui.Div().Column().Center().Grow(1).Child(
 			ui.Empty("Could not load the app catalog").Icon(icons.CloudOff).Description(res.Err.Error()).
 				Action(ui.Button("Try again").OnClick(res.Refetch)))
-	case a.selected.Get() != "":
-		content = a.detailPage(ctx, a.selected.Get())
 	default:
-		switch a.page.Get() {
-		case pageInstalled:
-			content = a.installedPage(ctx)
-		case pageSettings:
-			content = a.settingsPage(ctx, res.Data)
-		default:
-			content = a.discoverPage(ctx, res.Data)
-		}
+		content = a.page(ctx, res.Data)
 	}
 
-	pendingUpdates := len(a.updates(ctx).Data)
 	return ui.Div().Row().Size(ui.Full, ui.Full).Background(t.Background).TextColor(t.Text).
-		Child(ui.Sidebar(a.page,
-			ui.SidebarItem{Key: pageDiscover, Label: "Discover", Icon: icons.Compass},
-			ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Package, Badge: pendingUpdates},
-			ui.SidebarItem{Key: pageSettings, Label: "Settings", Icon: icons.Settings},
-		).Label("uas").Width(ui.Px(sidebarWidth)).OnChange(func(string) { a.selected.Set("") }).
-			Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space5).PaddingBottom(space4).
-				Child(brandMark(ctx, 34)).
-				Child(ui.Div().Column().
-					Child(ui.Text("uas").FontSize(18).Bold()).
-					Child(caption(ctx, "App store")))).
-			Footer(a.sidebarFooter(ctx, res.Data, !res.Loading && res.Err == nil))).
+		Child(a.sidebar(ctx, res.Data, !res.Loading && res.Err == nil)).
 		Child(ui.Div().Width(ui.Px(1)).Height(ui.Full).Background(t.Border)).
-		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(content)).
+		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(a.topBar(ctx)).
+			Child(content)).
 		Child(a.confirmDialog(ctx)).
 		Child(a.removeDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
 }
 
-// sidebarWidth is the width of the navigation pane.
-const sidebarWidth = 228
+// page renders the current view.
+func (a *App) page(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
+	v := a.current()
+	switch v.page {
+	case pageApp:
+		return a.detailPage(ctx, v.arg)
+	case pageSearch:
+		return a.searchPage(ctx)
+	case pageSources:
+		return a.sourcesPage(ctx)
+	case pageSource:
+		return a.sourcePage(ctx, catalog.SourceID(v.arg))
+	case pageCategory:
+		return a.categoryPage(ctx, v.arg)
+	case pageInstalled:
+		return a.installedPage(ctx)
+	case pageUpdates:
+		return a.updatesPage(ctx)
+	case pageSettings:
+		return a.settingsPage(ctx, info)
+	}
+	return a.homePage(ctx, info)
+}
+
+// navCategories are the categories in the sidebar.
+var navCategories = []struct {
+	key, label, tip string
+	icon            *icons.Icon
+}{
+	{"Development", "Development", "Code editors, IDEs, debuggers and other tools for programmers", icons.Code},
+	{"Game", "Games", "Games, game launchers and emulators", icons.Gamepad2},
+	{"Graphics", "Graphics", "Image editors, drawing and painting, photo tools, 3D and design apps", icons.Palette},
+	{"Network", "Internet", "Browsers, chat, email, file sharing and remote desktop apps", icons.Globe},
+	{"AudioVideo", "Multimedia", "Music and video players, editors, recorders and streaming apps", icons.Play},
+	{"Office", "Productivity", "Documents, spreadsheets, notes, calendars and other productivity apps", icons.CircleCheck},
+	{"System", "System", "System monitors, settings, terminals, disk and hardware tools", icons.Settings},
+	{"Utility", "Utilities", "Small tools: calculators, archivers, clipboard managers and the like", icons.Wrench},
+}
+
+func categoryLabel(key string) string {
+	for _, c := range navCategories {
+		if c.key == key {
+			return c.label
+		}
+	}
+	if key == "" {
+		return "Popular"
+	}
+	return key
+}
+
+func categoryTip(key string) string {
+	for _, c := range navCategories {
+		if c.key == key {
+			return c.tip
+		}
+	}
+	return "The most installed desktop apps from every source"
+}
+
+// sidebar is the navigation pane.
+func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.Element {
+	installed := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	items := []ui.SidebarItem{
+		{Key: pageHome, Label: "Home", Icon: icons.LayoutGrid},
+		{Key: pageSearch, Label: "Search", Icon: icons.Search},
+		{Key: pageSources, Label: "Sources", Icon: icons.Layers},
+		ui.SidebarHeading("Categories"),
+	}
+	for _, c := range navCategories {
+		items = append(items, ui.SidebarItem{Key: pageCategory + ":" + c.key, Label: c.label, Icon: c.icon})
+	}
+	items = append(items, ui.SidebarHeading("Library"),
+		ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Download, Badge: len(installed.Data)},
+		ui.SidebarItem{Key: pageUpdates, Label: "Updates", Icon: icons.RefreshCw, Badge: len(a.updates(ctx).Data)},
+	)
+	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).
+		OnChange(func(key string) { a.goTo(navView(key)) }).
+		Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space5).PaddingBottom(space3).
+			Child(brandMark(ctx, 30)).
+			Child(ui.Text("uas").FontSize(18).Bold())).
+		Footer(a.sidebarFooter(ctx, info, ready))
+}
 
 // sidebarFooter shows how fresh the catalog is.
 func (a *App) sidebarFooter(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.Element {
@@ -185,6 +323,51 @@ func (a *App) sidebarFooter(ctx *ui.Context, info catalog.BuildInfo, ready bool)
 			Child(ui.Div().Size(ui.Px(7), ui.Px(7)).Radius(4).Background(t.Success)).
 			Child(ui.Text(compactThousands(info.Apps) + " apps").FontSize(12).Semibold())).
 		Child(caption(ctx, status))
+}
+
+// topBar holds the back button, the search field and the settings button.
+func (a *App) topBar(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	back := ui.Element(ui.Div().Width(ui.Px(36)))
+	if len(a.history.Get()) > 1 {
+		back = ui.IconButton(icons.ChevronLeft).Label("Back").Tooltip("Back").OnClick(a.back)
+	}
+	search := ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps…").Icon(icons.Search).
+		Large().Clearable().Width(ui.Full).
+		Styles(ui.FieldStyle{Frame: ui.Style{Radius: 22, Background: t.Surface}}).
+		OnChange(func(s string) { a.typed(ctx, s) }).
+		OnSubmit(func(s string) {
+			a.search.Set(strings.TrimSpace(s))
+			a.showSearch()
+		})
+	settings := ui.IconButton(icons.Settings).Label("Settings").Tooltip("Settings").
+		OnClick(func() { a.goTo(view{page: pageSettings}) })
+	return ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space6).PaddingTop(space4).PaddingBottom(space2).
+		Child(back).
+		Child(ui.Div().Row().Justify(ui.Center).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Div().MaxWidth(ui.Px(860)).Grow(1).Basis(ui.Px(0)).Child(search))).
+		Child(settings)
+}
+
+// searchDebounce is how long typing must pause before a search runs.
+const searchDebounce = 250 * time.Millisecond
+
+// typed reacts to the search field: it opens the search page and searches once typing pauses.
+func (a *App) typed(ctx *ui.Context, s string) {
+	if strings.TrimSpace(s) != "" {
+		a.showSearch()
+	}
+	if a.cancelSearch != nil {
+		a.cancelSearch()
+	}
+	a.cancelSearch = ctx.After(searchDebounce, func() { a.search.Set(strings.TrimSpace(s)) })
+}
+
+// showSearch opens the search page, unless it is open.
+func (a *App) showSearch() {
+	if a.current().page != pageSearch {
+		a.open(view{page: pageSearch})
+	}
 }
 
 // updates returns the available updates by InstalledApp.Key. Checking asks the network, so it is kept for

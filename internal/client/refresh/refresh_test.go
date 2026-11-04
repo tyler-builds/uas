@@ -70,7 +70,7 @@ func (f *fixture) search(q string) []catalog.SearchResult {
 		f.t.Fatal(err)
 	}
 	defer db.Close()
-	rs, err := db.Search(context.Background(), q, 10, catalog.OrderRelevance)
+	rs, err := db.Search(context.Background(), q, catalog.SearchOptions{Order: catalog.OrderRelevance, Limit: 10})
 	if err != nil {
 		f.t.Fatal(err)
 	}
