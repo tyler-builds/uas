@@ -151,10 +151,15 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
   that don't apply.
 - **refresh:** Fetches the manifest, checks the signature, downloads the catalog only if its hash changed, and swaps
   it in atomically. Works offline with the last good catalog.
-- **catalog:** Shared schema and queries, used by both indexer and client.
+- **catalog:** Shared schema and queries, used by both indexer and client. Schema version 2 adds each app's
+  `popularity` (the highest install count of its listings: Homebrew's installs-on-request in the past year,
+  Flathub's last-month installs from its `collection/popular` API times 12) and a precomputed search `boost`
+  that multiplies the bm25 score, so well-known apps rank first.
 - **state:** A local SQLite database of what UAS installed and from where (needed for GitHub apps, which nothing
   else tracks). Reconciled on startup against `flatpak list`, `brew list` and the rpm-ostree deployment, so
   installs made outside UAS still show up.
+- **session:** The engine shared by the CLI and the desktop app: loads settings, detects the platform, builds
+  the backends, opens (and on first use downloads) the catalog, and runs installs, updates and removals.
 - **recommend:** Picks the default source per app and gives the reason. Verified listings first, then
   Flathub, Homebrew, GitHub, Fedora layering, COPR layering (`recommend.InstallOrder`). Trust flags will be
   able to move a source down.
@@ -204,11 +209,28 @@ type Backend interface {
 
 ### UI (Jamb)
 
-Pages: Home (curated and trending), Search, App detail (source picker with recommendation, trust panel,
-permissions, reboot warning), Installed, Updates, Settings (sources on or off, refresh, Flatpak scope, telemetry).
+`cmd/uas-gui` with `internal/gui`, on top of `internal/client/session`, the engine the CLI uses too (settings,
+platform, backends, install and remove, catalog). Pages:
 
-Jamb's Linux adapter is experimental. On this machine (KDE Plasma, Wayland) server-side title bars work. Gaps that
-matter for this app: no AT-SPI accessibility, no input methods. Those become Jamb work items.
+- **Discover:** a search field (searches after a 250 ms pause) and category chips. With no search it lists
+  the most popular desktop apps, overall or per category (`catalog.DB.Browse`, by `popularity`).
+- **App page:** icon, developer, summary; a source picker of every listing this system can install, with the
+  recommended one preselected and the reason shown; install notes (scope, password, restart, layering);
+  Install, or Installed with Update and Remove; the trust panel for GitHub and COPR listings; screenshots;
+  the description as Markdown; license and links.
+- **Installed:** everything installed from every source, matched to the catalog for icons and app pages, with
+  Update (not for layered packages, which update with the system) and Remove.
+- **Settings:** Flatpak scope, the catalog's build and per-source status with a manual refresh, what the
+  system supports, and the privacy statement.
+
+GitHub, COPR and Fedora installs ask first in an alert dialog that repeats the notes and the trust panel;
+removals always ask. Jobs run in the background with progress in the page and in a toast. Images are cached in
+`~/.cache/uas/images`. At start the app checks for a newer catalog in the background and switches to it.
+
+Jamb is pinned to its main branch (`47731b5`): the Linux platform landed after its last tag. Linux support is
+experimental (Wayland only, CPU rendering, no AT-SPI or input methods). Jamb picks Linux fonts from Debian paths
+only, so `cmd/uas-gui/fonts.go` registers the desktop's fonts through fontconfig. Problems found while building
+the UI are written up for the Jamb maintainers outside this repo.
 
 ### Packaging the client
 
@@ -233,7 +255,7 @@ uas/
 ├── go.mod
 ├── cmd/
 │   ├── uas/                 # CLI: search, info, install, remove, update
-│   ├── uas-gui/             # Jamb desktop app
+│   ├── uas-gui/             # Jamb desktop app (fonts.go: fontconfig font workaround)
 │   └── uas-indexer/         # crawler, run in CI
 ├── internal/
 │   ├── catalog/             # shared types, SQLite schema, FTS queries (rebuilt each run, no migrations)
@@ -258,6 +280,7 @@ uas/
 │   │   ├── recommend/
 │   │   ├── run/             # runs flatpak, brew, rpm-ostree, pkexec
 │   │   ├── jobs/
+│   │   ├── session/         # engine shared by CLI and GUI
 │   │   ├── settings/
 │   │   ├── telemetry/      # Event, Sink interface, no-op sink
 │   │   └── backend/
@@ -267,9 +290,7 @@ uas/
 │   │       ├── github/
 │   │       ├── rpmostree/
 │   │       └── copr/
-│   └── ui/
-│       ├── pages/           # home, search, app, installed, updates, settings
-│       └── components/      # trust panel, source picker, job progress
+│   └── gui/                 # Jamb views: discover, detail, installed, settings, jobs, icons
 ├── overrides/               # manual merge and trust overrides (YAML)
 ├── deploy/cloudflare/       # catalog Worker (serves R2, accepts signed-catalog uploads)
 ├── .github/workflows/
@@ -292,7 +313,9 @@ uas/
 6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking. Done. Follow-ups: installing
    `.flatpak` bundles and `.rpm` files from releases.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling. Done (live install untested; see above).
-8. **Jamb UI** on top of the finished core. Can start in parallel after milestone 2.
+8. **Jamb UI:** Discover, app pages, Installed, Settings. Done. Follow-ups: an Updates page (available
+   updates per source), icons for apps whose catalog entry has only cached icons (some Fedora and KDE apps),
+   synonyms in search ("photo editor" doesn't find GIMP).
 
 ## Decisions
 

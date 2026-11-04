@@ -1,9 +1,17 @@
 # uas
 
 An app store for Bazzite that finds apps across Flathub, Fedora, COPR, Homebrew and GitHub releases.
-See [docs/architecture.md](docs/architecture.md).
+See [docs/architecture.md](docs/architecture.md) and [docs/trust-score.md](docs/trust-score.md).
 
-## Development
+## Desktop app
+
+```sh
+go run ./cmd/uas-gui
+```
+
+It needs a Wayland session (jamb's Linux support is Wayland only).
+
+## Command line
 
 `uas` downloads the published catalog on first use (or with `uas refresh`) into `~/.cache/uas/`:
 
