@@ -3,6 +3,10 @@
 // It runs a set of repository searches through the GraphQL API, keeps repos whose latest stable release has a
 // Linux AppImage, Flatpak bundle or RPM for the target architecture, and scores each with the trust package.
 // Repos below MinScore, archived repos and forks are left out.
+//
+// Those searches only find repos that call themselves AppImage or Linux apps. A sweep (SweepMinStars) also
+// looks at every popular repo pushed in the past year, whatever its readme says, so apps such as an editor
+// that just ships an AppImage among its release files are found too.
 package github
 
 import (
@@ -14,11 +18,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
@@ -38,6 +46,15 @@ var DefaultQueries = []string{
 	"topic:linux-app archived:false fork:false stars:>=50",
 }
 
+// DefaultSweepMinStars is the star count from which the sweep looks at a repo.
+const DefaultSweepMinStars = 2000
+
+// sweepPushedWithin is how recently a swept repo must have been pushed to.
+const sweepPushedWithin = 365 * 24 * time.Hour
+
+// searchCap is how many results a GitHub search returns at most.
+const searchCap = 1000
+
 // DefaultMinScore leaves out repos with little evidence behind them.
 const DefaultMinScore = 35
 
@@ -48,9 +65,17 @@ type Fetcher struct {
 	Arch     string // "x86_64" or "aarch64"
 	Queries  []string
 	MinScore int
-	Endpoint string
-	Log      *slog.Logger
-	Now      func() time.Time
+	// SweepMinStars, when set, also checks every repo with at least this many stars pushed in the past
+	// year.
+	SweepMinStars int
+	// SweepCache, when set, is a file that keeps the repos the sweep found for SweepFor (default a week).
+	// The sweep reads some 21,000 repos and takes about 25 minutes; the repos it finds are re-read in full
+	// on every run, so versions stay current while new apps show up within a week.
+	SweepCache string
+	SweepFor   time.Duration
+	Endpoint   string
+	Log        *slog.Logger
+	Now        func() time.Time
 }
 
 // Source implements fetch.Fetcher.
@@ -115,6 +140,35 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 			after = &res.Search.PageInfo.EndCursor
 		}
 	}
+	if f.SweepMinStars > 0 {
+		found, err := f.sweptRepos(ctx, now)
+		if err != nil {
+			return nil, err
+		}
+		var ids []string
+		for _, id := range found {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		repos, err := f.reposByID(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range repos {
+			checked++
+			l, ok := toListing(r, f.Arch, now)
+			if !ok {
+				continue
+			}
+			if l.Trust.Score < minScore {
+				skipped++
+				continue
+			}
+			listings = append(listings, l)
+		}
+	}
 	if f.Log != nil {
 		f.Log.Info("github repos checked", "repos", checked, "kept", len(listings), "below_min_score", skipped)
 	}
@@ -122,21 +176,232 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	return listings, nil
 }
 
-// searchQuery reads, for each repo, its latest release with files plus the dates of recent releases (for
-// release cadence). Asking for files of several releases per repo exceeds GitHub's per-query limits.
-const searchQuery = `query($q: String!, $after: String, $first: Int!) {
+// sweepCache is what SweepCache holds.
+type sweepCache struct {
+	Key string    `json:"key"`
+	At  time.Time `json:"at"`
+	IDs []string  `json:"ids"`
+}
+
+// sweptRepos returns the IDs of popular repos with a Linux file, from SweepCache while it is fresh.
+func (f *Fetcher) sweptRepos(ctx context.Context, now time.Time) ([]string, error) {
+	key := fmt.Sprintf("arch=%s min-stars=%d", f.Arch, f.SweepMinStars)
+	keep := f.SweepFor
+	if keep == 0 {
+		keep = 7 * 24 * time.Hour
+	}
+	if f.SweepCache != "" {
+		var c sweepCache
+		if raw, err := os.ReadFile(f.SweepCache); err == nil && json.Unmarshal(raw, &c) == nil &&
+			c.Key == key && now.Sub(c.At) < keep {
+			os.Chtimes(f.SweepCache, now, now) // in use: keep it from cache pruning, which goes by file time
+			if f.Log != nil {
+				f.Log.Info("github sweep reused", "with_linux_files", len(c.IDs), "age", now.Sub(c.At).Round(time.Minute))
+			}
+			return c.IDs, nil
+		}
+	}
+	ids, swept, err := f.sweep(ctx, f.SweepMinStars, now.Add(-sweepPushedWithin), map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	if f.Log != nil {
+		f.Log.Info("github sweep", "repos", swept, "with_linux_files", len(ids))
+	}
+	if f.SweepCache != "" {
+		raw, _ := json.Marshal(sweepCache{Key: key, At: now, IDs: ids})
+		if err := os.MkdirAll(filepath.Dir(f.SweepCache), 0o755); err == nil {
+			err = os.WriteFile(f.SweepCache, raw, 0o644)
+		}
+		if err != nil && f.Log != nil {
+			f.Log.Warn("saving the github sweep failed", "err", err)
+		}
+	}
+	return ids, nil
+}
+
+// sweep pages through popular repos pushed since pushed, reading only their latest release's file names, and
+// returns the IDs of those not yet seen that have a Linux file for the architecture. Star ranges are split
+// until each search fits under GitHub's 1,000-result cap, then read a few at a time.
+func (f *Fetcher) sweep(ctx context.Context, minStars int, pushed time.Time, seen map[string]bool) (
+	ids []string, swept int, err error) {
+	filter := " pushed:>=" + pushed.UTC().Format("2006-01-02") + " archived:false fork:false"
+	var queries []string
+	ranges := [][2]int{{minStars, 0}} // 0: no upper bound
+	for len(ranges) > 0 {
+		lo, hi := ranges[0][0], ranges[0][1]
+		ranges = ranges[1:]
+		q := starRange(lo, hi) + filter
+		var count struct {
+			Search struct {
+				RepositoryCount int `json:"repositoryCount"`
+			} `json:"search"`
+		}
+		if err := f.query(ctx, countQuery, map[string]any{"q": q}, &count); err != nil {
+			return nil, 0, fmt.Errorf("github: count %q: %w", q, err)
+		}
+		if count.Search.RepositoryCount > searchCap && hi != lo {
+			mid := lo * 2
+			if hi != 0 {
+				mid = lo + (hi-lo+1)/2
+			}
+			ranges = append(ranges, [2]int{lo, mid - 1}, [2]int{mid, hi})
+			continue
+		}
+		queries = append(queries, q)
+	}
+
+	// A few searches at once: each page takes seconds, and GitHub allows modest concurrency.
+	var mu sync.Mutex
+	work := make(chan string)
+	errs := make(chan error, sweepWorkers)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for range sweepWorkers {
+		go func() {
+			for q := range work {
+				err := f.sweepOne(ctx, q, func(r repo) {
+					mu.Lock()
+					defer mu.Unlock()
+					if r.ID == "" || seen[r.ID] {
+						return
+					}
+					seen[r.ID] = true
+					swept++
+					rel := r.LatestRelease
+					if rel != nil && !rel.IsPrerelease && !rel.IsDraft && len(pickAssets(r.NameWithOwner, rel, f.Arch)) > 0 {
+						ids = append(ids, r.ID)
+					}
+				})
+				if err != nil {
+					cancel()
+					errs <- err
+					return
+				}
+			}
+			errs <- nil
+		}()
+	}
+feed:
+	for _, q := range queries {
+		select {
+		case work <- q:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(work)
+	for range sweepWorkers {
+		if e := <-errs; e != nil && err == nil {
+			err = e
+		}
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.Strings(ids) // a stable order, whatever order the searches finished in
+	return ids, swept, nil
+}
+
+// sweepWorkers is how many sweep searches run at once.
+const sweepWorkers = 4
+
+// sweepOne pages through one sweep search.
+func (f *Fetcher) sweepOne(ctx context.Context, q string, each func(repo)) error {
+	var after *string
+	pageSize := 100
+	for {
+		var res struct {
+			Search struct {
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+				Nodes []repo `json:"nodes"`
+			} `json:"search"`
+		}
+		err := f.query(ctx, sweepQuery, map[string]any{"q": q, "after": after, "first": pageSize}, &res)
+		if err != nil && strings.Contains(err.Error(), "Resource limits") && pageSize > 5 {
+			pageSize /= 2
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("github: sweep %q: %w", q, err)
+		}
+		for _, r := range res.Search.Nodes {
+			each(r)
+		}
+		if !res.Search.PageInfo.HasNextPage {
+			return nil
+		}
+		after = &res.Search.PageInfo.EndCursor
+	}
+}
+
+// starRange is a search qualifier for stars from lo to hi, or lo and up when hi is 0.
+func starRange(lo, hi int) string {
+	if hi == 0 {
+		return fmt.Sprintf("stars:>=%d", lo)
+	}
+	return fmt.Sprintf("stars:%d..%d", lo, hi)
+}
+
+// reposByID reads the full details of repos, a page at a time.
+func (f *Fetcher) reposByID(ctx context.Context, ids []string) ([]repo, error) {
+	var out []repo
+	pageSize := 25
+	for len(ids) > 0 {
+		n := min(pageSize, len(ids))
+		var res struct {
+			Nodes []repo `json:"nodes"`
+		}
+		err := f.query(ctx, nodesQuery, map[string]any{"ids": ids[:n]}, &res)
+		if err != nil && strings.Contains(err.Error(), "Resource limits") && pageSize > 1 {
+			pageSize /= 2
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("github: read repos: %w", err)
+		}
+		for _, r := range res.Nodes {
+			if r.ID != "" {
+				out = append(out, r)
+			}
+		}
+		ids = ids[n:]
+	}
+	return out, nil
+}
+
+const countQuery = `query($q: String!) { search(query: $q, type: REPOSITORY, first: 1) { repositoryCount } }`
+
+// sweepQuery reads only what's needed to tell whether a repo ships a Linux file.
+const sweepQuery = `query($q: String!, $after: String, $first: Int!) {
   search(query: $q, type: REPOSITORY, first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
-    nodes { ... on Repository {
-      id nameWithOwner name description homepageUrl url stargazerCount createdAt isArchived isFork
+    nodes { ... on Repository { id nameWithOwner
+      latestRelease { isPrerelease isDraft releaseAssets(first: 40) { nodes { name downloadUrl } } } } }
+  }
+}`
+
+// repoFields is everything toListing reads about a repo.
+const repoFields = `id nameWithOwner name description homepageUrl url stargazerCount createdAt isArchived isFork
       licenseInfo { spdxId }
       owner { login }
       latestRelease { tagName publishedAt isPrerelease isDraft
         releaseAssets(first: 40) { nodes { name downloadUrl size digest downloadCount } } }
       releases(first: 8, orderBy: {field: CREATED_AT, direction: DESC}) {
         nodes { publishedAt isPrerelease isDraft }
-      }
-    } }
+      }`
+
+const nodesQuery = `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Repository { ` + repoFields + ` } } }`
+
+// searchQuery reads, for each repo, its latest release with files plus the dates of recent releases (for
+// release cadence). Asking for files of several releases per repo exceeds GitHub's per-query limits.
+const searchQuery = `query($q: String!, $after: String, $first: Int!) {
+  search(query: $q, type: REPOSITORY, first: $first, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on Repository { ` + repoFields + ` } }
   }
 }`
 
@@ -312,7 +577,7 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 		Source:    catalog.SourceGitHub,
 		Ref:       r.NameWithOwner,
 		Kind:      kind,
-		Name:      r.Name,
+		Name:      displayName(r.Name, assets),
 		Summary:   strings.TrimSpace(r.Description),
 		Developer: r.Owner.Login,
 		License:   license,
@@ -334,6 +599,39 @@ var (
 )
 
 // kindOf classifies a release file by name.
+// displayName is the app's name as its release files spell it, when they spell the repo name: a repo
+// "t3code" whose AppImage is "T3-Code-0.1.7-x86_64.AppImage" is "T3 Code". Otherwise it is the repo name.
+func displayName(repoName string, assets []catalog.Asset) string {
+	for _, a := range assets {
+		base := a.Name[:len(a.Name)-len(filepath.Ext(a.Name))]
+		var words []string
+		for _, w := range strings.FieldsFunc(base, func(r rune) bool { return r == '-' || r == '_' || r == ' ' || r == '.' }) {
+			if versionOrArch.MatchString(w) {
+				break
+			}
+			words = append(words, w)
+		}
+		if len(words) > 0 && squash(strings.Join(words, "")) == squash(repoName) {
+			return strings.Join(words, " ")
+		}
+	}
+	return repoName
+}
+
+// versionOrArch matches the words in a file name that come after the app's name.
+var versionOrArch = regexp.MustCompile(`(?i)^(v?\d.*|x86|x64|amd64|arm64|aarch64|i[36]86|linux|setup|portable|appimage)$`)
+
+// squash lowercases s and drops everything but letters and digits.
+func squash(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func kindOf(name string) string {
 	n := strings.ToLower(name)
 	switch {

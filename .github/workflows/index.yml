@@ -16,7 +16,7 @@ concurrency:
 jobs:
   index:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45 # a GitHub sweep without a cached result takes about 20 minutes
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

@@ -103,10 +103,11 @@ func main() {
 			Key: fmt.Sprintf("schema=%d arch=%s releases=%s", catalog.SchemaVersion, *arch, *fedoraReleases),
 		},
 		"github": &fetch.Cached{
-			Fetcher: &github.Fetcher{Client: client, Token: os.Getenv("GITHUB_TOKEN"), Arch: *arch, Log: log},
-			Dir:     filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
-			Key: fmt.Sprintf("schema=%d arch=%s queries=%s", catalog.SchemaVersion, *arch,
-				strings.Join(github.DefaultQueries, "|")),
+			Fetcher: &github.Fetcher{Client: client, Token: os.Getenv("GITHUB_TOKEN"), Arch: *arch, Log: log,
+				SweepMinStars: github.DefaultSweepMinStars, SweepCache: filepath.Join(*cache, "github", "sweep.json")},
+			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
+			Key: fmt.Sprintf("schema=%d arch=%s queries=%s sweep=%d", catalog.SchemaVersion, *arch,
+				strings.Join(github.DefaultQueries, "|"), github.DefaultSweepMinStars),
 		},
 	}
 	var fetchers []fetch.Fetcher

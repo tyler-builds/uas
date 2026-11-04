@@ -80,6 +80,16 @@ All endpoints below need confirming during the first spike.
   (about 30 GraphQL points per pass). Pages that GitHub refuses as too costly are retried at half size;
   timeouts and secondary rate limits are retried with backoff.
 
+  Those searches miss apps that never call themselves an AppImage or Linux app (T3 Code ships an x86_64
+  AppImage, but its repo has no description, no topics and no mention in its README). So a **sweep** also
+  checks every repo with at least 2,000 stars pushed in the past year (about 21,000 repos). It splits star
+  ranges until each search fits under the 1,000-result cap, reads only the latest release's file names
+  (four searches at a time), and then reads the full details, by node ID, of the repos that have a Linux
+  file. Discovery takes about 25 minutes, so its finds are kept for a week (`github/sweep.json` in the
+  indexer cache); the found repos are re-read in full on every pass, which takes under a minute, so versions
+  stay current and new apps appear within a week. A GitHub app's name comes from its release file when that spells the repo name
+  (`T3-Code-0.1.7-x86_64.AppImage` makes `t3code` "T3 Code"), so searching for "t3 code" finds it.
+
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
 Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
