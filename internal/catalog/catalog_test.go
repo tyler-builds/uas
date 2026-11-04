@@ -278,3 +278,27 @@ func TestSourceFiltersAndCounts(t *testing.T) {
 		t.Errorf("counts = %v, %v", counts, err)
 	}
 }
+
+// TestSearchWholeWordPrefix ranks a name that starts with the query as a word above a name the stemmer
+// matches, even a shorter one.
+func TestSearchWholeWordPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	apps := []App{
+		{ID: "io.example.Godots", Kind: KindDesktopApp, Name: "Godots", Summary: "Godot version manager",
+			Listings: []Listing{{Source: SourceFlathub, Ref: "app/io.example.Godots/x86_64/stable", Name: "Godots"}}},
+		{ID: "org.godotengine.Godot", Kind: KindDesktopApp, Name: "Godot Engine", Summary: "Make games",
+			Listings: []Listing{{Source: SourceFlathub, Ref: "app/org.godotengine.Godot/x86_64/stable", Name: "Godot Engine"}}},
+	}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	res, err := db.Search(context.Background(), "godot", SearchOptions{})
+	if err != nil || len(res) != 2 || res[0].ID != "org.godotengine.Godot" {
+		t.Fatalf("results = %+v, %v; want Godot Engine first", res, err)
+	}
+}

@@ -130,10 +130,12 @@ func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]Sea
 
 func (d *DB) search(ctx context.Context, match, exactName string, opt SearchOptions) ([]SearchResult, error) {
 	// bm25 weights, one per FTS column: app_id, name, keywords, summary, developer, description.
-	// By relevance, an exact name match always comes first.
+	// By relevance, an exact name match comes first, then names that start with the query as whole words
+	// ("Godot Engine" for "godot", before "Godots", which the stemmer also matches).
 	sort := orderBy(opt.Order)
 	if sort == "" {
-		sort = "lower(a.name) = ?2 DESC, bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
+		sort = "lower(a.name) = ?2 DESC, lower(a.name) LIKE ?2 || ' %' DESC, " + // query words are letters and digits only
+			"bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
 	}
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT `+resultColumns+`
