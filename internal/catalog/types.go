@@ -86,6 +86,8 @@ type Listing struct {
 	Package string `json:"package,omitempty"`
 	// Distro limits the listing to one distribution release, such as "fedora-45". Empty means any.
 	Distro string `json:"distro,omitempty"`
+	// Project is the COPR project ("owner/project") a COPR listing comes from.
+	Project string `json:"project,omitempty"`
 
 	// Assets are downloadable files, for sources that ship release files (GitHub), best first.
 	Assets []Asset `json:"assets,omitempty"`

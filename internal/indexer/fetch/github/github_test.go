@@ -41,8 +41,7 @@ func TestFetch(t *testing.T) {
 	defer srv.Close()
 
 	f := &Fetcher{Client: srv.Client(), Token: "test-token", Arch: "x86_64", Endpoint: srv.URL,
-		Queries: []string{"q1", "q2"}, Now: func() time.Time { return time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC) },
-		CacheDir: t.TempDir(), CacheFor: time.Hour}
+		Queries: []string{"q1", "q2"}, Now: func() time.Time { return time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC) }}
 	ls, err := f.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -67,12 +66,6 @@ func TestFetch(t *testing.T) {
 	}
 	if l.Trust == nil || l.Trust.Score < 70 || len(l.Trust.Flags) != 0 {
 		t.Errorf("trust = %+v", l.Trust)
-	}
-
-	// A second fetch within CacheFor makes no requests.
-	again, err := f.Fetch(context.Background())
-	if err != nil || len(again) != 1 || len(queries) != 2 {
-		t.Errorf("cached fetch = %d listings, %v, %d queries", len(again), err, len(queries))
 	}
 }
 

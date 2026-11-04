@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -19,21 +20,39 @@ import (
 // others. Build fails only if no source returned anything.
 func Build(ctx context.Context, fetchers []fetch.Fetcher, out string, log *slog.Logger) (catalog.BuildInfo, error) {
 	info := catalog.BuildInfo{BuiltAt: time.Now().UTC()}
-	var all []catalog.Listing
-	for _, f := range fetchers {
-		start := time.Now()
-		ls, err := f.Fetch(ctx)
-		st := catalog.SourceStatus{Source: f.Source(), Listings: len(ls), FetchedAt: time.Now().UTC()}
-		if err != nil {
-			if ctx.Err() != nil {
-				return info, ctx.Err()
+	// Sources are independent, so they are fetched at the same time; the slow ones (GitHub, COPR) then
+	// overlap instead of adding up.
+	type result struct {
+		listings []catalog.Listing
+		status   catalog.SourceStatus
+		err      error
+	}
+	results := make([]result, len(fetchers))
+	var wg sync.WaitGroup
+	for i, f := range fetchers {
+		wg.Go(func() {
+			start := time.Now()
+			ls, err := f.Fetch(ctx)
+			results[i] = result{listings: ls, err: err,
+				status: catalog.SourceStatus{Source: f.Source(), Listings: len(ls), FetchedAt: time.Now().UTC()}}
+			if err == nil {
+				log.Info("fetched", "source", f.Source(), "listings", len(ls),
+					"took", time.Since(start).Round(time.Millisecond))
 			}
-			st.Error, st.Listings = err.Error(), 0
-			log.Error("fetch failed", "source", f.Source(), "err", err)
+		})
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return info, ctx.Err()
+	}
+	var all []catalog.Listing
+	for _, r := range results {
+		st := r.status
+		if r.err != nil {
+			st.Error, st.Listings = r.err.Error(), 0
+			log.Error("fetch failed", "source", st.Source, "err", r.err)
 		} else {
-			log.Info("fetched", "source", f.Source(), "listings", len(ls),
-				"took", time.Since(start).Round(time.Millisecond))
-			all = append(all, ls...)
+			all = append(all, r.listings...)
 		}
 		info.Sources = append(info.Sources, st)
 	}

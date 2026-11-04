@@ -8,7 +8,6 @@ package fedora
 import (
 	"compress/gzip"
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -19,11 +18,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer/appstream"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/rpmrepo"
 )
 
 // DefaultMirror is Fedora's primary download server.
@@ -135,28 +134,23 @@ func (f *Fetcher) exists(ctx context.Context, url string) (bool, error) {
 	return false, fmt.Errorf("HEAD %s: %s", url, resp.Status)
 }
 
-// pkg is one binary package from a repo's primary.xml.
-type pkg struct {
-	Name     string
-	Version  string
-	Built    time.Time
-	Location string // URL of the .rpm
-}
-
 func (f *Fetcher) fetchRelease(ctx context.Context, n int) ([]catalog.Listing, error) {
 	cache := filepath.Join(f.CacheDir, strconv.Itoa(n))
-	pkgs := map[string]pkg{}
+	pkgs := map[string]rpmrepo.Package{}
 	// Updates come second, so a package's newest version wins.
 	for _, repo := range []string{f.releaseRepo(n), f.updatesRepo(n)} {
-		primary, err := f.primaryURL(ctx, repo, cache)
+		files, err := rpmrepo.Repomd(ctx, f.Client, repo, cache)
 		if err != nil {
 			return nil, err
 		}
-		path, err := fetch.Get(ctx, f.Client, primary, cache)
+		if files["primary"] == "" {
+			return nil, fmt.Errorf("repomd for %s has no primary data", repo)
+		}
+		path, err := fetch.Get(ctx, f.Client, files["primary"], cache)
 		if err != nil {
 			return nil, err
 		}
-		if err := readPrimary(path, f.Arch, repo, func(p pkg) { pkgs[p.Name] = p }); err != nil {
+		if err := rpmrepo.ReadPrimary(path, f.Arch, repo, func(p rpmrepo.Package) { pkgs[p.Name] = p }); err != nil {
 			return nil, err
 		}
 	}
@@ -172,114 +166,13 @@ func (f *Fetcher) fetchRelease(ctx context.Context, n int) ([]catalog.Listing, e
 	return listingsFromAppStreamRPM(rpmPath, n, pkgs)
 }
 
-// primaryURL reads a repo's repomd.xml and returns the URL of its primary package list.
-func (f *Fetcher) primaryURL(ctx context.Context, repo, cache string) (string, error) {
-	path, err := fetch.Get(ctx, f.Client, repo+"/repodata/repomd.xml", cache)
-	if err != nil {
-		return "", err
-	}
-	r, err := fetch.OpenDecompressed(path)
-	if err != nil {
-		return "", err
-	}
-	defer r.Close()
-	var md struct {
-		Data []struct {
-			Type     string `xml:"type,attr"`
-			Location struct {
-				Href string `xml:"href,attr"`
-			} `xml:"location"`
-		} `xml:"data"`
-	}
-	if err := xml.NewDecoder(r).Decode(&md); err != nil {
-		return "", fmt.Errorf("repomd: %w", err)
-	}
-	for _, d := range md.Data {
-		if d.Type == "primary" {
-			href, err := repoRelative(d.Location.Href)
-			if err != nil {
-				return "", err
-			}
-			return repo + "/" + href, nil
-		}
-	}
-	return "", fmt.Errorf("repomd for %s has no primary data", repo)
-}
-
-var safeHref = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~^/-]*$`)
-
-// repoRelative checks that a path from repo metadata stays inside the repo.
-func repoRelative(href string) (string, error) {
-	if !safeHref.MatchString(href) || strings.Contains(href, "..") {
-		return "", fmt.Errorf("unexpected path in repo metadata: %q", href)
-	}
-	return href, nil
-}
-
-// readPrimary streams a primary.xml file and calls fn for each package built for arch or noarch.
-func readPrimary(path, arch, repo string, fn func(pkg)) error {
-	r, err := fetch.OpenDecompressed(path)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	dec := xml.NewDecoder(r)
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("primary: %w", err)
-		}
-		se, ok := tok.(xml.StartElement)
-		if !ok || se.Name.Local != "package" {
-			continue
-		}
-		var x struct {
-			Name    string `xml:"name"`
-			Arch    string `xml:"arch"`
-			Version struct {
-				Epoch string `xml:"epoch,attr"`
-				Ver   string `xml:"ver,attr"`
-				Rel   string `xml:"rel,attr"`
-			} `xml:"version"`
-			Time struct {
-				Build int64 `xml:"build,attr"`
-			} `xml:"time"`
-			Location struct {
-				Href string `xml:"href,attr"`
-			} `xml:"location"`
-		}
-		if err := dec.DecodeElement(&x, &se); err != nil {
-			return fmt.Errorf("primary: %w", err)
-		}
-		if x.Arch != arch && x.Arch != "noarch" {
-			continue
-		}
-		href, err := repoRelative(x.Location.Href)
-		if err != nil {
-			return err
-		}
-		version := x.Version.Ver + "-" + x.Version.Rel
-		if x.Version.Epoch != "" && x.Version.Epoch != "0" {
-			version = x.Version.Epoch + ":" + version
-		}
-		p := pkg{Name: x.Name, Version: version, Location: repo + "/" + href}
-		if x.Time.Build > 0 {
-			p.Built = time.Unix(x.Time.Build, 0).UTC()
-		}
-		fn(p)
-	}
-}
-
 // isCatalogXML matches the AppStream catalog files inside appstream-data.
 func isCatalogXML(name string) bool {
 	return (strings.Contains(name, "/swcatalog/xml/") || strings.Contains(name, "/app-info/xmls/")) &&
 		(strings.HasSuffix(name, ".xml") || strings.HasSuffix(name, ".xml.gz"))
 }
 
-func listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]pkg) ([]catalog.Listing, error) {
+func listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]rpmrepo.Package) ([]catalog.Listing, error) {
 	f, err := os.Open(rpmPath)
 	if err != nil {
 		return nil, err
@@ -317,7 +210,7 @@ func listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]pkg) 
 
 var packageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 
-func toListing(c *appstream.Component, release int, pkgs map[string]pkg) (catalog.Listing, bool) {
+func toListing(c *appstream.Component, release int, pkgs map[string]rpmrepo.Package) (catalog.Listing, bool) {
 	var kind catalog.Kind
 	switch c.Type {
 	case "desktop-application", "desktop":

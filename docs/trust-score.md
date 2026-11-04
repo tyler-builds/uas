@@ -1,9 +1,10 @@
 # Trust score
 
-GitHub releases are not reviewed by any distribution, so uas scores each GitHub listing from public signals
-and shows the breakdown next to the install button, not only the number. Code: `internal/indexer/trust`.
+GitHub releases and COPR projects are not reviewed by any distribution, so uas scores each listing from
+public signals and shows the breakdown next to the install button, not only the number. Code:
+`internal/indexer/trust`.
 
-## Signals (0 to 100)
+## GitHub signals (0 to 100)
 
 | Signal | Max | Points |
 | --- | --- | --- |
@@ -15,7 +16,25 @@ and shows the breakdown next to the install button, not only the number. Code: `
 | License | 10 | any recognized SPDX license 10 |
 | Checksum | 10 | the AppImage has a SHA-256 published by GitHub 10 |
 
-## Warnings
+## COPR signals (0 to 100)
+
+COPR builds and signs every package, but nobody reviews what goes in, so the COPR score is about upkeep. It
+uses the project's last 30 builds.
+
+| Signal | Max | Points |
+| --- | --- | --- |
+| Latest successful build | 25 | within 3 months 25, 6 months 18, a year 10, older 0 |
+| Build health | 20 | share of finished builds that succeeded: 90%+ 20, 75%+ 14, 50%+ 8 |
+| Activity | 15 | builds in the past year: 10+ 15, 4+ 10, 1+ 5 |
+| Maintainers | 15 | group project or 2+ people submitting builds 15, one person 5 |
+| Project details | 10 | homepage or contact listed |
+| Description | 10 | at least a sentence |
+| Signing | 5 | always: COPR signs with the project's key |
+
+COPR listings below 30 are left out. COPR warnings: "No successful build in the past year", "Most recent
+builds failed".
+
+## GitHub warnings
 
 Shown whatever the score:
 

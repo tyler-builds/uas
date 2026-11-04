@@ -60,7 +60,13 @@ All endpoints below need confirming during the first spike.
   because Bazzite can have the next release staged before it boots it. Each listing carries a `distro`
   (such as `fedora-45`) and a `package` name. Only components whose package is in the repos are kept. Icons
   are only in AppStream's icon tarballs, so Fedora-only apps have no icon until icons are mirrored to R2.
-- **COPR:** COPR API v3. Only projects with successful builds for `fedora-<N>-x86_64`.
+- **COPR:** COPR API v3 lists all ~43,000 projects (43 pages, about 4 minutes). Kept: projects listed on
+  COPR's front page, with AppStream metadata turned on, building for one of the two newest Fedora releases
+  (~430). Each one's chroot repo is read for AppStream data and package versions, eight projects at a time,
+  and the project's last 30 builds give its trust score (see `docs/trust-score.md`). Most COPR repos carry no
+  AppStream data even with the option on (108 of 777 repos in November 2026), so COPR adds only about 25 apps,
+  among them Bazaar, Joplin, RStudio and gedit. Listings carry the project (`owner/project`). Results are
+  cached for 20 hours like GitHub's.
 - **Homebrew:** `formulae.brew.sh` JSON API plus install-on-request analytics. Keeps core formulae with a
   Linux bottle and at least 1,000 installs-on-request a year (about 2,500), which drops most libraries;
   keg-only, deprecated and disabled formulae are skipped. The install count is stored on the listing for
@@ -75,6 +81,10 @@ All endpoints below need confirming during the first spike.
   timeouts and secondary rate limits are retried with backoff.
 
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
+
+Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
+`fetch.Cached`, which reuses their last result for 20 hours (`-slow-cache-for`), so only one of the four daily
+runs pays for them. Fedora and COPR share `fetch/rpmrepo` for repo metadata.
 
 ### Merge (deduplication)
 
@@ -184,9 +194,13 @@ type Backend interface {
   listings for it. It refuses packages already in the image (`rpm -q`), lists layered packages with a
   "takes effect after restart" flag, and `update` explains that layered packages update with the system.
   Bazzite's polkit rules let `wheel` users layer without a password.
-- **copr:** Writes the `.repo` file to a temp file, shows the user what will be added, then runs
-  `pkexec install -m 0644 <tmp> /etc/yum.repos.d/...`, then hands off to rpmostree. A custom polkit policy isn't
-  possible here because `/usr` is read-only, so the prompt uses pkexec's generic wording.
+- **copr:** If the project's repo isn't enabled, writes the same `.repo` file `dnf copr enable` would (same
+  name, `gpgcheck=1` with the project's key) to a temp file and copies it into `/etc/yum.repos.d` with
+  `pkexec install`, then layers the package through the rpmostree backend. A custom polkit policy isn't
+  possible because `/usr` is read-only, so the password prompt uses pkexec's generic wording. Installs are
+  recorded in the state file; removing the last package uas installed from a project also removes the repo
+  file, but only if uas created it. Packages layered from COPR are listed under COPR, not Fedora. Not tested
+  live yet: enabling a repo needs a password.
 
 ### UI (Jamb)
 
@@ -277,7 +291,7 @@ uas/
    AppStream IDs and refs, and lists the choices when a name is ambiguous.
 6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking. Done. Follow-ups: installing
    `.flatpak` bundles and `.rpm` files from releases.
-7. **COPR:** fetcher, trust scoring, pkexec repo enabling.
+7. **COPR:** fetcher, trust scoring, pkexec repo enabling. Done (live install untested; see above).
 8. **Jamb UI** on top of the finished core. Can start in parallel after milestone 2.
 
 ## Decisions

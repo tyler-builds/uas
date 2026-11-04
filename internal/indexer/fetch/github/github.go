@@ -14,10 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,57 +51,6 @@ type Fetcher struct {
 	Endpoint string
 	Log      *slog.Logger
 	Now      func() time.Time
-	// CacheDir, if set, keeps the last results; a fresh enough copy (see CacheFor) is reused instead of
-	// searching again. A full search takes several minutes and GitHub data changes slowly.
-	CacheDir string
-	CacheFor time.Duration
-}
-
-type cached struct {
-	Arch     string            `json:"arch"`
-	Queries  []string          `json:"queries"`
-	Saved    time.Time         `json:"saved"`
-	Listings []catalog.Listing `json:"listings"`
-}
-
-func (f *Fetcher) cachePath() string { return filepath.Join(f.CacheDir, "github-listings.json") }
-
-// fromCache returns cached listings if they are fresh and were made with the same settings.
-func (f *Fetcher) fromCache(queries []string, now time.Time) ([]catalog.Listing, bool) {
-	if f.CacheDir == "" || f.CacheFor <= 0 {
-		return nil, false
-	}
-	b, err := os.ReadFile(f.cachePath())
-	if err != nil {
-		return nil, false
-	}
-	var c cached
-	if json.Unmarshal(b, &c) != nil || c.Arch != f.Arch || !slices.Equal(c.Queries, queries) ||
-		now.Sub(c.Saved) > f.CacheFor {
-		return nil, false
-	}
-	if f.Log != nil {
-		f.Log.Info("github results reused from cache", "saved", c.Saved, "listings", len(c.Listings))
-	}
-	return c.Listings, true
-}
-
-func (f *Fetcher) saveCache(queries []string, now time.Time, listings []catalog.Listing) error {
-	if f.CacheDir == "" {
-		return nil
-	}
-	b, err := json.Marshal(cached{Arch: f.Arch, Queries: queries, Saved: now, Listings: listings})
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(f.CacheDir, 0o755); err != nil {
-		return err
-	}
-	tmp := f.cachePath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, f.cachePath())
 }
 
 // Source implements fetch.Fetcher.
@@ -127,9 +73,6 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	}
 	if f.Now != nil {
 		now = f.Now()
-	}
-	if ls, ok := f.fromCache(queries, now); ok {
-		return ls, nil
 	}
 
 	seen := map[string]bool{}
@@ -176,9 +119,6 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 		f.Log.Info("github repos checked", "repos", checked, "kept", len(listings), "below_min_score", skipped)
 	}
 	sort.Slice(listings, func(i, j int) bool { return listings[i].Ref < listings[j].Ref })
-	if err := f.saveCache(queries, now, listings); err != nil && f.Log != nil {
-		f.Log.Warn("saving github results failed", "err", err)
-	}
 	return listings, nil
 }
 

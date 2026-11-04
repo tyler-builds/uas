@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/backend/copr"
 	"github.com/tyler-builds/uas/internal/client/backend/flatpak"
 	"github.com/tyler-builds/uas/internal/client/backend/github"
 	"github.com/tyler-builds/uas/internal/client/backend/homebrew"
@@ -77,8 +79,18 @@ func loadEnv(ctx context.Context, scope, catalogPath string) (*env, error) {
 	}
 	// Layering needs an image-based system. Package-based Fedora (dnf) is outside the Bazzite slice.
 	if e.platform.Atomic && e.platform.RPMOSTree != "" && e.platform.FedoraRelease() > 0 {
-		e.backends[catalog.SourceFedora] = rpmostree.New(ctx, run.Exec{}, e.platform.RPMOSTree, "rpm",
-			e.platform.FedoraRelease())
+		ostree := rpmostree.New(ctx, run.Exec{}, e.platform.RPMOSTree, "rpm", e.platform.FedoraRelease())
+		e.backends[catalog.SourceFedora] = ostree
+		statePath, err := state.DefaultPath()
+		if err == nil && e.platform.Pkexec != "" {
+			store := state.Store{Path: statePath}
+			e.backends[catalog.SourceCOPR] = &copr.Backend{Ostree: ostree, Runner: run.Exec{},
+				Pkexec: e.platform.Pkexec, RepoDir: "/etc/yum.repos.d", State: store}
+			// Packages layered from COPR show up under COPR, not Fedora.
+			if st, err := store.Load(); err == nil && len(st.COPR) > 0 {
+				ostree.Exclude = func(pkg string) bool { _, ok := st.FindCOPR(pkg); return ok }
+			}
+		}
 	}
 	return e, nil
 }
@@ -184,7 +196,16 @@ func runInstall(ctx context.Context, args []string) error {
 	if l.Source == catalog.SourceHomebrew {
 		fmt.Println("Installs with Homebrew for your user account. No restart needed.")
 	}
-	if l.Source == catalog.SourceFedora {
+	if l.Source == catalog.SourceCOPR {
+		fmt.Printf("From the COPR project %s, built by its owner and not reviewed by Fedora.\n", l.Project)
+		fmt.Printf("Trust score %d/100:\n", l.Trust.Score)
+		printTrust(os.Stdout, l)
+		name, _ := copr.RepoFileName(l.Project)
+		if _, err := os.Stat(filepath.Join("/etc/yum.repos.d", name)); err != nil {
+			fmt.Println("Enabling the project's repo needs your password.")
+		}
+	}
+	if l.Source == catalog.SourceFedora || l.Source == catalog.SourceCOPR {
 		fmt.Println("Adds the package to your system image (layering). It takes effect after a restart.")
 		fmt.Println("Layered packages can hold up system updates if they conflict with a new image.")
 	}

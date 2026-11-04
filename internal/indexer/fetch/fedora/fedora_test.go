@@ -15,6 +15,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/rpmrepo"
 )
 
 // cpioEntry writes one newc entry.
@@ -196,6 +197,7 @@ func TestFetch(t *testing.T) {
 }
 
 func TestRepoRelative(t *testing.T) {
+	repoRelative := rpmrepo.Relative
 	for _, ok := range []string{"Packages/d/DNS-Compliance-Testing-0^20230708git4aea40b-10.fc44.x86_64.rpm",
 		"repodata/abc-primary.xml.zst"} {
 		if _, err := repoRelative(ok); err != nil {

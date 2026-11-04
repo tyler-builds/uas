@@ -24,9 +24,52 @@ type GitHubInstall struct {
 	InstalledAt time.Time `json:"installed_at"`
 }
 
+// COPRInstall is one package layered from a COPR project.
+type COPRInstall struct {
+	Project  string `json:"project"` // "owner/project"
+	Package  string `json:"package"`
+	RepoFile string `json:"repo_file"`
+	// AddedRepo is true when uas created RepoFile, so removing the last package may remove the repo too.
+	AddedRepo   bool      `json:"added_repo"`
+	InstalledAt time.Time `json:"installed_at"`
+}
+
 // State is everything recorded.
 type State struct {
 	GitHub []GitHubInstall `json:"github"`
+	COPR   []COPRInstall   `json:"copr,omitempty"`
+}
+
+// FindCOPR returns the COPR install of pkg.
+func (s *State) FindCOPR(pkg string) (COPRInstall, bool) {
+	for _, c := range s.COPR {
+		if c.Package == pkg {
+			return c, true
+		}
+	}
+	return COPRInstall{}, false
+}
+
+// PutCOPR adds or replaces the COPR install of c.Package.
+func (s *State) PutCOPR(c COPRInstall) {
+	for i := range s.COPR {
+		if s.COPR[i].Package == c.Package {
+			s.COPR[i] = c
+			return
+		}
+	}
+	s.COPR = append(s.COPR, c)
+}
+
+// DeleteCOPR removes the COPR install of pkg.
+func (s *State) DeleteCOPR(pkg string) {
+	out := s.COPR[:0]
+	for _, c := range s.COPR {
+		if c.Package != pkg {
+			out = append(out, c)
+		}
+	}
+	s.COPR = out
 }
 
 // Find returns the install of repo.

@@ -36,6 +36,8 @@ type Backend struct {
 	RPM    string // the rpm binary, used to check what the running image contains
 	// Release is the Fedora release new layers are built against.
 	Release int
+	// Exclude, if set, hides layered packages that another backend (COPR) accounts for.
+	Exclude func(pkg string) bool
 }
 
 // New creates a backend and works out which Fedora release new layers will target. fallbackRelease (the
@@ -81,6 +83,9 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 	}
 	var apps []backend.InstalledApp
 	for _, p := range newest.RequestedPackages {
+		if b.Exclude != nil && b.Exclude(p) {
+			continue
+		}
 		apps = append(apps, backend.InstalledApp{
 			Source: catalog.SourceFedora, Ref: p, AppID: p, Name: p, Package: p, Scope: "system",
 			Origin: "layered", Pending: !slices.Contains(booted.RequestedPackages, p),
@@ -104,13 +109,31 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		return fmt.Errorf("rpm-ostree: %s is for %s, but new packages go onto Fedora %d", l.Package, l.Distro,
 			b.Release)
 	}
-	// rpm -q succeeds only if the running image has the package.
-	if _, err := b.Runner.Run(ctx, b.RPM, []string{"-q", "--quiet", l.Package}, nil); err == nil {
-		return fmt.Errorf("%s: %w", l.Package, ErrInImage)
+	return b.Layer(ctx, l.Package, progress)
+}
+
+// Layer adds a package to the system image, unless the running image already has it.
+func (b *Backend) Layer(ctx context.Context, pkg string, progress func(backend.Progress)) error {
+	if !packageName.MatchString(pkg) {
+		return fmt.Errorf("rpm-ostree: refusing malformed package name %q", pkg)
 	}
-	report(progress, "Adding "+l.Package+" to the system image")
-	_, err := b.Runner.Run(ctx, b.Path, []string{"install", "--idempotent", l.Package},
+	// rpm -q succeeds only if the running image has the package.
+	if _, err := b.Runner.Run(ctx, b.RPM, []string{"-q", "--quiet", pkg}, nil); err == nil {
+		return fmt.Errorf("%s: %w", pkg, ErrInImage)
+	}
+	report(progress, "Adding "+pkg+" to the system image")
+	_, err := b.Runner.Run(ctx, b.Path, []string{"install", "--idempotent", pkg},
 		func(line string) { report(progress, line) })
+	return err
+}
+
+// Unlayer removes a layered package.
+func (b *Backend) Unlayer(ctx context.Context, pkg string, progress func(backend.Progress)) error {
+	if !packageName.MatchString(pkg) {
+		return fmt.Errorf("rpm-ostree: refusing malformed package name %q", pkg)
+	}
+	report(progress, "Removing "+pkg+" from the system image")
+	_, err := b.Runner.Run(ctx, b.Path, []string{"uninstall", pkg}, func(line string) { report(progress, line) })
 	return err
 }
 
@@ -124,12 +147,10 @@ func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress f
 	if a.Source != catalog.SourceFedora {
 		return backend.ErrWrongSource
 	}
-	if a.Origin != "layered" || !packageName.MatchString(a.Package) {
+	if a.Origin != "layered" {
 		return fmt.Errorf("rpm-ostree: %s was installed from a local file; remove it with rpm-ostree uninstall", a.Ref)
 	}
-	report(progress, "Removing "+a.Package+" from the system image")
-	_, err := b.Runner.Run(ctx, b.Path, []string{"uninstall", a.Package}, func(line string) { report(progress, line) })
-	return err
+	return b.Unlayer(ctx, a.Package, progress)
 }
 
 type status struct {

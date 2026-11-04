@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/backend/copr"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/settings"
@@ -75,6 +76,9 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 		case nil:
 		case *rpmostree.Backend:
 			state = fmt.Sprintf("ready (layering onto Fedora %d)", b.Release)
+		case *copr.Backend:
+			state = fmt.Sprintf("ready (layering onto Fedora %d; enabling a repo asks for your password)",
+				b.Ostree.Release)
 		default:
 			state = "ready"
 		}
