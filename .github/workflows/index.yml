@@ -1,0 +1,36 @@
+name: Index
+
+# Builds the catalog from every source, signs it and publishes it to the catalog Worker.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: index
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Source downloads, kept between runs so unchanged sources answer 304 Not Modified.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/uas-indexer
+          key: indexer-${{ github.run_id }}
+          restore-keys: indexer-
+      - name: Build and publish
+        run: go run ./cmd/uas-indexer -out "$RUNNER_TEMP/catalog.db" -publish "$CATALOG_URL"
+        env:
+          CATALOG_URL: https://uas-catalog.tylerccarr.workers.dev
+          UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
+          UAS_UPLOAD_TOKEN: ${{ secrets.UAS_UPLOAD_TOKEN }}

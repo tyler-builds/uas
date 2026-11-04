@@ -23,7 +23,7 @@ works.
 ## System overview
 
 ```
-            GitHub Actions (cron, every 6h)                  Cloudflare R2 (custom domain, CDN)
+            GitHub Actions (cron, every 6h)                  Cloudflare Worker + R2
  ┌───────────────────────────────────────────────┐        ┌──────────────────────────────┐
  │ uas-indexer                                   │        │ manifest.json + .sig         │
  │  fetch: flathub fedora copr homebrew github   │ ─────► │ catalog-<hash>.db.zst        │
@@ -42,8 +42,10 @@ works.
  └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-No server code runs in v1. The indexer runs in CI, R2 serves static files, and every install happens on the
-client as the user, with polkit prompts only where the system tools already require them.
+The only server code is a small Worker (`deploy/cloudflare`) in front of R2. It serves the published files and
+accepts uploads from the indexer with a bearer token, so CI needs no R2 API keys. The indexer runs in CI, and
+every install happens on the client as the user, with polkit prompts only where the system tools already
+require them.
 
 ## Server side: the indexer
 
@@ -95,15 +97,25 @@ no published checksum, owner changed recently.
 
 1. Build `catalog.db` (SQLite with FTS5 search), compress with zstd.
 2. Write `manifest.json`: schema version, catalog hash and size, build time, per-source fetch status.
-3. Sign the manifest with an ed25519 key held as a CI secret. The client ships the public key, so a compromised
-   bucket cannot serve a fake catalog.
-4. Upload to R2. Keep the last few catalogs so clients mid-download don't break.
+3. Sign the manifest with an ed25519 key held as a CI secret. The published file is an envelope: the manifest
+   as an opaque payload plus a signature over it. The client ships the public key, so a compromised Worker,
+   bucket or upload token cannot serve a fake catalog.
+4. Upload the catalog (named `catalog-<sha256>.db.zst`, immutable), then the manifest. Keep the last three
+   catalogs so clients mid-download don't break.
+
+The client refuses a manifest older than its local one, so an old signed manifest cannot be replayed to roll
+the catalog back. It checks the compressed file's size and hash before decompressing it.
+
+Keys: the private signing key and the upload token live in the repo's Actions secrets (`UAS_SIGNING_KEY`,
+`UAS_UPLOAD_TOKEN`), with a backup in `~/.config/uas-indexer/` on the maintainer's machine. To rotate the
+signing key, add the new public key to `internal/client/refresh/keys.go`, ship a release, then switch the
+secret.
 
 Icons are mirrored to R2. Screenshots link to their original URLs.
 
-**Free-tier fit:** R2's free tier (10 GB, no egress fees) holds this easily. Expected catalog size is about
-5 to 10 MB compressed. Serve from a custom domain so Cloudflare's CDN caches it; the `r2.dev` URL is rate
-limited and only for development. A Worker is not needed in v1. The repo is private, so Actions minutes count against the free plan's monthly allowance (2,000 minutes on
+**Free-tier fit:** R2's free tier (10 GB, no egress fees) holds this easily: the Flathub-only catalog is
+5.4 MB compressed (27 MB uncompressed). The Worker's free tier allows 100,000 requests a day, and each client
+refresh is one request when nothing changed, two when it did. A custom domain can come later for edge caching. The repo is private, so Actions minutes count against the free plan's monthly allowance (2,000 minutes on
 GitHub Free; confirm for your plan). A 6-hour schedule is about 120 runs a month, so each run must stay under
 about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 12 hours if needed.
 
@@ -189,6 +201,7 @@ uas/
 │   └── uas-indexer/         # crawler, run in CI
 ├── internal/
 │   ├── catalog/             # shared types, SQLite schema, FTS queries (rebuilt each run, no migrations)
+│   ├── manifest/            # signed manifest envelope (shared by indexer and client)
 │   ├── indexer/
 │   │   ├── appstream/       # AppStream XML parser (Flathub, Fedora)
 │   │   ├── fetch/           # Fetcher interface, HTTP cache with ETags
@@ -203,7 +216,7 @@ uas/
 │   ├── client/
 │   │   ├── paths/
 │   │   ├── platform/
-│   │   ├── sync/
+│   │   ├── refresh/         # download, verify and install the catalog
 │   │   ├── state/
 │   │   ├── recommend/
 │   │   ├── run/             # runs flatpak, brew, rpm-ostree, pkexec
@@ -221,7 +234,7 @@ uas/
 │       ├── pages/           # home, search, app, installed, updates, settings
 │       └── components/      # trust panel, source picker, job progress
 ├── overrides/               # manual merge and trust overrides (YAML)
-├── deploy/cloudflare/       # R2 setup notes
+├── deploy/cloudflare/       # catalog Worker (serves R2, accepts signed-catalog uploads)
 ├── .github/workflows/
 │   ├── ci.yml               # test, lint, build
 │   └── index.yml            # cron: crawl, build, sign, publish
@@ -235,7 +248,7 @@ uas/
 1. **Catalog + Flathub:** schema, Flathub fetcher, local build, `uas search`. Done.
 2. **First install:** platform detection, flatpak backend, `uas install`, `remove`, `update`, `list`,
    `system`, `settings`. Done.
-3. **Hosting:** signing, R2 upload, Actions cron, client sync. Proves the free-hosting plan early.
+3. **Hosting:** signing, Worker + R2, Actions cron, `uas refresh`. Done.
 4. **Fedora + rpm-ostree:** layering, reboot-needed state.
 5. **Homebrew.**
 6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking.

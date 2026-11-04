@@ -5,15 +5,26 @@ See [docs/architecture.md](docs/architecture.md).
 
 ## Development
 
-Build a catalog from live sources, then search it:
+`uas` downloads the published catalog on first use (or with `uas refresh`) into `~/.cache/uas/`:
 
 ```sh
-go run ./cmd/uas-indexer -out ~/.cache/uas/catalog.db
 go run ./cmd/uas search firefox
 go run ./cmd/uas info org.mozilla.firefox
+go run ./cmd/uas install org.mozilla.firefox
 ```
 
-`uas` reads `~/.cache/uas/catalog.db` by default; set `UAS_CATALOG` or pass `-catalog` to use another file.
+To use a locally built catalog instead, build one and point `UAS_CATALOG` (or `-catalog`) at it:
+
+```sh
+go run ./cmd/uas-indexer -out out/catalog.db
+UAS_CATALOG=out/catalog.db go run ./cmd/uas search firefox
+```
+
+## Publishing
+
+The `Index` workflow builds and publishes the catalog every 6 hours, and can be run by hand from the Actions
+tab. Publishing needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The catalog Worker lives in
+`deploy/cloudflare`; deploy it with `npx wrangler deploy` from that directory.
 
 ```sh
 go test ./...

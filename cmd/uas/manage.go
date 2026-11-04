@@ -100,7 +100,7 @@ func runInstall(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	db, err := openCatalog(*catalogPath)
+	db, err := openCatalog(ctx, *catalogPath)
 	if err != nil {
 		return err
 	}

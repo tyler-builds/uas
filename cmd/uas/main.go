@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,11 +17,13 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/paths"
+	"github.com/tyler-builds/uas/internal/client/refresh"
 )
 
 const usage = `usage: uas <command> [flags] [args]
 
 commands:
+  refresh              download the latest catalog
   search <words>       find apps
   info <app-id>        show one app and where it is available
   install <app-id>     install an app
@@ -42,6 +45,8 @@ func main() {
 	defer stop()
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	case "refresh":
+		err = runRefresh(ctx, os.Stdout, args)
 	case "search":
 		err = runSearch(ctx, os.Stdout, args)
 	case "info":
@@ -95,12 +100,55 @@ func catalogFlag(fs *flag.FlagSet) *string {
 	return fs.String("catalog", def, "catalog database (or set "+paths.CatalogEnv+")")
 }
 
-func openCatalog(path string) (*catalog.DB, error) {
-	db, err := catalog.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no catalog at %s\nbuild one with: go run ./cmd/uas-indexer -out %s", path, path)
+// openCatalog opens the local catalog, downloading it first if there is none yet.
+func openCatalog(ctx context.Context, path string) (*catalog.DB, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "Downloading the app catalog...")
+		if _, err := refresh.Refresh(ctx, refreshOptions(path)); err != nil {
+			return nil, fmt.Errorf("download catalog: %w", err)
+		}
 	}
-	return db, err
+	return catalog.Open(path)
+}
+
+func refreshOptions(catalogPath string) refresh.Options {
+	base := os.Getenv(refresh.BaseURLEnv)
+	if base == "" {
+		base = refresh.DefaultBaseURL
+	}
+	return refresh.Options{
+		BaseURL:     base,
+		TrustedKeys: refresh.TrustedKeys(),
+		CatalogPath: catalogPath,
+		Client:      &http.Client{Timeout: 5 * time.Minute},
+		UserAgent:   "uas",
+	}
+}
+
+func runRefresh(ctx context.Context, w io.Writer, args []string) error {
+	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
+	catalogPath := catalogFlag(fs)
+	if rest, err := parseArgs(fs, args); err != nil {
+		return err
+	} else if len(rest) > 0 {
+		return errors.New("refresh: takes no arguments")
+	}
+	res, err := refresh.Refresh(ctx, refreshOptions(*catalogPath))
+	if err != nil {
+		return err
+	}
+	m := res.Manifest
+	state := "Already up to date"
+	if res.Updated {
+		state = "Updated"
+	}
+	fmt.Fprintf(w, "%s: %d apps, built %s.\n", state, m.Apps, m.BuiltAt.Local().Format("2006-01-02 15:04"))
+	for _, s := range m.Sources {
+		if s.Error != "" {
+			fmt.Fprintf(w, "  %s was unavailable at build time: %s\n", s.Source, s.Error)
+		}
+	}
+	return nil
 }
 
 func runSearch(ctx context.Context, w io.Writer, args []string) error {
@@ -115,7 +163,7 @@ func runSearch(ctx context.Context, w io.Writer, args []string) error {
 	if len(words) == 0 {
 		return errors.New("search: give one or more words to search for")
 	}
-	db, err := openCatalog(*catalogPath)
+	db, err := openCatalog(ctx, *catalogPath)
 	if err != nil {
 		return err
 	}
@@ -168,7 +216,7 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 	if len(ids) != 1 {
 		return errors.New("info: give exactly one app ID (see \"uas search\")")
 	}
-	db, err := openCatalog(*catalogPath)
+	db, err := openCatalog(ctx, *catalogPath)
 	if err != nil {
 		return err
 	}

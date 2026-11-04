@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,8 @@ import (
 	"github.com/tyler-builds/uas/internal/indexer"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/flathub"
+	"github.com/tyler-builds/uas/internal/indexer/publish"
+	"github.com/tyler-builds/uas/internal/manifest"
 )
 
 func main() {
@@ -22,11 +26,46 @@ func main() {
 	cache := flag.String("cache", defaultCacheDir(), "directory for downloaded source data")
 	arch := flag.String("arch", "x86_64", "CPU architecture to index: x86_64 or aarch64")
 	flathubFile := flag.String("flathub-file", "", "read Flathub AppStream XML from this file instead of downloading it")
+	publishURL := flag.String("publish", "", "after building, publish to the catalog Worker at this URL\n"+
+		"(needs $UAS_SIGNING_KEY and $UAS_UPLOAD_TOKEN)")
+	publishDir := flag.String("publish-dir", "", "after building, publish into this local directory (needs $UAS_SIGNING_KEY)")
+	keep := flag.Int("keep", 3, "number of published catalogs to keep")
+	keygen := flag.String("keygen", "", "write a new signing key to this file, print its public key, and exit")
 	flag.Parse()
+	if *keygen != "" {
+		if err := generateKey(*keygen); err != nil {
+			fmt.Fprintln(os.Stderr, "uas-indexer:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *out == "" || flag.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "usage: uas-indexer -out catalog.db [flags]")
 		flag.PrintDefaults()
 		os.Exit(2)
+	}
+	var store publish.Store
+	switch {
+	case *publishURL != "" && *publishDir != "":
+		fmt.Fprintln(os.Stderr, "uas-indexer: use -publish or -publish-dir, not both")
+		os.Exit(2)
+	case *publishURL != "":
+		token := os.Getenv("UAS_UPLOAD_TOKEN")
+		if token == "" {
+			fmt.Fprintln(os.Stderr, "uas-indexer: -publish needs $UAS_UPLOAD_TOKEN")
+			os.Exit(2)
+		}
+		store = &publish.HTTPStore{BaseURL: *publishURL, Token: token, Client: &http.Client{Timeout: 10 * time.Minute}}
+	case *publishDir != "":
+		store = &publish.DirStore{Dir: *publishDir}
+	}
+	var signingKey ed25519.PrivateKey
+	if store != nil {
+		var err error
+		if signingKey, err = manifest.ParsePrivateKey(os.Getenv("UAS_SIGNING_KEY")); err != nil {
+			fmt.Fprintln(os.Stderr, "uas-indexer: $UAS_SIGNING_KEY:", err)
+			os.Exit(2)
+		}
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -45,6 +84,42 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("catalog written", "path", *out, "apps", info.Apps, "took", time.Since(start).Round(time.Millisecond))
+
+	if store != nil {
+		m, err := publish.Publish(ctx, store, *out, info, publish.Options{Key: signingKey, Keep: *keep, Log: log})
+		if err != nil {
+			log.Error("publish failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("published", "catalog", m.Catalog.Path, "size", m.Catalog.Size,
+			"uncompressed", m.Catalog.UncompressedSize)
+	}
+}
+
+// generateKey writes a new signing key to path, refusing to overwrite one, and prints the public key for
+// embedding in the client.
+func generateKey(path string) error {
+	private, public, err := manifest.GenerateKey()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(private + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("private key written to %s\npublic key: %s\nkey id:     %s\n", path,
+		base64.StdEncoding.EncodeToString(public), manifest.KeyID(public))
+	return nil
 }
 
 func defaultCacheDir() string {
