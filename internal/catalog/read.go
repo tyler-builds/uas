@@ -129,6 +129,52 @@ func ftsQuery(words []string, op string) string {
 	return strings.Join(parts, " "+op+" ")
 }
 
+// AmbiguousError is returned by Resolve when a name fits more than one app.
+type AmbiguousError struct {
+	Name string
+	IDs  []string
+}
+
+func (e *AmbiguousError) Error() string {
+	return fmt.Sprintf("%q matches several apps: %s", e.Name, strings.Join(e.IDs, ", "))
+}
+
+// Resolve finds an app by its ID or by a name a source uses for it: a package name (such as a Homebrew
+// formula), an AppStream ID or a listing ref.
+func (d *DB) Resolve(ctx context.Context, name string) (*App, error) {
+	a, err := d.App(ctx, name)
+	if err == nil || !errors.Is(err, ErrNotFound) {
+		return a, err
+	}
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT DISTINCT app_id FROM listings
+		WHERE ref = ?1 OR appstream_id = ?1 OR json_extract(data, '$.package') = ?1
+		ORDER BY app_id`, name)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	switch len(ids) {
+	case 0:
+		return nil, fmt.Errorf("app %q: %w", name, ErrNotFound)
+	case 1:
+		return d.App(ctx, ids[0])
+	}
+	return nil, &AmbiguousError{Name: name, IDs: ids}
+}
+
 // App returns one app with all its listings.
 func (d *DB) App(ctx context.Context, id string) (*App, error) {
 	a := App{ID: id}

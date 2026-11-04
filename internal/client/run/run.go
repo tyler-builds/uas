@@ -38,16 +38,19 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Err }
 
 // Exec runs commands as real processes.
-type Exec struct{}
+type Exec struct {
+	// Env holds extra environment variables, such as "HOMEBREW_NO_ENV_HINTS=1".
+	Env []string
+}
 
 // maxStderr bounds how much error output is kept for messages.
 const maxStderr = 8 << 10
 
 // Run implements Runner.
-func (Exec) Run(ctx context.Context, name string, args []string, onLine func(string)) (string, error) {
+func (x Exec) Run(ctx context.Context, name string, args []string, onLine func(string)) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	// Stable, untranslated output that parsers can rely on.
-	cmd.Env = append(os.Environ(), "LC_ALL=C.UTF-8", "LANG=C.UTF-8")
+	cmd.Env = append(append(os.Environ(), "LC_ALL=C.UTF-8", "LANG=C.UTF-8"), x.Env...)
 	cmd.Stdin = nil
 	stderr := &tailBuffer{max: maxStderr}
 	cmd.Stderr = stderr

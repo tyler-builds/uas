@@ -120,6 +120,43 @@ func TestApp(t *testing.T) {
 	}
 }
 
+func TestResolve(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	apps := []App{
+		{ID: "homebrew:tree", Kind: KindConsoleApp, Name: "tree", Listings: []Listing{
+			{Source: SourceHomebrew, Ref: "tree", Package: "tree", Name: "tree"}}},
+		{ID: "org.example.Editor", Kind: KindDesktopApp, Name: "Editor", Listings: []Listing{
+			{Source: SourceFedora, Ref: "fedora-45/editor", Package: "editor", AppStreamID: "editor.desktop"}}},
+		{ID: "org.example.Other", Kind: KindDesktopApp, Name: "Other", Listings: []Listing{
+			{Source: SourceFedora, Ref: "fedora-45/shared", Package: "shared"}}},
+		{ID: "homebrew:shared", Kind: KindConsoleApp, Name: "shared", Listings: []Listing{
+			{Source: SourceHomebrew, Ref: "shared", Package: "shared"}}},
+	}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	for name, want := range map[string]string{"tree": "homebrew:tree", "homebrew:tree": "homebrew:tree",
+		"editor": "org.example.Editor", "editor.desktop": "org.example.Editor",
+		"fedora-45/editor": "org.example.Editor"} {
+		if a, err := db.Resolve(ctx, name); err != nil || a.ID != want {
+			t.Errorf("Resolve(%q) = %v, %v; want %s", name, a, err, want)
+		}
+	}
+	var amb *AmbiguousError
+	if _, err := db.Resolve(ctx, "shared"); !errors.As(err, &amb) || len(amb.IDs) != 2 {
+		t.Errorf("Resolve(shared) err = %v", err)
+	}
+	if _, err := db.Resolve(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Resolve(nope) err = %v", err)
+	}
+}
+
 func TestOpenMissing(t *testing.T) {
 	if _, err := Open(filepath.Join(t.TempDir(), "nope.db")); err == nil {
 		t.Fatal("expected an error")

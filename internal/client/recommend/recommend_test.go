@@ -32,4 +32,14 @@ func TestChoose(t *testing.T) {
 	if _, err := Choose(app, none, ""); err == nil {
 		t.Error("Choose(none available) succeeded")
 	}
+
+	// Homebrew beats Fedora layering, since it needs no restart.
+	tool := &catalog.App{Name: "Tool", Listings: []catalog.Listing{
+		{Source: catalog.SourceFedora, Ref: "fedora-45/tool"},
+		{Source: catalog.SourceHomebrew, Ref: "tool"},
+	}}
+	if c, err := Choose(tool, all, ""); err != nil || c.Listing.Source != catalog.SourceHomebrew ||
+		c.Reason != "homebrew installs without a restart" {
+		t.Errorf("Choose(tool) = %+v, %v", c, err)
+	}
 }

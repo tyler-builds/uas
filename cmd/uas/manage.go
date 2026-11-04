@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/flatpak"
+	"github.com/tyler-builds/uas/internal/client/backend/homebrew"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/recommend"
@@ -60,6 +61,10 @@ func loadEnv(ctx context.Context, scope string) (*env, error) {
 	if e.platform.Flatpak != "" {
 		e.backends[catalog.SourceFlathub] = &flatpak.Backend{Runner: run.Exec{}, Path: e.platform.Flatpak,
 			Scope: s.FlatpakScope}
+	}
+	if e.platform.Brew != "" {
+		e.backends[catalog.SourceHomebrew] = &homebrew.Backend{
+			Runner: run.Exec{Env: []string{"HOMEBREW_NO_ENV_HINTS=1"}}, Path: e.platform.Brew}
 	}
 	// Layering needs an image-based system. Package-based Fedora (dnf) is outside the Bazzite slice.
 	if e.platform.Atomic && e.platform.RPMOSTree != "" && e.platform.FedoraRelease() > 0 {
@@ -121,7 +126,7 @@ func runInstall(ctx context.Context, args []string) error {
 		return err
 	}
 	defer db.Close()
-	app, err := db.App(ctx, ids[0])
+	app, err := db.Resolve(ctx, ids[0])
 	if err != nil {
 		return err
 	}
@@ -156,6 +161,9 @@ func runInstall(ctx context.Context, args []string) error {
 		} else {
 			fmt.Println("Installs for all users. Flatpak will ask for your password.")
 		}
+	}
+	if l.Source == catalog.SourceHomebrew {
+		fmt.Println("Installs with Homebrew for your user account. No restart needed.")
 	}
 	if l.Source == catalog.SourceFedora {
 		fmt.Println("Adds the package to your system image (layering). It takes effect after a restart.")
@@ -271,10 +279,11 @@ func installNames(ctx context.Context, catalogPath, id string) map[string]bool {
 		return names
 	}
 	defer db.Close()
-	app, err := db.App(ctx, id)
+	app, err := db.Resolve(ctx, id)
 	if err != nil {
 		return names
 	}
+	names[app.ID] = true
 	for _, l := range app.Listings {
 		names[l.Ref] = true
 		if l.Package != "" {

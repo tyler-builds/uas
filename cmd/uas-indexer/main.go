@@ -20,6 +20,7 @@ import (
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/fedora"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/flathub"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/homebrew"
 	"github.com/tyler-builds/uas/internal/indexer/publish"
 	"github.com/tyler-builds/uas/internal/manifest"
 )
@@ -34,7 +35,7 @@ func main() {
 	publishDir := flag.String("publish-dir", "", "after building, publish into this local directory (needs $UAS_SIGNING_KEY)")
 	keep := flag.Int("keep", 3, "number of published catalogs to keep")
 	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
-	sources := flag.String("sources", "flathub,fedora", "comma-separated sources to index")
+	sources := flag.String("sources", "flathub,fedora,homebrew", "comma-separated sources to index")
 	keygen := flag.String("keygen", "", "write a new signing key to this file, print its public key, and exit")
 	flag.Parse()
 	if *keygen != "" {
@@ -88,6 +89,7 @@ func main() {
 			File: *flathubFile},
 		"fedora": &fedora.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "fedora"), Arch: *arch,
 			Releases: releases, Log: log},
+		"homebrew": &homebrew.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "homebrew"), Arch: *arch},
 	}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {

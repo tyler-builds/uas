@@ -61,7 +61,10 @@ All endpoints below need confirming during the first spike.
   (such as `fedora-45`) and a `package` name. Only components whose package is in the repos are kept. Icons
   are only in AppStream's icon tarballs, so Fedora-only apps have no icon until icons are mirrored to R2.
 - **COPR:** COPR API v3. Only projects with successful builds for `fedora-<N>-x86_64`.
-- **Homebrew:** `formulae.brew.sh` JSON API plus install analytics. Formulae that build on Linux only.
+- **Homebrew:** `formulae.brew.sh` JSON API plus install-on-request analytics. Keeps core formulae with a
+  Linux bottle and at least 1,000 installs-on-request a year (about 2,500), which drops most libraries;
+  keg-only, deprecated and disabled formulae are skipped. The install count is stored on the listing for
+  search ranking later.
 - **GitHub:** GraphQL API. A curated seed list plus discovery searches for repos whose latest release has a
   Linux x86_64 `.AppImage`, `.flatpak` or `.rpm` asset. Uses a GitHub App token (higher rate limit than
   `GITHUB_TOKEN`) and ETags for incremental runs. Search caps out at 1,000 results per query, so queries are
@@ -138,9 +141,9 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
 - **state:** A local SQLite database of what UAS installed and from where (needed for GitHub apps, which nothing
   else tracks). Reconciled on startup against `flatpak list`, `brew list` and the rpm-ostree deployment, so
   installs made outside UAS still show up.
-- **recommend:** Picks the default source per app and gives the reason. Default order on Bazzite: verified
-  Flathub, then Homebrew (for CLI tools), then GitHub `.flatpak`, then AppImage, then Fedora layering, then COPR
-  layering. Trust flags can move a source down.
+- **recommend:** Picks the default source per app and gives the reason. Verified listings first, then
+  Flathub, Homebrew, GitHub, Fedora layering, COPR layering (`recommend.InstallOrder`). Trust flags will be
+  able to move a source down.
 - **jobs:** A queue of install, update and remove jobs with progress events, cancellation and logs. Only one
   rpm-ostree job runs at a time. Tracks the "reboot needed" state.
 
@@ -261,7 +264,8 @@ uas/
    `system`, `settings`. Done.
 3. **Hosting:** signing, Worker + R2, Actions cron, `uas refresh`. Done.
 4. **Fedora + rpm-ostree:** layering, reboot-needed state. Done.
-5. **Homebrew.**
+5. **Homebrew.** Done. `uas install tree` works by package name: the CLI resolves app IDs, package names,
+   AppStream IDs and refs, and lists the choices when a name is ambiguous.
 6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling.
 8. **Jamb UI** on top of the finished core. Can start in parallel after milestone 2.

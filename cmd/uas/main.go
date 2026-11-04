@@ -222,7 +222,7 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 	}
 	defer db.Close()
 
-	a, err := db.App(ctx, ids[0])
+	a, err := db.Resolve(ctx, ids[0])
 	if err != nil {
 		return err
 	}

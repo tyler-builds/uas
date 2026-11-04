@@ -79,6 +79,9 @@ type Listing struct {
 	// Runtime is the Flatpak runtime the app needs, if any.
 	Runtime string `json:"runtime,omitempty"`
 
+	// Installs is how many times the app was installed in the past year, where the source publishes it.
+	Installs int `json:"installs,omitempty"`
+
 	// Package is the name of the package to install, for package-based sources such as Fedora.
 	Package string `json:"package,omitempty"`
 	// Distro limits the listing to one distribution release, such as "fedora-45". Empty means any.
