@@ -3,6 +3,8 @@ package refresh
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -147,5 +149,33 @@ func TestRefreshRejectsUntrustedKey(t *testing.T) {
 	f.options.TrustedKeys = []ed25519.PublicKey{otherKey.Public().(ed25519.PublicKey)}
 	if _, err := Refresh(context.Background(), f.options); err == nil || !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("err = %v, want unknown key", err)
+	}
+}
+
+func TestOpenCatalogReplacesOldFormat(t *testing.T) {
+	f := newFixture(t)
+	f.publish("Alpha", time.Unix(1770000000, 0).UTC())
+	if _, err := Refresh(context.Background(), f.options); err != nil {
+		t.Fatal(err)
+	}
+	// Pretend the local copy is from an older build of uas.
+	db, err := sql.Open("sqlite", f.options.CatalogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE meta SET value = '1' WHERE key = 'schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if _, err := catalog.Open(f.options.CatalogPath); !errors.Is(err, catalog.ErrSchema) {
+		t.Fatalf("Open err = %v, want ErrSchema", err)
+	}
+	// Refresh sees the same manifest hash and would keep the stale file; with the manifest gone it downloads.
+	os.Remove(ManifestPath(f.options.CatalogPath))
+	if res, err := Refresh(context.Background(), f.options); err != nil || !res.Updated {
+		t.Fatalf("refresh = %+v, %v", res, err)
+	}
+	if _, err := catalog.Open(f.options.CatalogPath); err != nil {
+		t.Fatalf("reopen: %v", err)
 	}
 }

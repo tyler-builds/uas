@@ -328,7 +328,20 @@ func (s *Session) OpenCatalog(ctx context.Context, notify func(string)) (*catalo
 			return nil, fmt.Errorf("download catalog: %w", err)
 		}
 	}
-	return catalog.Open(s.CatalogPath)
+	db, err := catalog.Open(s.CatalogPath)
+	if errors.Is(err, catalog.ErrSchema) {
+		// A catalog from an older (or newer) build of uas: fetch the one published for this format.
+		if notify != nil {
+			notify("Updating the app catalog to a new format...")
+		}
+		opt := RefreshOptions(s.CatalogPath)
+		os.Remove(refresh.ManifestPath(s.CatalogPath)) // so the refresh doesn't skip the download
+		if _, rerr := refresh.Refresh(ctx, opt); rerr != nil {
+			return nil, fmt.Errorf("download catalog: %w", rerr)
+		}
+		return catalog.Open(s.CatalogPath)
+	}
+	return db, err
 }
 
 // RefreshOptions returns the options for downloading the published catalog to catalogPath.

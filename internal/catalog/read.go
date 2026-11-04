@@ -18,6 +18,9 @@ import (
 // ErrNotFound is returned when an app is not in the catalog.
 var ErrNotFound = errors.New("not found")
 
+// ErrSchema is returned by Open for a catalog in a format this build doesn't read.
+var ErrSchema = errors.New("catalog format not supported")
+
 // DB is an open, read-only catalog.
 type DB struct {
 	db   *sql.DB
@@ -59,7 +62,7 @@ func (d *DB) loadMeta() error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if v, err := strconv.Atoi(version); err != nil || v != SchemaVersion {
-		return fmt.Errorf("catalog schema version %s, this build of uas needs %d", version, SchemaVersion)
+		return fmt.Errorf("%w: schema version %s, this build of uas needs %d", ErrSchema, version, SchemaVersion)
 	}
 	if err := d.db.QueryRow(`SELECT value FROM meta WHERE key = 'build'`).Scan(&build); err != nil {
 		return fmt.Errorf("read build info: %w", err)
