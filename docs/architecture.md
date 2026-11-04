@@ -34,7 +34,7 @@ works.
  ┌────────────────────────────── user's Bazzite machine ─────────────────────────────────┐
  │  uas-gui (Jamb)        uas (CLI)                                                       │
  │        └──────┬───────────┘                                                            │
- │          client core: platform · sync · catalog query · recommend · state · jobs       │
+ │          client core: platform · refresh · catalog · recommend · state · jobs       │
  │               │                                                                        │
  │          backends: flatpak · homebrew · github · rpmostree · copr                      │
  │               │            │          │            │            │                      │
@@ -126,7 +126,7 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
 - **platform:** Reads `/etc/os-release` and `rpm-ostree status --json`. Detects distro, release, atomic or not,
   booted image, pending deployment, CPU architecture, libfuse2, presence of `brew` and `flatpak`. Disables sources
   that don't apply.
-- **sync:** Fetches the manifest, checks the signature, downloads the catalog only if its hash changed, and swaps
+- **refresh:** Fetches the manifest, checks the signature, downloads the catalog only if its hash changed, and swaps
   it in atomically. Works offline with the last good catalog.
 - **catalog:** Shared schema and queries, used by both indexer and client.
 - **state:** A local SQLite database of what UAS installed and from where (needed for GitHub apps, which nothing
@@ -184,7 +184,7 @@ While the repo is private, build from source; a Homebrew tap and public releases
 None in v1. The code has hooks so it can be added later without touching callers:
 
 - `internal/client/telemetry` defines an `Event` type and a `Sink` interface. v1 ships only a no-op sink.
-- sync, search and jobs emit events (catalog synced, install succeeded or failed by source, and so on) through
+- refresh, search and jobs emit events (catalog refreshed, install succeeded or failed by source, and so on) through
   the sink. Events never carry search text, file paths, usernames, or machine identifiers.
 - A `telemetry` setting exists and defaults to off. A real sink only runs when the user turns it on.
 
