@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
@@ -34,6 +35,8 @@ CREATE TABLE apps (
 	keywords    TEXT NOT NULL, -- JSON array
 	screenshots TEXT NOT NULL, -- JSON array
 	popularity  INTEGER NOT NULL,
+	stars       INTEGER NOT NULL,
+	updated     INTEGER NOT NULL, -- Unix seconds of the newest release, 0 if unknown
 	-- boost multiplies the search score (bm25, where lower is better): 1 for unknown apps, up to about 2 for
 	-- the most installed ones. Precomputed because SQLite's math functions may not be compiled in.
 	boost       REAL NOT NULL
@@ -120,8 +123,8 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 
 	insApp, err := tx.PrepareContext(ctx, `INSERT INTO apps
 		(id, kind, name, summary, description, developer, license, homepage, vcs_url, icon_url,
-		 categories, keywords, screenshots, popularity, boost)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		 categories, keywords, screenshots, popularity, stars, updated, boost)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -145,8 +148,8 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 		a := &apps[i]
 		if _, err := insApp.ExecContext(ctx, a.ID, string(a.Kind), a.Name, a.Summary, a.Description, a.Developer,
 			a.License, a.Homepage, a.VCSURL, a.IconURL,
-			jsonArray(a.Categories), jsonArray(a.Keywords), jsonArray(a.Screenshots), a.Popularity,
-			1+math.Log10(float64(a.Popularity)+1)/6); err != nil {
+			jsonArray(a.Categories), jsonArray(a.Keywords), jsonArray(a.Screenshots), a.Popularity, a.Stars,
+			unixOrZero(a.Updated), 1+math.Log10(float64(a.Popularity)+1)/6); err != nil {
 			return fmt.Errorf("insert app %s: %w", a.ID, err)
 		}
 		for _, l := range a.Listings {
@@ -185,6 +188,13 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 		}
 	}
 	return db.Close()
+}
+
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
 }
 
 // jsonArray encodes v as JSON, writing an empty array instead of null.

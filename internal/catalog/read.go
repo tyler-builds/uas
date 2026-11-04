@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -66,49 +67,87 @@ func (d *DB) loadMeta() error {
 	return json.Unmarshal([]byte(build), &d.info)
 }
 
-// Search finds apps matching query, best match first. All words must match; if that finds nothing, any word
-// may match. Each word also matches as a prefix, so "firef" finds Firefox.
-func (d *DB) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+// Order is how lists of apps are sorted.
+type Order string
+
+// The orders.
+const (
+	// OrderRelevance sorts search results by how well they match, weighted by popularity. For browsing,
+	// where there is no query, it is OrderPopular.
+	OrderRelevance Order = "relevance"
+	// OrderPopular sorts by installs, then GitHub stars.
+	OrderPopular Order = "popular"
+	// OrderUpdated sorts by the newest release of any listing.
+	OrderUpdated Order = "updated"
+	// OrderName sorts by name.
+	OrderName Order = "name"
+)
+
+// orderBy returns the ORDER BY terms for an order, for queries over apps a.
+func orderBy(o Order) string {
+	switch o {
+	case OrderPopular:
+		return "a.popularity DESC, a.stars DESC, lower(a.name)"
+	case OrderUpdated:
+		return "a.updated DESC, lower(a.name)"
+	case OrderName:
+		return "lower(a.name), a.id"
+	}
+	return ""
+}
+
+const resultColumns = `a.id, a.name, a.summary, a.kind, a.icon_url,
+	(SELECT group_concat(DISTINCT source) FROM listings l WHERE l.app_id = a.id),
+	(SELECT max(verified) FROM listings l WHERE l.app_id = a.id),
+	a.popularity, a.stars, a.updated`
+
+// Search finds apps matching query. All words must match; if that finds nothing, any word may match. Each
+// word also matches as a prefix, so "firef" finds Firefox. With OrderRelevance, the best match comes first.
+func (d *DB) Search(ctx context.Context, query string, limit int, order Order) ([]SearchResult, error) {
 	words := queryWords(query)
 	if len(words) == 0 {
 		return nil, nil
 	}
-	results, err := d.search(ctx, ftsQuery(words, "AND"), strings.Join(words, " "), limit)
+	results, err := d.search(ctx, ftsQuery(words, "AND"), strings.Join(words, " "), limit, order)
 	if err != nil || len(results) > 0 || len(words) == 1 {
 		return results, err
 	}
-	return d.search(ctx, ftsQuery(words, "OR"), strings.Join(words, " "), limit)
+	return d.search(ctx, ftsQuery(words, "OR"), strings.Join(words, " "), limit, order)
 }
 
-func (d *DB) search(ctx context.Context, match, exactName string, limit int) ([]SearchResult, error) {
+func (d *DB) search(ctx context.Context, match, exactName string, limit int, order Order) ([]SearchResult, error) {
 	// bm25 weights, one per FTS column: app_id, name, keywords, summary, developer, description.
-	// An exact name match always comes first.
+	// By relevance, an exact name match always comes first.
+	sort := orderBy(order)
+	if sort == "" {
+		sort = "lower(a.name) = ?2 DESC, bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
+	}
 	rows, err := d.db.QueryContext(ctx, `
-		SELECT a.id, a.name, a.summary, a.kind, a.icon_url,
-		       (SELECT group_concat(DISTINCT source) FROM listings l WHERE l.app_id = a.id),
-		       (SELECT max(verified) FROM listings l WHERE l.app_id = a.id)
+		SELECT `+resultColumns+`
 		FROM apps_fts
 		JOIN apps a ON a.id = apps_fts.app_id
-		WHERE apps_fts MATCH ?
-		ORDER BY lower(a.name) = ? DESC, bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost
-		LIMIT ?`, match, exactName, limit)
+		WHERE apps_fts MATCH ?1
+		ORDER BY `+sort+`
+		LIMIT ?3`, match, exactName, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
 	return scanResults(rows)
 }
 
-// Browse lists apps for browsing: desktop apps with an icon, in a category if one is given, most popular
-// first.
-func (d *DB) Browse(ctx context.Context, category string, limit int) ([]SearchResult, error) {
+// Browse lists apps for browsing: desktop apps with an icon, in a category if one is given. OrderRelevance
+// means OrderPopular here.
+func (d *DB) Browse(ctx context.Context, category string, limit int, order Order) ([]SearchResult, error) {
+	sort := orderBy(order)
+	if sort == "" {
+		sort = orderBy(OrderPopular)
+	}
 	rows, err := d.db.QueryContext(ctx, `
-		SELECT a.id, a.name, a.summary, a.kind, a.icon_url,
-		       (SELECT group_concat(DISTINCT source) FROM listings l WHERE l.app_id = a.id),
-		       (SELECT max(verified) FROM listings l WHERE l.app_id = a.id)
+		SELECT `+resultColumns+`
 		FROM apps a
 		WHERE (?1 = '' OR a.id IN (SELECT app_id FROM app_categories WHERE category = ?1))
 		  AND a.kind = 'desktop-application' AND a.icon_url != ''
-		ORDER BY a.popularity DESC, a.name
+		ORDER BY `+sort+`
 		LIMIT ?2`, category, limit)
 	if err != nil {
 		return nil, fmt.Errorf("browse: %w", err)
@@ -122,12 +161,17 @@ func scanResults(rows *sql.Rows) ([]SearchResult, error) {
 	for rows.Next() {
 		var r SearchResult
 		var kind, sources string
-		if err := rows.Scan(&r.ID, &r.Name, &r.Summary, &kind, &r.IconURL, &sources, &r.Verified); err != nil {
+		var updated int64
+		if err := rows.Scan(&r.ID, &r.Name, &r.Summary, &kind, &r.IconURL, &sources, &r.Verified,
+			&r.Popularity, &r.Stars, &updated); err != nil {
 			return nil, err
 		}
 		r.Kind = Kind(kind)
 		for _, s := range strings.Split(sources, ",") {
 			r.Sources = append(r.Sources, SourceID(s))
+		}
+		if updated > 0 {
+			r.Updated = time.Unix(updated, 0).UTC()
 		}
 		results = append(results, r)
 	}
@@ -200,12 +244,13 @@ func (d *DB) Resolve(ctx context.Context, name string) (*App, error) {
 func (d *DB) App(ctx context.Context, id string) (*App, error) {
 	a := App{ID: id}
 	var kind, categories, keywords, screenshots string
+	var updated int64
 	err := d.db.QueryRowContext(ctx, `
 		SELECT kind, name, summary, description, developer, license, homepage, vcs_url, icon_url,
-		       categories, keywords, screenshots, popularity
+		       categories, keywords, screenshots, popularity, stars, updated
 		FROM apps WHERE id = ?`, id).
 		Scan(&kind, &a.Name, &a.Summary, &a.Description, &a.Developer, &a.License, &a.Homepage, &a.VCSURL,
-			&a.IconURL, &categories, &keywords, &screenshots, &a.Popularity)
+			&a.IconURL, &categories, &keywords, &screenshots, &a.Popularity, &a.Stars, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("app %q: %w", id, ErrNotFound)
 	}
@@ -213,6 +258,9 @@ func (d *DB) App(ctx context.Context, id string) (*App, error) {
 		return nil, err
 	}
 	a.Kind = Kind(kind)
+	if updated > 0 {
+		a.Updated = time.Unix(updated, 0).UTC()
+	}
 	for _, f := range []struct {
 		raw string
 		dst any

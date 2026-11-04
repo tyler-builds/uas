@@ -322,6 +322,7 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 		Released:  latest.PublishedAt,
 		Assets:    assets,
 		Trust:     &t,
+		Stars:     r.StargazerCount,
 	}, true
 }
 

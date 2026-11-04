@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/recommend"
 )
 
 // pending is an install waiting for the user's OK.
@@ -167,11 +168,19 @@ func (a *App) installBox(ctx *ui.Context, app *catalog.App, available []catalog.
 	box := ui.Div().Column().Gap(10).Padding(16).Radius(10).Border(1, t.Border).Background(t.Surface).
 		Child(ui.Div().Row().Gap(12).Align(ui.End).Wrap().Child(picker).Child(action))
 	if chosen.Get() == recommended && reason != "" {
-		box = box.Child(ui.Text("Recommended: " + reason).FontSize(13).TextColor(t.TextMuted))
+		box = box.Child(ui.Text("Recommended: " + reason + ".").FontSize(13).TextColor(t.TextMuted))
+	} else if reason != "" {
+		for _, l := range available {
+			if listingKey(l) == recommended {
+				box = box.Child(ui.Text("uas recommends " + listingLabel(l) + ": " + reason + ".").FontSize(13).
+					TextColor(t.TextMuted))
+			}
+		}
 	}
 	for _, n := range a.s.InstallNotes(listing) {
 		box = box.Child(ui.Text(n).FontSize(13).TextColor(t.TextMuted))
 	}
+	box = box.Child(a.whyPanel(ctx, app, listing))
 	if busy {
 		box = box.Child(ui.Div().Row().Gap(8).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
@@ -204,6 +213,38 @@ func (a *App) updateControl(ctx *ui.Context, in backend.InstalledApp, jobID, nam
 		return ui.Div()
 	}
 	return ui.BadgeText("Up to date").Variant(ui.BadgeNeutral)
+}
+
+// whyPanel explains what installing from the picked source means and how the app's other sources compare.
+// It opens from a "Why this source?" link, so the box stays short.
+func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.Element {
+	return ui.Component(func(ctx *ui.Context) ui.Element {
+		t := ctx.Theme()
+		open := ui.Local(ctx, "open", false)
+		toggle := ui.Button("Why " + listing.Source.Name() + "?").Ghost().Small().Icon(icons.Info).
+			OnClick(func() { open.Set(!open.Peek()) })
+		if !open.Get() {
+			return ui.Div().Row().Child(toggle)
+		}
+		bullet := func(s string) ui.Element {
+			return ui.Div().Row().Gap(8).Align(ui.Start).
+				Child(ui.Text("•").FontSize(13).TextColor(t.TextMuted)).
+				Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(ui.Text(s).FontSize(13)))
+		}
+		panel := ui.Div().Column().Gap(6).
+			Child(ui.Div().Row().Child(toggle.Icon(icons.ChevronUp))).
+			Child(ui.Text("Installing from " + listingLabel(listing) + ":").FontSize(13).Semibold())
+		for _, tr := range recommend.Traits(listing) {
+			panel = panel.Child(bullet(tr))
+		}
+		if alts := recommend.Alternatives(app, a.s.Available, listing); len(alts) > 0 {
+			panel = panel.Child(ui.Div().MarginTop(6).Child(ui.Text("Other sources:").FontSize(13).Semibold()))
+			for _, alt := range alts {
+				panel = panel.Child(bullet(listingLabel(alt.Listing) + ": not picked because " + alt.Because + "."))
+			}
+		}
+		return panel
+	}).Key("why:" + listingKey(listing))
 }
 
 func installedLabel(in backend.InstalledApp) string {

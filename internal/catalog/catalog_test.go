@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,7 +59,7 @@ func TestSearch(t *testing.T) {
 	ctx := context.Background()
 	ids := func(q string) []string {
 		t.Helper()
-		rs, err := db.Search(ctx, q, 10)
+		rs, err := db.Search(ctx, q, 10, OrderRelevance)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +93,7 @@ func TestSearch(t *testing.T) {
 		t.Errorf("empty query = %q", got)
 	}
 
-	rs, err := db.Search(ctx, "browser", 10)
+	rs, err := db.Search(ctx, "browser", 10, OrderRelevance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,14 +180,58 @@ func TestBrowse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	rs, err := db.Browse(context.Background(), "Game", 10)
+	rs, err := db.Browse(context.Background(), "Game", 10, OrderPopular)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rs) != 2 || rs[0].ID != "b.Big" || rs[1].ID != "a.Small" {
 		t.Errorf("Game = %+v", rs)
 	}
-	if rs, _ := db.Browse(context.Background(), "", 10); len(rs) != 3 {
+	if rs, _ := db.Browse(context.Background(), "", 10, OrderRelevance); len(rs) != 3 {
 		t.Errorf("all = %+v", rs)
+	}
+}
+
+func TestOrders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	day := func(n int) time.Time { return time.Date(2026, 1, n, 0, 0, 0, 0, time.UTC) }
+	mk := func(id, name string, pop, stars int, updated time.Time) App {
+		return App{ID: id, Kind: KindDesktopApp, Name: name, Summary: "editor", IconURL: "i", Popularity: pop,
+			Stars: stars, Updated: updated,
+			Listings: []Listing{{Source: SourceFlathub, Ref: "app/" + id + "/x86_64/stable", Name: name}}}
+	}
+	apps := []App{mk("a", "Zed", 10, 0, day(3)), mk("b", "Atom", 500, 0, day(1)), mk("c", "Kate", 10, 900, day(2))}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ids := func(rs []SearchResult) string {
+		var s []string
+		for _, r := range rs {
+			s = append(s, r.ID)
+		}
+		return strings.Join(s, ",")
+	}
+	ctx := context.Background()
+	for order, want := range map[Order]string{OrderPopular: "b,c,a", OrderUpdated: "a,c,b", OrderName: "b,c,a"} {
+		rs, err := db.Search(ctx, "editor", 10, order)
+		if err != nil || ids(rs) != want {
+			t.Errorf("Search by %s = %s, %v; want %s", order, ids(rs), err, want)
+		}
+		rs, err = db.Browse(ctx, "", 10, order)
+		if err != nil || ids(rs) != want {
+			t.Errorf("Browse by %s = %s, %v; want %s", order, ids(rs), err, want)
+		}
+	}
+	rs, _ := db.Browse(ctx, "", 10, OrderPopular)
+	if rs[1].Stars != 900 || !rs[0].Updated.Equal(day(1)) || rs[0].Popularity != 500 {
+		t.Errorf("result details = %+v", rs[:2])
+	}
+	if a, _ := db.App(ctx, "c"); a.Stars != 900 || !a.Updated.Equal(day(2)) {
+		t.Errorf("App = %+v", a)
 	}
 }

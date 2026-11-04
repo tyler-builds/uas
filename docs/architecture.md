@@ -151,7 +151,8 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
   that don't apply.
 - **refresh:** Fetches the manifest, checks the signature, downloads the catalog only if its hash changed, and swaps
   it in atomically. Works offline with the last good catalog.
-- **catalog:** Shared schema and queries, used by both indexer and client. Schema version 2 adds each app's
+- **catalog:** Shared schema and queries, used by both indexer and client. Schema version 3 stores each app's GitHub `stars` and `updated` (newest release of any listing) for
+  sorting and display; version 2 added each app's
   `popularity` (the highest install count of its listings: Homebrew's installs-on-request in the past year,
   Flathub's last-month installs from its `collection/popular` API times 12) and a precomputed search `boost`
   that multiplies the bm25 score, so well-known apps rank first.
@@ -212,11 +213,16 @@ type Backend interface {
 `cmd/uas-gui` with `internal/gui`, on top of `internal/client/session`, the engine the CLI uses too (settings,
 platform, backends, install and remove, catalog). Pages:
 
-- **Discover:** a search field (searches after a 250 ms pause) and category chips. With no search it lists
-  the most popular desktop apps, overall or per category (`catalog.DB.Browse`, by `popularity`).
+- **Discover:** a search field (searches after a 250 ms pause) and category chips with tooltips. With no
+  search it lists the most popular desktop apps, overall or per category (`catalog.DB.Browse`). A sort menu
+  offers best match (search only), most popular, recently updated and name (`catalog.Order`). Each row shows
+  what the order is based on: installs a year, or GitHub stars when there are no install counts, and the
+  latest release date, with a tooltip saying where the numbers come from.
 - **App page:** icon, developer, summary; a source picker of every listing this system can install, with the
   recommended one preselected and the reason shown; install notes (scope, password, restart, layering);
-  Install, or Installed with Update and Remove; the trust panel for GitHub and COPR listings; screenshots;
+  a "Why <source>?" panel listing what that source means (`recommend.Traits`: review, sandbox, restart) and
+  why each other listing wasn't picked (`recommend.Alternatives`); Install, or Installed with Update (only
+  when an update exists) and Remove; the trust panel for GitHub and COPR listings; screenshots;
   the description as Markdown; license and links.
 - **Installed:** everything installed from every source, matched to the catalog for icons and app pages, with
   Update (not for layered packages, which update with the system) and Remove.

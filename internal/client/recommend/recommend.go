@@ -69,7 +69,99 @@ func Choose(app *catalog.App, available func(catalog.Listing) bool, want catalog
 	case !layered(best.Source) && slices.ContainsFunc(candidates, func(l catalog.Listing) bool { return layered(l.Source) }):
 		reason = best.Source.Name() + " installs without a restart"
 	default:
-		reason = best.Source.Name() + " is the preferred source on this system"
+		reason = strengths[best.Source]
 	}
 	return Choice{Listing: best, Reason: reason}, nil
+}
+
+// strengths is the one-line case for each source, used when nothing more specific decides.
+var strengths = map[catalog.SourceID]string{
+	catalog.SourceFlathub:  "Flathub apps run sandboxed and install without a restart",
+	catalog.SourceHomebrew: "Homebrew installs for your user without changing the system",
+	catalog.SourceGitHub:   "it is the developer's own release",
+	catalog.SourceFedora:   "Fedora packages are reviewed and signed by Fedora",
+	catalog.SourceCOPR:     "the COPR project is the only packaged build",
+}
+
+// Traits says what installing a listing means: who reviewed it, whether it is sandboxed, whether it
+// needs a restart.
+func Traits(l catalog.Listing) []string {
+	var t []string
+	switch l.Source {
+	case catalog.SourceFlathub:
+		if l.Verified {
+			v := "Publisher verified by Flathub"
+			if l.VerifiedAs != "" {
+				v += " (" + l.VerifiedAs + ")"
+			}
+			t = append(t, v)
+		} else {
+			t = append(t, "Publisher not verified by Flathub: someone other than the developer may package it")
+		}
+		t = append(t, "Runs in a sandbox, with the permissions it declares",
+			"Installs and updates without a restart")
+	case catalog.SourceHomebrew:
+		t = append(t, "Built by Homebrew from a formula its maintainers review",
+			"Installs for your user only, without a restart or changes to the system",
+			"Not sandboxed")
+	case catalog.SourceGitHub:
+		t = append(t, "Downloaded straight from the developer's GitHub releases; no distribution reviews it")
+		if l.Trust != nil {
+			t = append(t, fmt.Sprintf("Trust score %d/100, from the project's age, stars, downloads and releases",
+				l.Trust.Score))
+		}
+		t = append(t, "Checked against the checksum GitHub publishes", "Runs as an AppImage, not sandboxed",
+			"Installs without a restart")
+	case catalog.SourceFedora:
+		t = append(t, "Packaged, reviewed and signed by Fedora",
+			"Layered into the system image: takes effect after a restart",
+			"Layered packages can hold up system updates if they conflict with a new image",
+			"Not sandboxed")
+	case catalog.SourceCOPR:
+		t = append(t, "Built by the owner of the COPR project "+l.Project+"; Fedora doesn't review it")
+		if l.Trust != nil {
+			t = append(t, fmt.Sprintf("Trust score %d/100, from the project's build history", l.Trust.Score))
+		}
+		t = append(t, "Layered into the system image: takes effect after a restart",
+			"Layered packages can hold up system updates if they conflict with a new image",
+			"Not sandboxed")
+	}
+	return t
+}
+
+// Alternative is another listing of the app, and why it wasn't picked.
+type Alternative struct {
+	Listing catalog.Listing
+	Because string
+}
+
+// Alternatives explains, for each listing other than chosen, why chosen was preferred or why the listing
+// can't be used here.
+func Alternatives(app *catalog.App, available func(catalog.Listing) bool, chosen catalog.Listing) []Alternative {
+	var alts []Alternative
+	for _, l := range app.Listings {
+		if l.Source == chosen.Source && l.Ref == chosen.Ref {
+			continue
+		}
+		alts = append(alts, Alternative{Listing: l, Because: because(l, chosen, available(l))})
+	}
+	return alts
+}
+
+func because(l, chosen catalog.Listing, available bool) string {
+	switch {
+	case !available && l.Distro != "" && l.Distro != chosen.Distro && (l.Source == catalog.SourceFedora || l.Source == catalog.SourceCOPR):
+		return "built for a different Fedora release than this system's next boot"
+	case !available:
+		return "can't be installed on this system"
+	case chosen.Verified && !l.Verified:
+		return "its publisher isn't verified"
+	case layered(l.Source) && !layered(chosen.Source):
+		return "it would be layered into the system image, which needs a restart"
+	case l.Trust != nil && (chosen.Trust == nil || chosen.Trust.Score > l.Trust.Score):
+		return fmt.Sprintf("nobody reviews it (trust score %d/100)", l.Trust.Score)
+	case l.Source == catalog.SourceHomebrew && chosen.Source == catalog.SourceFlathub:
+		return "it isn't sandboxed"
+	}
+	return chosen.Source.Name() + " ranks higher on image-based systems like Bazzite"
 }

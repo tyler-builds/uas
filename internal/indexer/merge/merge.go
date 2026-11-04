@@ -210,6 +210,10 @@ func build(ls []catalog.Listing) catalog.App {
 			a.Screenshots = l.Screenshots
 		}
 		a.Popularity = max(a.Popularity, l.Installs)
+		a.Stars = max(a.Stars, l.Stars)
+		if l.Released.After(a.Updated) {
+			a.Updated = l.Released
+		}
 	}
 	return a
 }

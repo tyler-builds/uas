@@ -10,7 +10,7 @@ import (
 )
 
 // SchemaVersion is the version of the catalog database layout. Bump it on any incompatible change.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // SourceID names a place apps come from.
 type SourceID string
@@ -100,6 +100,9 @@ type Listing struct {
 	// past year; Flathub: last month's installs times 12). It ranks search results and browsing.
 	Installs int `json:"installs,omitempty"`
 
+	// Stars is the GitHub repository's star count, for GitHub listings.
+	Stars int `json:"stars,omitempty"`
+
 	// Package is the name of the package to install, for package-based sources such as Fedora.
 	Package string `json:"package,omitempty"`
 	// Distro limits the listing to one distribution release, such as "fedora-45". Empty means any.
@@ -175,6 +178,10 @@ type App struct {
 	Screenshots []Screenshot
 	// Popularity is the highest Installs of the app's listings.
 	Popularity int
+	// Stars is the highest Stars of the app's listings (GitHub).
+	Stars int
+	// Updated is the newest Released of the app's listings.
+	Updated time.Time
 	// Listings are ordered by SourcePrecedence.
 	Listings []Listing
 }
@@ -214,4 +221,9 @@ type SearchResult struct {
 	IconURL  string     `json:"icon_url,omitempty"`
 	Sources  []SourceID `json:"sources"`
 	Verified bool       `json:"verified"`
+	// Popularity is the app's yearly installs (see App.Popularity), Stars its GitHub stars, and Updated the
+	// date of the newest release of any of its listings.
+	Popularity int       `json:"popularity,omitempty"`
+	Stars      int       `json:"stars,omitempty"`
+	Updated    time.Time `json:"updated,omitzero"`
 }

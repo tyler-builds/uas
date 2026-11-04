@@ -143,6 +143,7 @@ func runSearch(ctx context.Context, w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	catalogPath := catalogFlag(fs)
 	limit := fs.Int("limit", 20, "maximum number of results")
+	sortBy := fs.String("sort", "relevance", "relevance, popular, updated or name")
 	asJSON := fs.Bool("json", false, "print results as JSON")
 	words, err := parseArgs(fs, args)
 	if err != nil {
@@ -157,7 +158,13 @@ func runSearch(ctx context.Context, w io.Writer, args []string) error {
 	}
 	defer db.Close()
 
-	results, err := db.Search(ctx, strings.Join(words, " "), *limit)
+	order := catalog.Order(*sortBy)
+	switch order {
+	case catalog.OrderRelevance, catalog.OrderPopular, catalog.OrderUpdated, catalog.OrderName:
+	default:
+		return fmt.Errorf("search: unknown -sort %q", *sortBy)
+	}
+	results, err := db.Search(ctx, strings.Join(words, " "), *limit, order)
 	if err != nil {
 		return err
 	}

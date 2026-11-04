@@ -33,10 +33,13 @@ type App struct {
 	query    *ui.Signal[string] // the search field's text
 	search   *ui.Signal[string] // the query being searched, set after a pause in typing
 	category *ui.Signal[string] // the category browsed when there is no search; "" is Popular
-	selected *ui.Signal[string] // the app whose page is open; "" shows the page list
-	jobs     *ui.Signal[map[string]job]
-	confirm  *ui.Signal[*pending] // an install waiting for the user's OK
-	removing *ui.Signal[*removal] // a removal waiting for the user's OK
+	// searchOrder and browseOrder sort search results and browsing; browsing has no relevance order.
+	searchOrder *ui.Signal[catalog.Order]
+	browseOrder *ui.Signal[catalog.Order]
+	selected    *ui.Signal[string] // the app whose page is open; "" shows the page list
+	jobs        *ui.Signal[map[string]job]
+	confirm     *ui.Signal[*pending] // an install waiting for the user's OK
+	removing    *ui.Signal[*removal] // a removal waiting for the user's OK
 
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
@@ -51,17 +54,19 @@ type App struct {
 // New creates the app for a session.
 func New(s *session.Session) *App {
 	return &App{
-		s:          s,
-		page:       ui.NewSignal(pageDiscover),
-		query:      ui.NewSignal(""),
-		search:     ui.NewSignal(""),
-		category:   ui.NewSignal(""),
-		selected:   ui.NewSignal(""),
-		jobs:       ui.NewSignal(map[string]job{}),
-		confirm:    ui.NewSignal[*pending](nil),
-		removing:   ui.NewSignal[*removal](nil),
-		catalogGen: ui.NewSignal(0),
-		icons:      newIconLoader(),
+		s:           s,
+		page:        ui.NewSignal(pageDiscover),
+		query:       ui.NewSignal(""),
+		search:      ui.NewSignal(""),
+		category:    ui.NewSignal(""),
+		searchOrder: ui.NewSignal(catalog.OrderRelevance),
+		browseOrder: ui.NewSignal(catalog.OrderPopular),
+		selected:    ui.NewSignal(""),
+		jobs:        ui.NewSignal(map[string]job{}),
+		confirm:     ui.NewSignal[*pending](nil),
+		removing:    ui.NewSignal[*removal](nil),
+		catalogGen:  ui.NewSignal(0),
+		icons:       newIconLoader(),
 	}
 }
 

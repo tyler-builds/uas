@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/copr"
@@ -99,12 +100,13 @@ func main() {
 			Fetcher: &copr.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "copr"), Arch: *arch,
 				Releases: releases, Log: log},
 			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
-			Key: "arch=" + *arch + " releases=" + *fedoraReleases,
+			Key: fmt.Sprintf("schema=%d arch=%s releases=%s", catalog.SchemaVersion, *arch, *fedoraReleases),
 		},
 		"github": &fetch.Cached{
 			Fetcher: &github.Fetcher{Client: client, Token: os.Getenv("GITHUB_TOKEN"), Arch: *arch, Log: log},
 			Dir:     filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
-			Key: "arch=" + *arch + " queries=" + strings.Join(github.DefaultQueries, "|"),
+			Key: fmt.Sprintf("schema=%d arch=%s queries=%s", catalog.SchemaVersion, *arch,
+				strings.Join(github.DefaultQueries, "|")),
 		},
 	}
 	var fetchers []fetch.Fetcher
