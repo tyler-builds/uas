@@ -302,3 +302,38 @@ func TestSearchWholeWordPrefix(t *testing.T) {
 		t.Fatalf("results = %+v, %v; want Godot Engine first", res, err)
 	}
 }
+
+// TestSearchShort ranks one- and two-letter searches by name prefix and popularity.
+func TestSearchShort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	app := func(id, name, summary string, pop int) App {
+		return App{ID: id, Kind: KindDesktopApp, Name: name, Summary: summary, Popularity: pop,
+			Listings: []Listing{{Source: SourceFlathub, Ref: "app/" + id + "/x86_64/stable", Name: name}}}
+	}
+	apps := []App{
+		app("org.example.Gimp", "GIMP", "Edit images", 500),
+		app("org.example.Go", "Go", "A language", 10),
+		app("org.example.Godot", "Godot Engine", "Make games", 1000),
+		app("org.example.Notes", "Notes", "Good notes", 5000), // "go" only in its summary
+	}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	res, err := db.Search(context.Background(), "go", SearchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range res {
+		ids = append(ids, r.ID)
+	}
+	// The exact name first, then name prefixes by popularity; a summary match doesn't count for two letters.
+	if strings.Join(ids, " ") != "org.example.Go org.example.Godot" {
+		t.Errorf("results = %v", ids)
+	}
+}

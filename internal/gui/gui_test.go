@@ -218,3 +218,28 @@ func TestUpdateShownOnlyWhenAvailable(t *testing.T) {
 			!u.HasRole(access.RoleButton, "Update 1 app")
 	})
 }
+
+// TestSearchAsYouType searches the first letter at once, so the page shows results instead of its empty
+// state, and the rest of a quick burst once typing pauses.
+func TestSearchAsYouType(t *testing.T) {
+	a, _, _ := testApp(t)
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
+	field := u.ByRole(access.RoleTextField, "Search apps")
+	field.Type("t")
+	if got := a.search.Peek(); got != "t" {
+		t.Fatalf("after the first letter, search = %q; want it at once", got)
+	}
+	field.Type("o")
+	field.Type("o")
+	field.Type("l")
+	if got := a.search.Peek(); got != "t" {
+		t.Errorf("mid-burst, search = %q; want it to wait for a pause", got)
+	}
+	u.Advance(searchDebounce + 10*time.Millisecond)
+	if got := a.search.Peek(); got != "tool" {
+		t.Errorf("after the pause, search = %q", got)
+	}
+	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
+}

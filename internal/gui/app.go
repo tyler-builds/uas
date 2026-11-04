@@ -70,7 +70,7 @@ type App struct {
 	db         *catalog.DB
 	icons      *iconLoader
 
-	cancelSearch func()    // stops a search waiting for typing to pause
+	cancelSearch func()    // set while typing is under way (see typed)
 	startup      sync.Once // the background catalog check at start
 }
 
@@ -350,18 +350,28 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 		Child(settings)
 }
 
-// searchDebounce is how long typing must pause before a search runs.
-const searchDebounce = 250 * time.Millisecond
+// searchDebounce is how long typing must pause before the latest text is searched. Searches take a few
+// milliseconds, so this only spares searching every letter of a fast burst.
+const searchDebounce = 100 * time.Millisecond
 
-// typed reacts to the search field: it opens the search page and searches once typing pauses.
+// typed reacts to the search field: it opens the search page and searches. The first keystroke after a
+// pause searches at once, so the page shows results rather than its empty state; keystrokes that follow
+// quickly search once typing pauses. cancelSearch is set while a burst is under way.
 func (a *App) typed(ctx *ui.Context, s string) {
-	if strings.TrimSpace(s) != "" {
+	q := strings.TrimSpace(s)
+	if q != "" {
 		a.showSearch()
 	}
-	if a.cancelSearch != nil {
-		a.cancelSearch()
+	if a.cancelSearch == nil {
+		a.search.Set(q)
+		a.cancelSearch = ctx.After(searchDebounce, func() { a.cancelSearch = nil })
+		return
 	}
-	a.cancelSearch = ctx.After(searchDebounce, func() { a.search.Set(strings.TrimSpace(s)) })
+	a.cancelSearch()
+	a.cancelSearch = ctx.After(searchDebounce, func() {
+		a.cancelSearch = nil
+		a.search.Set(q)
+	})
 }
 
 // showSearch opens the search page, unless it is open.

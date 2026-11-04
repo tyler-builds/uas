@@ -121,11 +121,32 @@ func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]Sea
 	if len(words) == 0 {
 		return nil, nil
 	}
+	if len(words) == 1 && len([]rune(words[0])) <= 2 && orderBy(opt.Order) == "" {
+		return d.searchShort(ctx, words[0], opt)
+	}
 	results, err := d.search(ctx, ftsQuery(words, "AND"), strings.Join(words, " "), opt)
 	if err != nil || len(results) > 0 || len(words) == 1 {
 		return results, err
 	}
 	return d.search(ctx, ftsQuery(words, "OR"), strings.Join(words, " "), opt)
+}
+
+// searchShort searches for one or two letters, as the first keystrokes of a search are. Nearly every app
+// matches them somewhere, so ranking by text relevance means scoring the whole catalog (30 to 50 ms) for
+// little use. Instead it matches names that start with them and puts the most popular first (about 3 ms).
+func (d *DB) searchShort(ctx context.Context, word string, opt SearchOptions) ([]SearchResult, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT `+resultColumns+`
+		FROM apps_fts
+		JOIN apps a ON a.id = apps_fts.app_id
+		WHERE apps_fts MATCH ?1
+		  AND (?4 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?4))
+		ORDER BY lower(a.name) = ?2 DESC, a.popularity DESC, a.stars DESC, lower(a.name)
+		LIMIT ?3`, `name : "`+word+`"*`, word, limitOr(opt.Limit), string(opt.Source))
+	if err != nil {
+		return nil, fmt.Errorf("search: %w", err)
+	}
+	return scanResults(rows)
 }
 
 func (d *DB) search(ctx context.Context, match, exactName string, opt SearchOptions) ([]SearchResult, error) {
