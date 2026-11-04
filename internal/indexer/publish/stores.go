@@ -3,8 +3,10 @@ package publish
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,6 +69,20 @@ func (s *HTTPStore) ListCatalogs(ctx context.Context) ([]Object, error) {
 	return objs, nil
 }
 
+// ListIcons implements Store.
+func (s *HTTPStore) ListIcons(ctx context.Context) ([]string, error) {
+	resp, err := s.do(ctx, http.MethodGet, "_icons", nil, 0, "")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var keys []string
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&keys); err != nil {
+		return nil, fmt.Errorf("list icons: %w", err)
+	}
+	return keys, nil
+}
+
 // Delete implements Store.
 func (s *HTTPStore) Delete(ctx context.Context, key string) error {
 	resp, err := s.do(ctx, http.MethodDelete, key, nil, 0, "")
@@ -83,10 +99,14 @@ type DirStore struct {
 
 // Put implements Store.
 func (s *DirStore) Put(_ context.Context, key string, body io.Reader, _ int64, _ string) error {
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+	dst, err := s.path(key)
+	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(s.Dir, ".upload-*")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".upload-*")
 	if err != nil {
 		return err
 	}
@@ -98,7 +118,28 @@ func (s *DirStore) Put(_ context.Context, key string, body io.Reader, _ int64, _
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(s.Dir, filepath.Base(key)))
+	return os.Rename(tmp.Name(), dst)
+}
+
+// path is where a key is stored: keys may have one directory, as icons do.
+func (s *DirStore) path(key string) (string, error) {
+	if !fs.ValidPath(key) || strings.Count(key, "/") > 1 {
+		return "", fmt.Errorf("bad key %q", key)
+	}
+	return filepath.Join(s.Dir, filepath.FromSlash(key)), nil
+}
+
+// ListIcons implements Store.
+func (s *DirStore) ListIcons(context.Context) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(s.Dir, "icons"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	var keys []string
+	for _, e := range entries {
+		keys = append(keys, "icons/"+e.Name())
+	}
+	return keys, err
 }
 
 // ListCatalogs implements Store.
@@ -120,5 +161,9 @@ func (s *DirStore) ListCatalogs(context.Context) ([]Object, error) {
 
 // Delete implements Store.
 func (s *DirStore) Delete(_ context.Context, key string) error {
-	return os.Remove(filepath.Join(s.Dir, filepath.Base(key)))
+	p, err := s.path(key)
+	if err != nil {
+		return err
+	}
+	return os.Remove(p)
 }

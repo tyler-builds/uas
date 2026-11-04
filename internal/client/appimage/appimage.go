@@ -1,4 +1,4 @@
-// Package appimage reads the desktop entry and icon out of an AppImage without running it.
+// Package appimage reads the desktop entry, icon and AppStream metainfo out of an AppImage without running it.
 //
 // A type 2 AppImage is a small ELF runtime followed by a squashfs image of the app. The image starts where
 // the ELF file ends (after its section header table), and holds the app's .desktop file and icon at its root.
@@ -24,10 +24,13 @@ type Info struct {
 	Desktop map[string]string
 	Icon    []byte
 	IconExt string // ".png" or ".svg"
+	// Metainfo is the app's AppStream metainfo file (usr/share/metainfo), if it ships one.
+	Metainfo []byte
 }
 
 const maxIcon = 4 << 20
 const maxDesktop = 256 << 10
+const maxMetainfo = 1 << 20
 
 // Inspect reads an AppImage file. It never executes it.
 func Inspect(name string) (*Info, error) {
@@ -36,15 +39,21 @@ func Inspect(name string) (*Info, error) {
 		return nil, err
 	}
 	defer f.Close()
-	off, err := squashfsOffset(f)
+	return InspectAt(f)
+}
+
+// InspectAt reads an AppImage from r, which need not be a local file: the indexer reads AppImages on GitHub a
+// few ranges at a time.
+func InspectAt(r io.ReaderAt) (*Info, error) {
+	off, err := squashfsOffset(r)
 	if err != nil {
 		return nil, err
 	}
-	r, err := squashfs.NewReaderAtOffset(f, off)
+	sq, err := squashfs.NewReaderAtOffset(r, off)
 	if err != nil {
 		return nil, fmt.Errorf("appimage: %w", err)
 	}
-	return fromFS(sqfs{r.FS})
+	return fromFS(sqfs{sq.FS})
 }
 
 // squashfsOffset returns where the squashfs image starts: the end of the ELF section header table.
@@ -136,7 +145,26 @@ func fromFS(fsys fs.FS) (*Info, error) {
 			break
 		}
 	}
+	info.Metainfo = findMetainfo(fsys)
 	return info, nil
+}
+
+// findMetainfo returns the first AppStream metainfo file in the image, or nil.
+func findMetainfo(fsys fs.FS) []byte {
+	for _, dir := range []string{"usr/share/metainfo", "usr/share/appdata"} {
+		entries, err := fs.ReadDir(fsys, dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if n := e.Name(); strings.HasSuffix(n, ".metainfo.xml") || strings.HasSuffix(n, ".appdata.xml") {
+				if b, err := readFile(fsys, dir+"/"+n, maxMetainfo); err == nil {
+					return b
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // readFile reads a file, following up to five relative symlinks that stay inside the image.

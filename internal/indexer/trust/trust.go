@@ -19,14 +19,35 @@ type RepoFacts struct {
 	Stars       int
 	Downloads   int       // downloads of the latest release's assets
 	LastRelease time.Time // the latest stable release
-	// ReleasesLastYear counts stable releases in the 12 months before now.
-	ReleasesLastYear int
-	License          string // SPDX ID, or "" if none was detected
+	// ReleasesLastYear counts releases, prereleases included, in the 12 months before now. Prereleases count
+	// because they show the project is worked on: some publish nightlies and a stable release now and then.
+	ReleasesLastYear    int
+	PrereleasesLastYear int    // how many of those are prereleases
+	MoreReleases        bool   // there may be more than ReleasesLastYear: only the newest few were read
+	License             string // SPDX ID, or "" if none was detected
 	// HasChecksum is true when the asset uas would install has a published SHA-256.
 	HasChecksum bool
 }
 
 const day = 24 * time.Hour
+
+// releaseCount says how many releases a repo had: "3 releases", or "8+ releases, 7 of them prereleases".
+func releaseCount(f RepoFacts) string {
+	s := plural(f.ReleasesLastYear, "release")
+	if f.MoreReleases {
+		s = fmt.Sprintf("%d+ releases", f.ReleasesLastYear)
+	}
+	switch p := f.PrereleasesLastYear; {
+	case p == 0:
+	case p == f.ReleasesLastYear && !f.MoreReleases && p == 1:
+		s += ", a prerelease"
+	case p == f.ReleasesLastYear:
+		s += ", all prereleases"
+	default:
+		s += fmt.Sprintf(", %d of them prereleases", p)
+	}
+	return s
+}
 
 // GitHub scores a GitHub repo's releases.
 func GitHub(f RepoFacts, now time.Time) catalog.Trust {
@@ -56,13 +77,14 @@ func GitHub(f RepoFacts, now time.Time) catalog.Trust {
 	// 100,000+ downloads of the latest release = 10.
 	add("Downloads", plural(f.Downloads, "download")+" of the latest release", logPoints(f.Downloads, 5, 10), 10)
 
+	activity := releaseCount(f) + " in the past year"
 	switch n := f.ReleasesLastYear; {
 	case n >= 4:
-		add("Release activity", plural(n, "release")+" in the past year", 15, 15)
+		add("Release activity", activity, 15, 15)
 	case n >= 2:
-		add("Release activity", plural(n, "release")+" in the past year", 10, 15)
+		add("Release activity", activity, 10, 15)
 	case n == 1:
-		add("Release activity", "1 release in the past year", 6, 15)
+		add("Release activity", activity, 6, 15)
 	default:
 		add("Release activity", "no releases in the past year", 0, 15)
 	}

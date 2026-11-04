@@ -56,3 +56,19 @@ func TestHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseCount(t *testing.T) {
+	for _, c := range []struct {
+		f    RepoFacts
+		want string
+	}{
+		{RepoFacts{ReleasesLastYear: 3}, "3 releases"},
+		{RepoFacts{ReleasesLastYear: 8, PrereleasesLastYear: 7, MoreReleases: true}, "8+ releases, 7 of them prereleases"},
+		{RepoFacts{ReleasesLastYear: 8, PrereleasesLastYear: 8, MoreReleases: true}, "8+ releases, all prereleases"},
+		{RepoFacts{ReleasesLastYear: 1, PrereleasesLastYear: 1}, "1 release, a prerelease"},
+	} {
+		if got := releaseCount(c.f); got != c.want {
+			t.Errorf("releaseCount(%+v) = %q, want %q", c.f, got, c.want)
+		}
+	}
+}

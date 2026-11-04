@@ -32,6 +32,8 @@ type Store interface {
 	Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error
 	// ListCatalogs returns every stored catalog file.
 	ListCatalogs(ctx context.Context) ([]Object, error)
+	// ListIcons returns the keys of the stored icons ("icons/<sha256>.png").
+	ListIcons(ctx context.Context) ([]string, error)
 	Delete(ctx context.Context, key string) error
 }
 

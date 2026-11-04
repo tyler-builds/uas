@@ -73,9 +73,16 @@ type Fetcher struct {
 	// on every run, so versions stay current while new apps show up within a week.
 	SweepCache string
 	SweepFor   time.Duration
-	Endpoint   string
-	Log        *slog.Logger
-	Now        func() time.Time
+	// MediaDir, when set, is where the names, icons and screenshots read from AppImages and READMEs are kept
+	// (see enrich.go). Without it listings carry only what the GitHub API says.
+	MediaDir string
+	// IconBase is the address icons are published under: an icon is at IconBase/icons/<file>.
+	IconBase string
+	// RESTEndpoint is GitHub's REST API, for tests.
+	RESTEndpoint string
+	Endpoint     string
+	Log          *slog.Logger
+	Now          func() time.Time
 }
 
 // Source implements fetch.Fetcher.
@@ -168,6 +175,9 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 			}
 			listings = append(listings, l)
 		}
+	}
+	if f.MediaDir != "" {
+		f.enrich(ctx, listings)
 	}
 	if f.Log != nil {
 		f.Log.Info("github repos checked", "repos", checked, "kept", len(listings), "below_min_score", skipped)
@@ -384,13 +394,19 @@ const sweepQuery = `query($q: String!, $after: String, $first: Int!) {
   }
 }`
 
+// recentReleases is how many of a repo's newest releases are read for its release activity.
+const (
+	recentReleases     = 8
+	recentReleasesText = "8"
+)
+
 // repoFields is everything toListing reads about a repo.
 const repoFields = `id nameWithOwner name description homepageUrl url stargazerCount createdAt isArchived isFork
       licenseInfo { spdxId }
       owner { login }
       latestRelease { tagName publishedAt isPrerelease isDraft
         releaseAssets(first: 40) { nodes { name downloadUrl size digest downloadCount } } }
-      releases(first: 8, orderBy: {field: CREATED_AT, direction: DESC}) {
+      releases(first: ` + recentReleasesText + `, orderBy: {field: CREATED_AT, direction: DESC}) {
         nodes { publishedAt isPrerelease isDraft }
       }`
 
@@ -549,12 +565,22 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 	if latest == nil || latest.IsPrerelease || latest.IsDraft {
 		return catalog.Listing{}, false
 	}
-	releasesLastYear := 0
+	releasesLastYear, prereleases, inYear := 0, 0, 0
 	for _, rel := range r.Releases.Nodes {
-		if !rel.IsPrerelease && !rel.IsDraft && now.Sub(rel.PublishedAt) <= 365*24*time.Hour {
-			releasesLastYear++
+		if now.Sub(rel.PublishedAt) > 365*24*time.Hour {
+			continue
+		}
+		inYear++
+		if rel.IsDraft {
+			continue
+		}
+		releasesLastYear++
+		if rel.IsPrerelease {
+			prereleases++
 		}
 	}
+	// Every release read is from the past year, so there may be more than were read.
+	more := inYear == len(r.Releases.Nodes) && len(r.Releases.Nodes) == recentReleases
 	assets := pickAssets(r.NameWithOwner, latest, arch)
 	if len(assets) == 0 {
 		return catalog.Listing{}, false
@@ -569,7 +595,7 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 	}
 	t := trust.GitHub(trust.RepoFacts{
 		Created: r.CreatedAt, Stars: r.StargazerCount, Downloads: downloads, LastRelease: latest.PublishedAt,
-		ReleasesLastYear: releasesLastYear, License: license, HasChecksum: assets[0].SHA256 != "",
+		ReleasesLastYear: releasesLastYear, PrereleasesLastYear: prereleases, MoreReleases: more, License: license, HasChecksum: assets[0].SHA256 != "",
 	}, now)
 
 	kind := catalog.KindDesktopApp

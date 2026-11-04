@@ -90,6 +90,21 @@ All endpoints below need confirming during the first spike.
   stay current and new apps appear within a week. A GitHub app's name comes from its release file when that spells the repo name
   (`T3-Code-0.1.7-x86_64.AppImage` makes `t3code` "T3 Code"), so searching for "t3 code" finds it.
 
+  A repo says little about the app it ships, so the indexer also looks **inside each AppImage**, with HTTP
+  range requests (`internal/indexer/fetch/rangeread`, about 400 KB and a second per app, never the whole
+  file). It reads the same squashfs as the client (`internal/client/appimage.InspectAt`). The desktop entry
+  gives the app's real name, a one-line summary (used when the repo has no description), categories and the
+  icon. AppStream metainfo, when the AppImage ships one, gives a description and screenshots. Otherwise up
+  to four screenshots come from the README: images named like screenshots first, never badges or logos,
+  each checked with a HEAD request to be a picture. What was found is kept per release file
+  (`github/media` in the indexer cache), so only new versions are read again.
+
+  Icons are scaled to at most 256 px, named by their SHA-256 and uploaded to R2 before the catalog
+  (`publish.Icons`, through `icons/<sha256>.png|svg` on the Worker). The Worker serves them as immutable,
+  and serves SVGs with a sandboxing Content-Security-Policy, because they come from third parties. A
+  GitHub listing never takes an AppStream ID from its metainfo. Otherwise any repo could claim a Flathub
+  app's ID and be merged into it as one of its sources.
+
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
 Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
@@ -164,7 +179,8 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
 - **catalog:** Shared schema and queries, used by both indexer and client. Schema version 3 stores each app's GitHub `stars` and `updated` (newest release of any listing) for
   sorting and display; version 2 added each app's
   `popularity` (the highest install count of its listings: Homebrew's installs-on-request in the past year,
-  Flathub's last-month installs from its `collection/popular` API times 12) and a precomputed search `boost`
+  Flathub's last-month installs from its `collection/popular` API times 12, matched by the Flatpak ID in the
+  listing's ref because an old-style AppStream ID such as `org.godotengine.Godot.desktop` differs from it) and a precomputed search `boost`
   that multiplies the bm25 score, so well-known apps rank first.
 - **state:** A local SQLite database of what UAS installed and from where (needed for GitHub apps, which nothing
   else tracks). Reconciled on startup against `flatpak list`, `brew list` and the rpm-ostree deployment, so

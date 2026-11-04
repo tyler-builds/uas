@@ -90,6 +90,8 @@ func main() {
 		os.Exit(2)
 	}
 	client := &http.Client{Timeout: 10 * time.Minute}
+	// What GitHub apps say about themselves inside their AppImages: names, icons, screenshots.
+	mediaDir := filepath.Join(*cache, "github", "media")
 	available := map[string]fetch.Fetcher{
 		"flathub": &flathub.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "flathub"), Arch: *arch,
 			File: *flathubFile},
@@ -104,10 +106,11 @@ func main() {
 		},
 		"github": &fetch.Cached{
 			Fetcher: &github.Fetcher{Client: client, Token: os.Getenv("GITHUB_TOKEN"), Arch: *arch, Log: log,
-				SweepMinStars: github.DefaultSweepMinStars, SweepCache: filepath.Join(*cache, "github", "sweep.json")},
+				SweepMinStars: github.DefaultSweepMinStars, SweepCache: filepath.Join(*cache, "github", "sweep.json"),
+				MediaDir: mediaDir, IconBase: *publishURL},
 			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
-			Key: fmt.Sprintf("schema=%d arch=%s queries=%s sweep=%d", catalog.SchemaVersion, *arch,
-				strings.Join(github.DefaultQueries, "|"), github.DefaultSweepMinStars),
+			Key: fmt.Sprintf("schema=%d arch=%s queries=%s sweep=%d media=1 icons=%s", catalog.SchemaVersion, *arch,
+				strings.Join(github.DefaultQueries, "|"), github.DefaultSweepMinStars, *publishURL),
 		},
 	}
 	var fetchers []fetch.Fetcher
@@ -134,6 +137,11 @@ func main() {
 	}
 
 	if store != nil {
+		// Icons first: the catalog points at them.
+		if _, err := publish.Icons(ctx, store, github.IconDir(mediaDir), log); err != nil {
+			log.Error("icon upload failed", "err", err)
+			os.Exit(1)
+		}
 		m, err := publish.Publish(ctx, store, *out, info, publish.Options{Key: signingKey, Keep: *keep, Log: log})
 		if err != nil {
 			log.Error("publish failed", "err", err)

@@ -32,9 +32,13 @@ func TestFromFS(t *testing.T) {
 		"example-notes.desktop": {Data: []byte(desktop)},
 		"example-notes.png":     {Data: png},
 		"AppRun":                {Data: []byte("#!/bin/sh")},
+		"usr/share/metainfo/org.example.Notes.metainfo.xml": {Data: []byte("<component/>")},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if string(info.Metainfo) != "<component/>" {
+		t.Errorf("metainfo = %q", info.Metainfo)
 	}
 	if info.Desktop["Name"] != "Example Notes" || info.Desktop["Exec"] != "AppRun --no-sandbox %U" {
 		t.Errorf("desktop = %v", info.Desktop)

@@ -11,7 +11,7 @@ public signals and shows the breakdown next to the install button, not only the 
 | Project age | 15 | under 3 months 0, under a year 5, 1 to 2 years 10, older 15 |
 | Stars | 25 | log scale: 10 stars ≈ 6, 100 ≈ 12, 1,000 ≈ 19, 10,000+ 25 |
 | Downloads of the latest release | 10 | log scale: 100,000+ downloads = 10 |
-| Release activity | 15 | stable releases in the past 12 months: 0 → 0, 1 → 6, 2 to 3 → 10, 4+ → 15 |
+| Release activity | 15 | releases in the past 12 months, prereleases included (nightlies show the project is worked on): 0 → 0, 1 → 6, 2 to 3 → 10, 4+ → 15. Only the 8 newest releases are read, so a repo with 8 in the past year shows "8+" |
 | Latest release | 15 | within 6 months 15, a year 10, 18 months 5, older 0 |
 | License | 10 | any recognized SPDX license 10 |
 | Checksum | 10 | the AppImage has a SHA-256 published by GitHub 10 |
