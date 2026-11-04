@@ -139,8 +139,8 @@ func main() {
 	if store != nil {
 		// Icons first: the catalog points at them.
 		if _, err := publish.Icons(ctx, store, github.IconDir(mediaDir), log); err != nil {
-			log.Error("icon upload failed", "err", err)
-			os.Exit(1)
+			// Not fatal: apps show a placeholder until a later run uploads their icons.
+			log.Warn("icon upload failed", "err", err)
 		}
 		m, err := publish.Publish(ctx, store, *out, info, publish.Options{Key: signingKey, Keep: *keep, Log: log})
 		if err != nil {
