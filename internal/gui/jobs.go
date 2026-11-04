@@ -52,7 +52,7 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 					t.Title("Restart to finish")
 				}
 			}
-			ui.InvalidateQueries(ctx, func(key string) bool { return key == "installed" })
+			ui.InvalidateQueries(ctx, func(key string) bool { return key == "installed" || key == "updates" })
 		})
 	}()
 }

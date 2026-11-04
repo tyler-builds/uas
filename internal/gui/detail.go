@@ -115,9 +115,14 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 	}).Key("detail:" + id)
 }
 
-// scroll puts a page in a scrolling column that fills the content area.
+// scroll puts a page in a scrolling column that fills the content area, centered up to its MaxWidth.
+//
+// The centering is a row with Justify(Center) and a growing page, not Align(Center) on the column: under
+// Align(Center), jamb sizes the page to its content, measures rows that use Basis(0) at no width, and the
+// page ends up far taller than its content (see jamb-notes.md).
 func scroll(page *ui.DivElement) ui.Element {
-	return ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).ScrollY().Align(ui.Center).Child(page)
+	return ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).ScrollY().
+		Child(ui.Div().Row().Justify(ui.Center).Child(page.Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))))
 }
 
 // installBox is the source picker and the install, update and remove buttons.
@@ -147,15 +152,12 @@ func (a *App) installBox(ctx *ui.Context, app *catalog.App, available []catalog.
 		action = ui.Button("Install").Primary().Loading(true).Disabled(true)
 	case copy != nil:
 		in := *copy
-		action = ui.Div().Row().Gap(8).Align(ui.Center).
+		row := ui.Div().Row().Gap(8).Align(ui.Center).
 			Child(ui.BadgeText(installedLabel(in)).Variant(ui.BadgeSuccess).StatusDot()).
-			Child(ui.Button("Update").Secondary().Loading(busy).OnClick(func() {
-				a.startJob(ctx, app.ID, "Updating "+app.Name, a.s.NeedsRestart(in.Source), app.Name+" is up to date",
-					func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
-			})).
-			Child(ui.Button("Remove").Danger().Disabled(busy).OnClick(func() {
-				a.removing.Set(&removal{app: in, name: app.Name})
-			}))
+			Child(a.updateControl(ctx, in, app.ID, app.Name, busy))
+		action = row.Child(ui.Button("Remove").Danger().Disabled(busy).OnClick(func() {
+			a.removing.Set(&removal{app: in, name: app.Name})
+		}))
 	default:
 		action = ui.Button("Install").Primary().Icon(icons.Download).Loading(busy).OnClick(func() {
 			a.requestInstall(ctx, app, listing)
@@ -176,6 +178,32 @@ func (a *App) installBox(ctx *ui.Context, app *catalog.App, available []catalog.
 			Child(ui.Text(job.status).FontSize(13).Truncate()))
 	}
 	return box
+}
+
+// updateControl is an Update button when the app has an update, "Up to date" when its source says it has
+// none, and nothing for sources that can't tell (layered packages update with the system).
+func (a *App) updateControl(ctx *ui.Context, in backend.InstalledApp, jobID, name string, busy bool) ui.Element {
+	if !a.canCheck(in) {
+		return ui.Div()
+	}
+	ups := a.updates(ctx)
+	version, ok := ups.Data[in.Key()]
+	switch {
+	case ok:
+		label := "Update"
+		if version != "" {
+			label = "Update to " + version
+		}
+		return ui.Button(label).Primary().Icon(icons.Download).Loading(busy).OnClick(func() {
+			a.startJob(ctx, jobID, "Updating "+name, a.s.NeedsRestart(in.Source), name+" is up to date",
+				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
+		})
+	case ups.Loading:
+		return ui.ProgressRing().Size(ui.RingSmall).Label("Checking for updates")
+	case ups.Err != nil:
+		return ui.Div()
+	}
+	return ui.BadgeText("Up to date").Variant(ui.BadgeNeutral)
 }
 
 func installedLabel(in backend.InstalledApp) string {

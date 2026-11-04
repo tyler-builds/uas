@@ -25,6 +25,8 @@ type fakeBackend struct {
 	mu        sync.Mutex
 	installed []backend.InstalledApp
 	removed   []string
+	updated   []string
+	available []backend.AvailableUpdate
 }
 
 func (f *fakeBackend) Source() catalog.SourceID        { return f.src }
@@ -42,8 +44,17 @@ func (f *fakeBackend) Install(_ context.Context, l catalog.Listing, p func(backe
 		Name: l.Name, Version: l.Version, Scope: "user"})
 	return nil
 }
-func (f *fakeBackend) Update(context.Context, backend.InstalledApp, func(backend.Progress)) error {
+func (f *fakeBackend) Update(_ context.Context, a backend.InstalledApp, _ func(backend.Progress)) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updated = append(f.updated, a.Ref)
+	f.available = nil
 	return nil
+}
+func (f *fakeBackend) Updates(context.Context) ([]backend.AvailableUpdate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]backend.AvailableUpdate(nil), f.available...), nil
 }
 func (f *fakeBackend) Remove(_ context.Context, a backend.InstalledApp, _ func(backend.Progress)) error {
 	f.mu.Lock()
@@ -118,6 +129,11 @@ func TestBrowseAndInstall(t *testing.T) {
 		return len(apps) == 1
 	})
 	waitText(t, u, "detail:org.example.Notes", "Installed 1.0")
+	// No update yet, so no Update button.
+	waitText(t, u, "detail:org.example.Notes", "Up to date")
+	if u.Tree().Find(access.RoleButton, "Update") != nil {
+		t.Error("an Update button with no update available")
+	}
 
 	// Remove asks first.
 	clickButton(u, "Remove")
@@ -178,4 +194,26 @@ func TestMinimumWindowSize(t *testing.T) {
 	if w := u.Runtime().ContentWidth(); w > 760 {
 		t.Errorf("the app page is %v px wide at the minimum window width of 760", w)
 	}
+}
+
+func TestUpdateShownOnlyWhenAvailable(t *testing.T) {
+	a, fp, _ := testApp(t)
+	ref := "app/org.example.Notes/x86_64/stable"
+	fp.installed = []backend.InstalledApp{{Source: catalog.SourceFlathub, Ref: ref, AppID: "org.example.Notes",
+		Name: "Notes", Version: "1.0", Scope: "user"}}
+	fp.available = []backend.AvailableUpdate{{Ref: ref, Scope: "user", Version: "1.1"}}
+	a.page.Set(pageInstalled)
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+
+	clickButton(u, "Update 1 app")
+	u.WaitFor("the update", func() bool {
+		fp.mu.Lock()
+		defer fp.mu.Unlock()
+		return len(fp.updated) == 1
+	})
+	u.WaitFor("the update buttons to go", func() bool {
+		return u.Tree().Find(access.RoleButton, "Update to 1.1") == nil &&
+			u.Tree().Find(access.RoleButton, "Update 1 app") == nil
+	})
 }

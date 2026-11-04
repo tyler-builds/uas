@@ -67,6 +67,36 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 	return apps, nil
 }
 
+// Updates implements backend.UpdateChecker. It asks the remotes of the user and system installations;
+// an installation with no remotes has nothing to update.
+func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
+	var ups []backend.AvailableUpdate
+	var errs []error
+	for _, scope := range []string{string(settings.ScopeUser), string(settings.ScopeSystem)} {
+		out, err := b.Runner.Run(ctx, b.Path, []string{"remote-ls", "--" + scope, "--updates", "--app",
+			"--columns=application,ref,version"}, nil)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, line := range strings.Split(out, "\n") {
+			f := strings.Split(line, "\t")
+			if len(f) != 3 || f[1] == "" {
+				continue
+			}
+			ref := f[1]
+			if !strings.HasPrefix(ref, "app/") {
+				ref = "app/" + ref
+			}
+			ups = append(ups, backend.AvailableUpdate{Ref: ref, Scope: scope, Version: f[2]})
+		}
+	}
+	if len(errs) == 2 {
+		return nil, errs[0]
+	}
+	return ups, nil
+}
+
 // Install implements backend.Backend. In user scope it first adds Flathub as a user remote if needed, which
 // needs no password.
 func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(backend.Progress)) error {

@@ -13,6 +13,7 @@ import (
 	"github.com/tyler-builds/jamb/ui"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/session"
 )
@@ -138,16 +139,11 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		}
 	}
 
-	running := 0
-	for id, j := range a.jobs.Get() {
-		if !j.done && id != "catalog" {
-			running++
-		}
-	}
+	pendingUpdates := len(a.updates(ctx).Data)
 	return ui.Div().Row().Size(ui.Full, ui.Full).Background(t.Background).TextColor(t.Text).
 		Child(ui.Sidebar(a.page,
 			ui.SidebarItem{Key: pageDiscover, Label: "Discover", Icon: icons.Compass},
-			ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Package, Badge: running},
+			ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Package, Badge: pendingUpdates},
 			ui.SidebarItem{Key: pageSettings, Label: "Settings", Icon: icons.Settings},
 		).Label("uas").Width(ui.Px(200)).OnChange(func(string) { a.selected.Set("") }).
 			Header(ui.Div().Row().Align(ui.Center).Gap(10).PaddingX(16).PaddingY(14).
@@ -157,6 +153,25 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.confirmDialog(ctx)).
 		Child(a.removeDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
+}
+
+// updates returns the available updates by InstalledApp.Key. Checking asks the network, so it is kept for
+// ten minutes; jobs and the Refresh button check again.
+func (a *App) updates(ctx *ui.Context) ui.QueryResult[map[string]string] {
+	return ui.Query(ctx, "updates", func(c context.Context) (map[string]string, error) {
+		ups, err := a.s.Updates(c)
+		if len(ups) > 0 || err == nil {
+			// Partial results are still useful when one source can't be reached.
+			return ups, nil
+		}
+		return ups, err
+	}, ui.QueryStaleTime(10*time.Minute))
+}
+
+// canCheck reports whether the source of an installed app can tell when it has an update.
+func (a *App) canCheck(in backend.InstalledApp) bool {
+	_, ok := a.s.Backends[in.Source].(backend.UpdateChecker)
+	return ok
 }
 
 // key makes a query key that changes when the catalog is replaced.

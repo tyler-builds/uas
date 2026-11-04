@@ -29,6 +29,7 @@ commands:
   install <app-id>     install an app
   remove <app-id>      remove an installed app
   update <app-id>      update an installed app
+  updates              list installed apps that have updates
   list                 list installed apps
   system               show what uas detected about this system
   settings [key value] show or change settings
@@ -57,6 +58,8 @@ func main() {
 		err = runRemove(ctx, args)
 	case "update":
 		err = runUpdate(ctx, args)
+	case "updates":
+		err = runUpdates(ctx, os.Stdout, args)
 	case "list":
 		err = runList(ctx, os.Stdout, args)
 	case "system":

@@ -142,3 +142,23 @@ func TestRemoveAndUpdateUseAppScope(t *testing.T) {
 		t.Error("Remove with a malformed scope succeeded")
 	}
 }
+
+func TestUpdates(t *testing.T) {
+	r := &fakeRunner{outputs: map[string]string{
+		"remote-ls --user --updates --app --columns=application,ref,version":   "",
+		"remote-ls --system --updates --app --columns=application,ref,version": "org.example.App\tapp/org.example.App/x86_64/stable\t2.0\n",
+	}}
+	b := &Backend{Runner: r, Path: "flatpak", Scope: settings.ScopeUser}
+	ups, err := b.Updates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []backend.AvailableUpdate{{Ref: "app/org.example.App/x86_64/stable", Scope: "system", Version: "2.0"}}
+	if !reflect.DeepEqual(ups, want) {
+		t.Errorf("updates = %+v", ups)
+	}
+	key := backend.InstalledApp{Source: catalog.SourceFlathub, Ref: "app/org.example.App/x86_64/stable", Scope: "system"}.Key()
+	if key != backend.UpdateKey(catalog.SourceFlathub, ups[0].Scope, ups[0].Ref) {
+		t.Error("an installed app's key does not match its update's key")
+	}
+}

@@ -211,6 +211,29 @@ func (b *Backend) download(ctx context.Context, a catalog.Asset, dst string, pro
 	return nil
 }
 
+// Updates implements backend.UpdateChecker: an app has an update when the catalog's current AppImage has a
+// different checksum from the installed one.
+func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
+	if b.Latest == nil {
+		return nil, nil
+	}
+	st, err := b.State.Load()
+	if err != nil {
+		return nil, err
+	}
+	var ups []backend.AvailableUpdate
+	for _, g := range st.GitHub {
+		l, err := b.Latest(ctx, g.Repo)
+		if err != nil {
+			continue // no longer in the catalog: nothing to offer
+		}
+		if a, ok := l.Asset(catalog.AssetAppImage); ok && a.SHA256 != "" && a.SHA256 != g.SHA256 {
+			ups = append(ups, backend.AvailableUpdate{Ref: g.Repo, Scope: "user", Version: l.Version})
+		}
+	}
+	return ups, nil
+}
+
 // Update implements backend.Backend: it installs the catalog's current release if it differs.
 func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress func(backend.Progress)) error {
 	if a.Source != catalog.SourceGitHub {

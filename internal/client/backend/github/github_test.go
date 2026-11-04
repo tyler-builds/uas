@@ -88,6 +88,15 @@ func TestInstallUpdateRemove(t *testing.T) {
 		t.Fatalf("installed = %+v", apps)
 	}
 
+	if ups, err := b.Updates(ctx); err != nil || len(ups) != 0 {
+		t.Errorf("updates with the current release installed = %+v, %v", ups, err)
+	}
+	b.Latest = func(context.Context, string) (catalog.Listing, error) { return l2, nil }
+	if ups, err := b.Updates(ctx); err != nil || len(ups) != 1 || ups[0].Version != "2.0" {
+		t.Errorf("updates with a newer release = %+v, %v", ups, err)
+	}
+	b.Latest = func(context.Context, string) (catalog.Listing, error) { return l1, nil }
+
 	// Same release: nothing to do. New release: reinstalled.
 	if err := b.Update(ctx, apps[0], nil); err != nil {
 		t.Fatal(err)

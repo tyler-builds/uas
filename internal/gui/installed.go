@@ -2,6 +2,9 @@ package gui
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/tyler-builds/jamb/icons"
@@ -15,6 +18,13 @@ import (
 func (a *App) installedPage(ctx *ui.Context) ui.Element {
 	t := ctx.Theme()
 	res := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	ups := a.updates(ctx)
+	var withUpdates []backend.InstalledApp
+	for _, in := range res.Data {
+		if _, ok := ups.Data[in.Key()]; ok {
+			withUpdates = append(withUpdates, in)
+		}
+	}
 	var body ui.Element
 	switch {
 	case res.Loading:
@@ -35,11 +45,39 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 			Child(ui.Text("Installed").FontSize(22).Semibold()).
 			Child(ui.If(len(res.Data) > 0, ui.Badge(len(res.Data)).Noun("apps"))).
 			Child(ui.Spacer()).
-			Child(ui.Button("Refresh").Icon(icons.RefreshCw).Secondary().Small().Loading(res.Fetching).
-				OnClick(res.Refetch))).
+			Child(ui.If(len(withUpdates) > 0, ui.Button(updatesLabel(len(withUpdates))).Icon(icons.Download).
+				Primary().Small().OnClick(func() { a.updateAll(ctx, withUpdates) }))).
+			Child(ui.Button("Refresh").Icon(icons.RefreshCw).Secondary().Small().
+				Loading(res.Fetching || ups.Fetching).
+				OnClick(func() {
+					res.Refetch()
+					ups.Refetch()
+				}))).
 		Child(ui.Text("Packages layered onto the system image update with the system.").FontSize(13).
 			TextColor(t.TextMuted)).
 		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).Child(body))
+}
+
+func updatesLabel(n int) string {
+	if n == 1 {
+		return "Update 1 app"
+	}
+	return "Update " + strconv.Itoa(n) + " apps"
+}
+
+// updateAll updates the apps one after another in the background.
+func (a *App) updateAll(ctx *ui.Context, apps []backend.InstalledApp) {
+	a.startJob(ctx, "update-all", updatesLabel(len(apps)), false, "Updates installed",
+		func(c context.Context, p func(backend.Progress)) error {
+			var errs []error
+			for _, in := range apps {
+				p(backend.Progress{Message: "Updating " + in.Name})
+				if err := a.s.Update(c, in, p); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", in.Name, err))
+				}
+			}
+			return errors.Join(errs...)
+		})
 }
 
 // installedRow is one installed app, matched to the catalog for its icon and page when possible.
@@ -80,10 +118,12 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp) ui.Element 
 		if match.Data != nil {
 			row = row.Child(ui.Button("Details").Ghost().Small().OnClick(func() { a.selected.Set(appID) }))
 		}
-		if a.s.NeedsRestart(in.Source) {
-			// Layered packages update with the system image; no per-app update.
-		} else {
-			row = row.Child(ui.Button("Update").Secondary().Small().Loading(busy).OnClick(func() {
+		if version, ok := a.updates(ctx).Data[in.Key()]; ok {
+			label := "Update"
+			if version != "" {
+				label = "Update to " + version
+			}
+			row = row.Child(ui.Button(label).Primary().Small().Loading(busy).OnClick(func() {
 				a.startJob(ctx, appID, "Updating "+name, false, name+" is up to date",
 					func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 			}))

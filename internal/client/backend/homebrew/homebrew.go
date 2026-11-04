@@ -61,6 +61,31 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 	return apps, nil
 }
 
+// Updates implements backend.UpdateChecker.
+func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
+	out, err := b.Runner.Run(ctx, b.Path, []string{"outdated", "--json=v2", "--formula"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Formulae []struct {
+			Name    string `json:"name"`
+			Current string `json:"current_version"`
+			Pinned  bool   `json:"pinned"`
+		} `json:"formulae"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		return nil, fmt.Errorf("brew outdated: %w", err)
+	}
+	var ups []backend.AvailableUpdate
+	for _, f := range res.Formulae {
+		if !f.Pinned {
+			ups = append(ups, backend.AvailableUpdate{Ref: f.Name, Scope: "user", Version: f.Current})
+		}
+	}
+	return ups, nil
+}
+
 // Install implements backend.Backend.
 func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(backend.Progress)) error {
 	if l.Source != catalog.SourceHomebrew {

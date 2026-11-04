@@ -63,3 +63,19 @@ func TestCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdates(t *testing.T) {
+	r := &fakeRunner{output: `{"formulae": [
+		{"name": "pipx", "installed_versions": ["1.18.11"], "current_version": "1.18.12", "pinned": false},
+		{"name": "held", "installed_versions": ["1.0"], "current_version": "2.0", "pinned": true}], "casks": []}`}
+	ups, err := (&Backend{Runner: r, Path: "brew"}).Updates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ups) != 1 || ups[0] != (backend.AvailableUpdate{Ref: "pipx", Scope: "user", Version: "1.18.12"}) {
+		t.Errorf("updates = %+v", ups)
+	}
+	if r.calls[0] != "brew outdated --json=v2 --formula" {
+		t.Errorf("call = %q", r.calls[0])
+	}
+}

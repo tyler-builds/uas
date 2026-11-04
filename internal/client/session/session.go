@@ -204,6 +204,42 @@ func (s *Session) names(ctx context.Context, id string) map[string]bool {
 	return names
 }
 
+// Updates returns the available updates of every source that can check, by InstalledApp.Key. A source whose
+// check fails is left out, and its error is returned alongside the others' results.
+func (s *Session) Updates(ctx context.Context) (map[string]string, error) {
+	type result struct {
+		src catalog.SourceID
+		ups []backend.AvailableUpdate
+		err error
+	}
+	var checks []catalog.SourceID
+	for _, src := range catalog.SourcePrecedence {
+		if _, ok := s.Backends[src].(backend.UpdateChecker); ok {
+			checks = append(checks, src)
+		}
+	}
+	results := make(chan result, len(checks))
+	for _, src := range checks {
+		go func() {
+			ups, err := s.Backends[src].(backend.UpdateChecker).Updates(ctx)
+			results <- result{src, ups, err}
+		}()
+	}
+	updates := map[string]string{}
+	var errs []error
+	for range checks {
+		r := <-results
+		if r.err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", r.src.Name(), r.err))
+			continue
+		}
+		for _, u := range r.ups {
+			updates[backend.UpdateKey(r.src, u.Scope, u.Ref)] = u.Version
+		}
+	}
+	return updates, errors.Join(errs...)
+}
+
 // Install installs l.
 func (s *Session) Install(ctx context.Context, l catalog.Listing, progress func(backend.Progress)) error {
 	b := s.Backends[l.Source]

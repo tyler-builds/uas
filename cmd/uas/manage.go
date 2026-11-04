@@ -240,3 +240,42 @@ func (p *progressPrinter) done() {
 		p.dirty = false
 	}
 }
+
+func runUpdates(ctx context.Context, w io.Writer, args []string) error {
+	fs := flag.NewFlagSet("updates", flag.ContinueOnError)
+	if rest, err := parseArgs(fs, args); err != nil {
+		return err
+	} else if len(rest) > 0 {
+		return errors.New("updates: takes no arguments")
+	}
+	catalogPath, _ := paths.Catalog()
+	e, err := session.Load(ctx, "", catalogPath)
+	if err != nil {
+		return err
+	}
+	apps, err := e.Installed(ctx)
+	if err != nil {
+		return err
+	}
+	ups, checkErr := e.Updates(ctx)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	n := 0
+	for _, a := range apps {
+		if v, ok := ups[a.Key()]; ok {
+			if n == 0 {
+				fmt.Fprintln(tw, "NAME\tID\tINSTALLED\tAVAILABLE\tSOURCE")
+			}
+			n++
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", truncate(a.Name, 30), a.AppID, a.Version, v, a.Source.Name())
+		}
+	}
+	tw.Flush()
+	if n == 0 {
+		fmt.Fprintln(w, "Everything is up to date.")
+	}
+	fmt.Fprintln(w, "Packages layered onto the system image update with the system (ujust update).")
+	if checkErr != nil {
+		fmt.Fprintln(w, "Some sources could not be checked:", checkErr)
+	}
+	return nil
+}

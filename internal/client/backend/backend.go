@@ -53,6 +53,27 @@ type Backend interface {
 	Remove(ctx context.Context, a InstalledApp, progress func(Progress)) error
 }
 
+// AvailableUpdate is a newer version of an installed app.
+type AvailableUpdate struct {
+	Ref     string `json:"ref"`
+	Scope   string `json:"scope"`
+	Version string `json:"version,omitempty"`
+}
+
+// UpdateChecker is implemented by backends that can tell which installed apps have updates. Backends
+// without it (layered packages, which update with the system image) offer no per-app updates.
+type UpdateChecker interface {
+	Updates(ctx context.Context) ([]AvailableUpdate, error)
+}
+
+// UpdateKey identifies an installed app among the updates of every source.
+func UpdateKey(src catalog.SourceID, scope, ref string) string {
+	return string(src) + "|" + scope + "|" + ref
+}
+
+// Key returns the app's UpdateKey.
+func (a InstalledApp) Key() string { return UpdateKey(a.Source, a.Scope, a.Ref) }
+
 // Restarter is implemented by backends whose changes take effect only after a restart.
 type Restarter interface {
 	NeedsRestart() bool
