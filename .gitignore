@@ -3,3 +3,4 @@
 *.db.tmp
 .wrangler/
 node_modules/
+jamb-notes.md

@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/refresh"
+	"github.com/tyler-builds/uas/internal/client/session"
 )
 
 const usage = `usage: uas <command> [flags] [args]
@@ -100,29 +100,14 @@ func catalogFlag(fs *flag.FlagSet) *string {
 	return fs.String("catalog", def, "catalog database (or set "+paths.CatalogEnv+")")
 }
 
-// openCatalog opens the local catalog, downloading it first if there is none yet.
-func openCatalog(ctx context.Context, path string) (*catalog.DB, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintln(os.Stderr, "Downloading the app catalog...")
-		if _, err := refresh.Refresh(ctx, refreshOptions(path)); err != nil {
-			return nil, fmt.Errorf("download catalog: %w", err)
-		}
-	}
-	return catalog.Open(path)
+// openCatalog opens the session's catalog, downloading it first if there is none yet.
+func openCatalog(ctx context.Context, e *session.Session) (*catalog.DB, error) {
+	return e.OpenCatalog(ctx, func(msg string) { fmt.Fprintln(os.Stderr, msg) })
 }
 
-func refreshOptions(catalogPath string) refresh.Options {
-	base := os.Getenv(refresh.BaseURLEnv)
-	if base == "" {
-		base = refresh.DefaultBaseURL
-	}
-	return refresh.Options{
-		BaseURL:     base,
-		TrustedKeys: refresh.TrustedKeys(),
-		CatalogPath: catalogPath,
-		Client:      &http.Client{Timeout: 5 * time.Minute},
-		UserAgent:   "uas",
-	}
+// openCatalogAt opens the catalog at path for commands that need no session.
+func openCatalogAt(ctx context.Context, path string) (*catalog.DB, error) {
+	return (&session.Session{CatalogPath: path}).OpenCatalog(ctx, func(msg string) { fmt.Fprintln(os.Stderr, msg) })
 }
 
 func runRefresh(ctx context.Context, w io.Writer, args []string) error {
@@ -133,7 +118,7 @@ func runRefresh(ctx context.Context, w io.Writer, args []string) error {
 	} else if len(rest) > 0 {
 		return errors.New("refresh: takes no arguments")
 	}
-	res, err := refresh.Refresh(ctx, refreshOptions(*catalogPath))
+	res, err := refresh.Refresh(ctx, session.RefreshOptions(*catalogPath))
 	if err != nil {
 		return err
 	}
@@ -163,7 +148,7 @@ func runSearch(ctx context.Context, w io.Writer, args []string) error {
 	if len(words) == 0 {
 		return errors.New("search: give one or more words to search for")
 	}
-	db, err := openCatalog(ctx, *catalogPath)
+	db, err := openCatalogAt(ctx, *catalogPath)
 	if err != nil {
 		return err
 	}
@@ -216,7 +201,7 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 	if len(ids) != 1 {
 		return errors.New("info: give exactly one app ID (see \"uas search\")")
 	}
-	db, err := openCatalog(ctx, *catalogPath)
+	db, err := openCatalogAt(ctx, *catalogPath)
 	if err != nil {
 		return err
 	}

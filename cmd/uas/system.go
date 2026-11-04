@@ -13,6 +13,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/backend/copr"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/paths"
+	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/settings"
 )
 
@@ -25,11 +26,11 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 		return errors.New("system: takes no arguments")
 	}
 	catalogPath, _ := paths.Catalog()
-	e, err := loadEnv(ctx, "", catalogPath)
+	e, err := session.Load(ctx, "", catalogPath)
 	if err != nil {
 		return err
 	}
-	p := e.platform
+	p := e.Platform
 	if *asJSON {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
@@ -72,7 +73,7 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 	fmt.Fprintln(w, "\nSources uas can install from:")
 	for _, s := range catalog.SourcePrecedence {
 		state := "not supported yet"
-		switch b := e.backends[s].(type) {
+		switch b := e.Backends[s].(type) {
 		case nil:
 		case *rpmostree.Backend:
 			state = fmt.Sprintf("ready (layering onto Fedora %d)", b.Release)
