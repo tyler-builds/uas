@@ -90,7 +90,7 @@ func buildTheme(t *ui.Theme, p palette) *ui.Theme {
 
 	t.Sidebar = ui.SidebarStyle{
 		Pane:         ui.Style{Background: h(p.panel)},
-		Item:         ui.Style{Radius: radiusS, FontSize: 14, MinHeight: ui.Px(42)},
+		Item:         ui.Style{Radius: radiusS, FontSize: 14, MinHeight: ui.Px(40)},
 		ItemSelected: ui.Style{Background: h(p.surfaceActive), TextColor: h(p.text), FontWeight: ui.FontSemibold},
 		Indicator:    ui.Style{Clear: ui.ClearBackground}, // the fill alone marks the selected item
 		Heading:      ui.Style{TextColor: h(p.textSubtle), FontSize: 11},
@@ -227,10 +227,15 @@ func sourceColor(ctx *ui.Context, s catalog.SourceID) ui.Color { return tintColo
 const verifiedTip = "Flathub has confirmed that the publisher is the app's own developer, through the " +
 	"developer's website or code-hosting account"
 
+// glyph is an icon in the accent color, for page headers.
+func glyph(ctx *ui.Context, ic *icons.Icon, size float32) ui.Element {
+	return ui.Icon(ic).Size(size).Color(ctx.Theme().Accent)
+}
+
 // sourceTag is a source's icon in its color followed by its name, as the lists show where an app comes from.
 func sourceTag(ctx *ui.Context, s catalog.SourceID) ui.Element {
 	return ui.Div().Row().Align(ui.Center).Gap(6).Shrink(0).Tooltip(s.Name() + ": " + sourceTips[s]).
-		Child(ui.Icon(sourceIcons[s]).Size(15).Color(sourceColor(ctx, s))).
+		Child(sourceMark(ctx, s, 15)).
 		Child(ui.Text(s.Name()).FontSize(13).TextColor(ctx.Theme().TextMuted))
 }
 
@@ -269,7 +274,7 @@ func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
 	c := sourceColor(ctx, s)
 	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(10).Height(ui.Px(26)).Radius(13).Shrink(0).
 		Background(c.Alpha(0.14)).Tooltip(sourceTips[s]).
-		Child(ui.Icon(sourceIcons[s]).Size(14).Color(c)).
+		Child(sourceMark(ctx, s, 14)).
 		Child(ui.Text(s.Name()).FontSize(12.5).Semibold().TextColor(c))
 }
 

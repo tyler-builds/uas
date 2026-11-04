@@ -5,7 +5,7 @@ components instead of raw sizes and colors.
 
 ## Layout
 
-- **Sidebar:** 42px items; the selected one is marked by its fill alone, with no bar. The uas mark, then Home, Search and Sources; a "Categories" group (Development, Games,
+- **Sidebar:** 40px items; the selected one is marked by its fill alone, with no bar. The uas mark, then Home, Search and Sources; a "Categories" group (Development, Games,
   Graphics, Internet, Multimedia, Productivity, System, Utilities); a "Library" group with Installed and
   Updates and their counts; the catalog's freshness at the bottom.
 - **Top bar:** a back button when there is somewhere to go back to, a pill-shaped search field (typing
@@ -37,10 +37,9 @@ components instead of raw sizes and colors.
 - **Palette:** charcoal surfaces with a teal accent (`#2dd4bf` dark, `#0d9488` light). Primary buttons are
   teal with dark text in the dark theme. `gui.Themes()` builds both themes over jamb's, so every widget picks
   them up, and the window follows the system's light or dark mode.
-- **Sources:** each has a color and an icon, shown with its name wherever an app's sources are listed:
-  Flathub blue with an open package, Fedora violet with layers (its installs layer onto the system image),
-  Homebrew amber with a beer mug, COPR rose with a hammer (packages built by the project owner), GitHub gray
-  with a branch. A Flathub-verified publisher gets a green shield. Hovering any of them explains it.
+- **Sources:** each has a color and its own logo (`sourceMark`), shown with its name wherever an app's
+  sources are listed: Flathub blue, Fedora violet, Homebrew amber, GitHub gray. The logos are Simple Icons
+  SVGs tinted through `currentColor` (`internal/gui/logos`). COPR has no logo and shows a rose hammer. A Flathub-verified publisher gets a green shield. Hovering any of them explains it.
 
 - **Surfaces:** cards, rows and tiles are one flat color with no border, lighter than the page (the light
   theme's page is a soft gray so white cards stand out). Hovering lightens a clickable one.

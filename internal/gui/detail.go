@@ -197,7 +197,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 			for _, l := range available {
 				if listingKey(l) == v {
 					return ui.Div().Row().Align(ui.Center).Gap(space2).
-						Child(ui.Icon(sourceIcons[l.Source]).Size(16).Color(sourceColor(ctx, l.Source))).
+						Child(sourceMark(ctx, l.Source, 16)).
 						Child(ui.Text(listingLabel(l)).FontSize(13).Truncate())
 				}
 			}
@@ -220,24 +220,25 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 		value, label string
 		color        ui.Color
 		tip          string
+		mark         ui.Element // drawn instead of icon when set
 	}
 	var stats []stat
 	switch {
 	case app.Popularity > 0:
 		stats = append(stats, stat{icons.Download, compact(app.Popularity), "Installs a year", t.TextMuted,
-			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year"})
+			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year", nil})
 	case app.Stars > 0:
-		stats = append(stats, stat{icons.Star, compact(app.Stars), "GitHub stars", t.TextMuted, ""})
+		stats = append(stats, stat{icons.Star, compact(app.Stars), "GitHub stars", t.TextMuted, "", nil})
 	}
 	if !app.Updated.IsZero() {
-		stats = append(stats, stat{icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "Latest release", t.TextMuted, ""})
+		stats = append(stats, stat{icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "Latest release", t.TextMuted, "", nil})
 	}
 	if listing.Version != "" {
-		stats = append(stats, stat{icons.Tag, shortVersion(listing.Version), "Version", t.TextMuted, listing.Version})
+		stats = append(stats, stat{icons.Tag, shortVersion(listing.Version), "Version", t.TextMuted, listing.Version, nil})
 	}
 	switch {
 	case listing.Verified:
-		stats = append(stats, stat{icons.ShieldCheck, "Verified", "Publisher", t.Success, verifiedTip})
+		stats = append(stats, stat{icons.ShieldCheck, "Verified", "Publisher", t.Success, verifiedTip, nil})
 	case listing.Trust != nil:
 		c := t.Success
 		if listing.Trust.Score < 50 {
@@ -246,10 +247,10 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 			c = t.Warning
 		}
 		stats = append(stats, stat{icons.ShieldCheck, fmt.Sprintf("%d / 100", listing.Trust.Score), "Trust score", c,
-			"How well kept the project is; see the breakdown below"})
+			"How well kept the project is; see the breakdown below", nil})
 	case listing.Source != "":
-		stats = append(stats, stat{sourceIcons[listing.Source], listing.Source.Name(), "Source",
-			sourceColor(ctx, listing.Source), sourceTips[listing.Source]})
+		stats = append(stats, stat{mark: sourceMark(ctx, listing.Source, 22), value: listing.Source.Name(),
+			label: "Source", tip: sourceTips[listing.Source]})
 	}
 	row := ui.Div().Row().Align(ui.Center).PaddingY(space2)
 	for i, s := range stats {
@@ -258,7 +259,8 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 		}
 		cell := ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space3).Grow(1).Basis(ui.Px(0)).
 			MinWidth(ui.Px(0)).
-			Child(ui.Icon(s.icon).Size(22).Color(s.color)).
+			Child(ui.If(s.mark != nil, s.mark)).
+			Child(ui.If(s.mark == nil, ui.Element(ui.Icon(s.icon).Size(22).Color(s.color)))).
 			Child(ui.Div().Column().Gap(2).
 				Child(ui.Text(s.value).FontSize(17).Semibold()).
 				Child(muted(ctx, s.label)))
@@ -288,7 +290,7 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 	panel := ui.Div().Column().Gap(space5)
 	if listing.Source != "" {
 		panel = panel.Child(field("Source", ui.Div().Row().Align(ui.Center).Gap(space2).
-			Child(ui.Icon(sourceIcons[listing.Source]).Size(20).Color(sourceColor(ctx, listing.Source))).
+			Child(sourceMark(ctx, listing.Source, 20)).
 			Child(ui.Text(listing.Source.Name()).FontSize(17).Semibold())))
 	}
 	if c := mainCategory(app.Categories); c != "" {

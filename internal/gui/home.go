@@ -100,14 +100,12 @@ func (a *App) featured(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	// technology reads them (a canvas is exposed as one image).
 	return ui.Div().Height(ui.Px(220)).Radius(radiusXL).ClipContent().
 		Child(art2).
-		Child(ui.Div().Column().Justify(ui.Center).Gap(space2).PaddingX(space8 + 8).Height(ui.Full).
+		Child(ui.Div().Column().Justify(ui.Center).Gap(space3).PaddingX(space8 + 8).Height(ui.Full).
 			Child(ui.Text("FEATURED").FontSize(12).Semibold().TextColor(t.TextMuted)).
-			Child(ui.Div().Column().
-				Child(display("Every app for " + system + ".")).
-				Child(display("One store."))).
+			Child(display("Every app for " + system + ". One store.").FontSize(32)).
 			Child(ui.Text(compactThousands(info.Apps) + " apps from Flathub, Fedora, Homebrew, COPR and GitHub, " +
 				"checked and ranked in one place.").FontSize(15).TextColor(t.TextMuted)).
-			Child(ui.Div().Row().MarginTop(space2).Child(a.featuredButton(ctx))))
+			Child(ui.Div().Row().MarginTop(space1).Child(a.featuredButton(ctx))))
 }
 
 // featuredButton is the banner's light call to action.
@@ -144,7 +142,7 @@ func (a *App) sourceTiles(ctx *ui.Context, cols int) ui.Element {
 			func() { a.open(view{page: pageSource, arg: string(s)}) }).
 			Tooltip(sourceTips[s]).
 			Child(ui.Div().Size(ui.Px(48), ui.Px(48)).Radius(radiusM).Background(c.Alpha(0.15)).Center().
-				Child(ui.Icon(sourceIcons[s]).Size(26).Color(c))).
+				Child(sourceMark(ctx, s, 26))).
 			Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 				Child(subhead(s.Name())).
 				Child(muted(ctx, plural(counts.Data[s], "app", "apps")))).
