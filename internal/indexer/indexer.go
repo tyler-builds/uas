@@ -60,7 +60,13 @@ func Build(ctx context.Context, fetchers []fetch.Fetcher, out string, log *slog.
 		return info, errors.New("no listings fetched from any source")
 	}
 
-	apps := merge.Merge(all)
+	apps, hidden := merge.Merge(all)
+	for _, h := range hidden {
+		log.Debug("hidden as an unofficial copy", "source", h.Source, "ref", h.Ref, "of", h.Of, "why", h.Reason)
+	}
+	if len(hidden) > 0 {
+		log.Info("unofficial copies hidden", "listings", len(hidden))
+	}
 	info.Apps = len(apps)
 	if err := catalog.Write(ctx, out, apps, info); err != nil {
 		return info, fmt.Errorf("write catalog: %w", err)

@@ -2,9 +2,13 @@
 //
 // Listings merge when they share an AppStream ID. Groups that are still separate then merge when they point at
 // the same code-forge repo (github.com/owner/repo), or have the same name and the same homepage or
-// source-code URL, as long as they come from different sources and the match is unambiguous (exactly two
-// groups share the key). That catches distros that use old-style IDs such as
-// "rednotebook" for the app Flathub calls "app.rednotebook.RedNotebook".
+// source-code URL, as long as the match is unambiguous: every group that shares the key comes from a different
+// source. That catches distros that use old-style IDs such as "rednotebook" for the app Flathub calls
+// "app.rednotebook.RedNotebook".
+//
+// Then copies are sorted out (copies.go): a GitHub app with the same name as an app from a reviewed source is
+// merged into it when it comes from the app's own developer, hidden when it looks like someone else's
+// repackage, and kept otherwise; COPR builds of a reviewed app are hidden unless the developer made them.
 package merge
 
 import (
@@ -17,8 +21,9 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 )
 
-// Merge groups listings into apps, sorted by app ID.
-func Merge(listings []catalog.Listing) []catalog.App {
+// Merge groups listings into apps, sorted by app ID. It also returns the listings it hid as unofficial
+// copies, with why.
+func Merge(listings []catalog.Listing) ([]catalog.App, []Hidden) {
 	groups := map[string][]catalog.Listing{}
 	var order []string
 	refs := map[string]bool{}
@@ -41,6 +46,7 @@ func Merge(listings []catalog.Listing) []catalog.App {
 	order = linkGroups(groups, order, func(l catalog.Listing) string { return forgeRepo(l.VCSURL) })
 	order = linkGroups(groups, order, nameAnd(func(l catalog.Listing) string { return l.Homepage }))
 	order = linkGroups(groups, order, nameAnd(func(l catalog.Listing) string { return l.VCSURL }))
+	order, hidden := sortCopies(groups, order)
 
 	apps := make([]catalog.App, 0, len(groups))
 	seen := map[string]bool{}
@@ -55,7 +61,7 @@ func Merge(listings []catalog.Listing) []catalog.App {
 		apps = append(apps, a)
 	}
 	sort.Slice(apps, func(i, j int) bool { return apps[i].ID < apps[j].ID })
-	return apps
+	return apps, hidden
 }
 
 // nameAnd returns a key of a listing's name plus its normalized URL, or "" if either is missing.
@@ -83,7 +89,8 @@ func forgeRepo(raw string) string {
 	return u
 }
 
-// linkGroups merges pairs of groups that share a key. It returns the new group order.
+// linkGroups merges groups that share a key, when each of them comes from a different source (so the key
+// can't be confusing two apps). It returns the new group order.
 func linkGroups(groups map[string][]catalog.Listing, order []string, keyOf func(catalog.Listing) string) []string {
 	byKey := map[string][]string{}
 	for _, g := range order {
@@ -104,17 +111,29 @@ func linkGroups(groups map[string][]catalog.Listing, order []string, keyOf func(
 			if k == "" || merged[g] {
 				continue
 			}
-			pair := byKey[k]
-			if len(pair) != 2 || merged[pair[0]] || merged[pair[1]] {
+			set := byKey[k]
+			if len(set) < 2 || slices.ContainsFunc(set, func(g string) bool { return merged[g] }) {
 				continue
 			}
-			a, b := pair[0], pair[1]
-			if !disjointSources(groups[a], groups[b]) {
+			var all []catalog.Listing
+			ok := true
+			for _, g := range set {
+				if !disjointSources(all, groups[g]) {
+					ok = false
+					break
+				}
+				all = append(all, groups[g]...)
+			}
+			if !ok {
 				continue
 			}
-			groups[a] = append(groups[a], groups[b]...)
-			delete(groups, b)
-			merged[a], merged[b] = true, true
+			a := set[0]
+			for _, b := range set[1:] {
+				groups[a] = append(groups[a], groups[b]...)
+				delete(groups, b)
+				merged[b] = true
+			}
+			merged[a] = true
 		}
 	}
 	var out []string

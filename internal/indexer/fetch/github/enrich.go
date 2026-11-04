@@ -104,7 +104,7 @@ func (f *Fetcher) factsFor(ctx context.Context, l catalog.Listing) (fc facts, fr
 	if len(l.Assets) > 0 {
 		key = l.Assets[0].URL
 	}
-	sum := sha256.Sum256([]byte("v1|" + key))
+	sum := sha256.Sum256([]byte("v2|" + key)) // v2: the right desktop entry when an image has several
 	cache := filepath.Join(f.MediaDir, "facts", hex.EncodeToString(sum[:])+".json")
 	now := time.Now()
 	if raw, err := os.ReadFile(cache); err == nil && json.Unmarshal(raw, &fc) == nil {

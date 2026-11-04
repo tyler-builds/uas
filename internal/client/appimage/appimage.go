@@ -115,20 +115,22 @@ func fromFS(fsys fs.FS) (*Info, error) {
 	if err != nil {
 		return nil, fmt.Errorf("appimage: %w", err)
 	}
-	info := &Info{}
+	var desktops []map[string]string
+	var names []string
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".desktop") {
 			b, err := readFile(fsys, e.Name(), maxDesktop)
 			if err != nil {
 				return nil, fmt.Errorf("appimage: %s: %w", e.Name(), err)
 			}
-			info.Desktop = parseDesktop(string(b))
-			break
+			desktops = append(desktops, parseDesktop(string(b)))
+			names = append(names, e.Name())
 		}
 	}
-	if info.Desktop == nil {
+	if len(desktops) == 0 {
 		return nil, errors.New("appimage: no .desktop file at the image root")
 	}
+	info := &Info{Desktop: desktops[pickDesktop(fsys, names, desktops)]}
 
 	var candidates []string
 	if icon := info.Desktop["Icon"]; icon != "" && !strings.ContainsAny(icon, "/\\") {
@@ -147,6 +149,31 @@ func fromFS(fsys fs.FS) (*Info, error) {
 	}
 	info.Metainfo = findMetainfo(fsys)
 	return info, nil
+}
+
+// pickDesktop chooses the app's own desktop entry when the image root has several (some AppImages also carry
+// those of libraries they bundle): the one whose icon is the image's .DirIcon, else the first that isn't a
+// library's (lib*.desktop), else the first.
+func pickDesktop(fsys fs.FS, names []string, desktops []map[string]string) int {
+	if len(desktops) == 1 {
+		return 0
+	}
+	if lfs, ok := fsys.(linkFS); ok {
+		if target, err := lfs.ReadLink(".DirIcon"); err == nil {
+			icon := strings.TrimSuffix(path.Base(target), path.Ext(target))
+			for i, d := range desktops {
+				if d["Icon"] == icon {
+					return i
+				}
+			}
+		}
+	}
+	for i, n := range names {
+		if !strings.HasPrefix(strings.ToLower(n), "lib") {
+			return i
+		}
+	}
+	return 0
 }
 
 // findMetainfo returns the first AppStream metainfo file in the image, or nil.

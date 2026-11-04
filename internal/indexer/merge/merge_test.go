@@ -7,7 +7,7 @@ import (
 )
 
 func TestMergeByAppStreamID(t *testing.T) {
-	apps := Merge([]catalog.Listing{
+	apps, _ := Merge([]catalog.Listing{
 		{Source: catalog.SourceFedora, Ref: "example-browser", AppStreamID: "org.example.Browser.desktop",
 			Name: "example-browser", License: "MPL-2.0"},
 		{Source: catalog.SourceFlathub, Ref: "app/org.example.Browser/x86_64/stable",
@@ -44,7 +44,7 @@ func TestMergeByAppStreamID(t *testing.T) {
 }
 
 func TestMergeByRepo(t *testing.T) {
-	apps := Merge([]catalog.Listing{
+	apps, _ := Merge([]catalog.Listing{
 		{Source: catalog.SourceFlathub, Ref: "app/it.mijorus.gearlever/x86_64/stable", AppStreamID: "it.mijorus.gearlever",
 			Name: "Gear Lever", VCSURL: "https://github.com/mijorus/gearlever"},
 		{Source: catalog.SourceGitHub, Ref: "mijorus/gearlever", Name: "gearlever",
@@ -60,7 +60,7 @@ func TestMergeByRepo(t *testing.T) {
 }
 
 func TestMergeByNameAndURL(t *testing.T) {
-	apps := Merge([]catalog.Listing{
+	apps, _ := Merge([]catalog.Listing{
 		{Source: catalog.SourceFlathub, Ref: "app/app.rednotebook.RedNotebook/x86_64/stable",
 			AppStreamID: "app.rednotebook.RedNotebook", Name: "RedNotebook", Homepage: "https://rednotebook.app"},
 		{Source: catalog.SourceFedora, Ref: "fedora-45/rednotebook", AppStreamID: "rednotebook",

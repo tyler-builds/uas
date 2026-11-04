@@ -120,10 +120,30 @@ Listings are linked into one `App` when, in order of confidence:
    the GitHub repo URL, or Homebrew's head URL. A repo path is specific enough to link without the name.
 3. They have the same name and the same normalized homepage or source-code URL.
 
-Rules 2 and 3 use the app name plus the URL, merge only groups from different sources, and only when exactly
-two groups share the key, so ambiguous cases (Fedora's `ardour8` and `ardour9`) stay separate. Bare forge
+Rules 2 and 3 merge only when every group that shares the key comes from a different source, so ambiguous
+cases (Fedora's `ardour8` and `ardour9`) stay separate, while Neovim on Flathub, Homebrew and GitHub becomes
+one app. Bare forge
 hosts such as `github.com` don't count as a homepage. With Flathub and Fedora 44/45, 581 apps merge. Each merge records why it happened,
 so wrong merges can be debugged and overridden with a manual overrides file in the repo.
+
+**Unofficial copies** (`merge/copies.go`). GitHub and COPR are where anyone can publish anything, so next to an
+app from a reviewed source (Flathub, Fedora, Homebrew) a copy is shown only if it comes from the app's own
+developer. The developer is recognized by owning the app's code-forge URLs, by being named in its AppStream ID
+(`io.github.<owner>.App`, `org.<owner>.App`), or by the app's homepage being their site. A repo's own homepage
+doesn't count, because anyone can point it at the real site.
+
+- A GitHub-only app with a reviewed app's name joins it as another source if the developer published it, and
+  is hidden as a duplicate if the app already has their GitHub releases.
+- Otherwise it is hidden when it looks like a repackage (`postman-appimage`, "AppImage of podman",
+  "unofficial") or is a small repo (under 1,000 stars) using an established app's name (10,000+ installs a
+  year).
+- Anything else that shares a name is a different app and stays (Scratch the notes app beside MIT Scratch).
+- COPR builds of a reviewed app are hidden unless the developer made them. `ublue-os`, Bazzite's vendor, is
+  trusted.
+
+This drops some genuine third-party builds, such as a COPR with a newer version; that is the intended trade.
+The build log lists each hidden listing and why (at debug level; the count at info). On the November 2026
+catalog it hides 40 listings and merges 405 GitHub releases into reviewed apps.
 
 ### Trust scoring
 

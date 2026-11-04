@@ -155,3 +155,28 @@ func TestInspectRealSquashfs(t *testing.T) {
 		t.Error("accepted a file that is not an ELF")
 	}
 }
+
+// TestSeveralDesktopFiles picks the app's own entry over a bundled library's.
+func TestSeveralDesktopFiles(t *testing.T) {
+	fsys := linkMap{MapFS: fstest.MapFS{
+		"libgphoto2.desktop": {Data: []byte("[Desktop Entry]\nName=libgphoto2\nIcon=libgphoto2\n")},
+		"performous.desktop": {Data: []byte("[Desktop Entry]\nName=Performous\nIcon=performous\n")},
+		"performous.png":     {Data: png},
+		".DirIcon":           {Data: png},
+	}, links: map[string]string{".DirIcon": "performous.png"}}
+	info, err := fromFS(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Desktop["Name"] != "Performous" {
+		t.Errorf("name = %q", info.Desktop["Name"])
+	}
+	// Without a .DirIcon link, a library's entry still loses.
+	info, err = fromFS(fstest.MapFS{
+		"libgphoto2.desktop": {Data: []byte("[Desktop Entry]\nName=libgphoto2\n")},
+		"wine.desktop":       {Data: []byte("[Desktop Entry]\nName=Wine\n")},
+	})
+	if err != nil || info.Desktop["Name"] != "Wine" {
+		t.Errorf("name = %q, %v", info.Desktop["Name"], err)
+	}
+}
