@@ -70,8 +70,7 @@ type App struct {
 	db         *catalog.DB
 	icons      *iconLoader
 
-	cancelSearch func()    // set while typing is under way (see typed)
-	startup      sync.Once // the background catalog check at start
+	startup sync.Once // the background catalog check at start
 }
 
 // New creates the app for a session.
@@ -336,7 +335,7 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 	search := ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps…").Icon(icons.Search).
 		Large().Clearable().Width(ui.Full).
 		Styles(ui.FieldStyle{Frame: ui.Style{Radius: 22, Background: t.Surface}}).
-		OnChange(func(s string) { a.typed(ctx, s) }).
+		OnChange(a.typed).
 		OnSubmit(func(s string) {
 			a.search.Set(strings.TrimSpace(s))
 			a.showSearch()
@@ -350,28 +349,16 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 		Child(settings)
 }
 
-// searchDebounce is how long typing must pause before the latest text is searched. Searches take a few
-// milliseconds, so this only spares searching every letter of a fast burst.
-const searchDebounce = 100 * time.Millisecond
-
-// typed reacts to the search field: it opens the search page and searches. The first keystroke after a
-// pause searches at once, so the page shows results rather than its empty state; keystrokes that follow
-// quickly search once typing pauses. cancelSearch is set while a burst is under way.
-func (a *App) typed(ctx *ui.Context, s string) {
+// typed reacts to the search field: it opens the search page and searches what the field holds, on every
+// keystroke. A search takes 1 to 10 ms and the page keeps showing the previous results until the new ones
+// are in, so there is no debounce: a debounce timer once left the page searching an older prefix of what
+// was typed ("Godo" for "Godot").
+func (a *App) typed(s string) {
 	q := strings.TrimSpace(s)
 	if q != "" {
 		a.showSearch()
 	}
-	if a.cancelSearch == nil {
-		a.search.Set(q)
-		a.cancelSearch = ctx.After(searchDebounce, func() { a.cancelSearch = nil })
-		return
-	}
-	a.cancelSearch()
-	a.cancelSearch = ctx.After(searchDebounce, func() {
-		a.cancelSearch = nil
-		a.search.Set(q)
-	})
+	a.search.Set(q)
 }
 
 // showSearch opens the search page, unless it is open.

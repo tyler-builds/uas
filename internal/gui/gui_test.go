@@ -160,7 +160,6 @@ func TestGitHubInstallAsksWithTrustScore(t *testing.T) {
 
 	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
 	u.ByRole(access.RoleTextField, "Search apps").Type("tool")
-	u.Advance(searchDebounce + 10*time.Millisecond)
 	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
 	u.Get("row:github:example/tool").ByRole(access.RoleButton, "Details").Click()
 	waitText(t, u, "detail:github:example/tool", "Trust score")
@@ -219,27 +218,19 @@ func TestUpdateShownOnlyWhenAvailable(t *testing.T) {
 	})
 }
 
-// TestSearchAsYouType searches the first letter at once, so the page shows results instead of its empty
-// state, and the rest of a quick burst once typing pauses.
+// TestSearchAsYouType searches what the field holds on every keystroke, so the page always matches the
+// field, however fast the typing.
 func TestSearchAsYouType(t *testing.T) {
 	a, _, _ := testApp(t)
 	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
 	defer u.Close()
 	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
 	field := u.ByRole(access.RoleTextField, "Search apps")
-	field.Type("t")
-	if got := a.search.Peek(); got != "t" {
-		t.Fatalf("after the first letter, search = %q; want it at once", got)
-	}
-	field.Type("o")
-	field.Type("o")
-	field.Type("l")
-	if got := a.search.Peek(); got != "t" {
-		t.Errorf("mid-burst, search = %q; want it to wait for a pause", got)
-	}
-	u.Advance(searchDebounce + 10*time.Millisecond)
-	if got := a.search.Peek(); got != "tool" {
-		t.Errorf("after the pause, search = %q", got)
+	for i, c := range "tool" {
+		field.Type(string(c))
+		if got, want := a.search.Peek(), "tool"[:i+1]; got != want {
+			t.Fatalf("after typing %q, search = %q", want, got)
+		}
 	}
 	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
 }
