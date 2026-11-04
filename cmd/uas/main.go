@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -20,8 +21,14 @@ import (
 const usage = `usage: uas <command> [flags] [args]
 
 commands:
-  search <words>   find apps
-  info <app-id>    show one app and where it is available
+  search <words>       find apps
+  info <app-id>        show one app and where it is available
+  install <app-id>     install an app
+  remove <app-id>      remove an installed app
+  update <app-id>      update an installed app
+  list                 list installed apps
+  system               show what uas detected about this system
+  settings [key value] show or change settings
 
 Run "uas <command> -h" for a command's flags.
 `
@@ -31,13 +38,26 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
 	case "search":
 		err = runSearch(ctx, os.Stdout, args)
 	case "info":
 		err = runInfo(ctx, os.Stdout, args)
+	case "install":
+		err = runInstall(ctx, args)
+	case "remove", "uninstall":
+		err = runRemove(ctx, args)
+	case "update":
+		err = runUpdate(ctx, args)
+	case "list":
+		err = runList(ctx, os.Stdout, args)
+	case "system":
+		err = runSystem(os.Stdout, args)
+	case "settings":
+		err = runSettings(os.Stdout, args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 		return

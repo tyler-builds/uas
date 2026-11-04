@@ -128,16 +128,16 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
 
 ### Backends
 
-All implement one interface:
+All implement one interface. A backend is only created when platform detection finds its tool. Backends
+run tools through a `run.Runner`, so tests use a fake, and they validate every ref before it reaches a command line.
 
 ```go
 type Backend interface {
-    ID() SourceID
-    Available(p platform.Info) bool
+    Source() catalog.SourceID
     Installed(ctx context.Context) ([]InstalledApp, error)
-    Install(ctx context.Context, l catalog.Listing, progress chan<- Progress) error
-    Update(ctx context.Context, a InstalledApp, progress chan<- Progress) error
-    Remove(ctx context.Context, a InstalledApp, progress chan<- Progress) error
+    Install(ctx context.Context, l catalog.Listing, progress func(Progress)) error
+    Update(ctx context.Context, a InstalledApp, progress func(Progress)) error
+    Remove(ctx context.Context, a InstalledApp, progress func(Progress)) error
 }
 ```
 
@@ -206,6 +206,7 @@ uas/
 │   │   ├── sync/
 │   │   ├── state/
 │   │   ├── recommend/
+│   │   ├── run/             # runs flatpak, brew, rpm-ostree, pkexec
 │   │   ├── jobs/
 │   │   ├── settings/
 │   │   ├── telemetry/      # Event, Sink interface, no-op sink
@@ -232,7 +233,8 @@ uas/
 ## Milestones
 
 1. **Catalog + Flathub:** schema, Flathub fetcher, local build, `uas search`. Done.
-2. **First install:** platform detection, flatpak backend, `uas install`.
+2. **First install:** platform detection, flatpak backend, `uas install`, `remove`, `update`, `list`,
+   `system`, `settings`. Done.
 3. **Hosting:** signing, R2 upload, Actions cron, client sync. Proves the free-hosting plan early.
 4. **Fedora + rpm-ostree:** layering, reboot-needed state.
 5. **Homebrew.**
