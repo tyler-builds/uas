@@ -103,17 +103,13 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 		}
 		side := a.sidePanel(ctx, app, listing, choice, chosen.Get() == listingKey(choice.Listing))
 
-		w, _ := ctx.WindowSize()
-		if w-sidebarWidth > 1000 {
-			// Grow and Basis(0) only beside the side panel: in a column, jamb collapses a Basis(0) child to no
-			// height (see jamb-notes.md).
-			page = page.Child(ui.Div().Row().Gap(space8).Align(ui.Start).
-				Child(main.Grow(1).Basis(ui.Px(0))).
-				Child(ui.Div().Width(ui.Px(280)).Shrink(0).Child(side)))
-		} else {
-			page = page.Child(main).Child(side)
+		// The side panel sits beside the main column when there is room, and under it otherwise.
+		body := ui.Div().Column().Gap(space6)
+		if w, _ := ctx.WindowSize(); w-sidebarWidth > 1000 {
+			body = ui.Div().Row().Gap(space8).Align(ui.Start)
+			side = ui.Div().Width(ui.Px(280)).Shrink(0).Child(side)
 		}
-		return scroll(page)
+		return scroll(page.Child(body.Child(main.Grow(1).Basis(ui.Px(0))).Child(side)))
 	}).Key("detail:" + id)
 }
 
@@ -169,7 +165,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	switch {
 	case installed.Loading:
 		// Disabled as well as Loading: a loading button exposes no busy state to assistive technology.
-		action = ui.Button("Install").Primary().Large().Width(ui.Full).Styles(big).Loading(true).Disabled(true)
+		action = ui.Button("Install").Primary().Large().Width(ui.Full).Styles(big).Loading(true)
 	case copy != nil:
 		in := *copy
 		action = ui.Div().Column().Gap(space2).
@@ -196,7 +192,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 		for _, l := range available {
 			if listingKey(l) == opt.Value {
 				return ui.Div().Row().Align(ui.Center).Gap(space2).
-					Child(sourceMark(ctx, l.Source, 16)).
+					Child(ui.Icon(sourceIcons[l.Source]).Size(16).Color(sourceColor(ctx, l.Source))).
 					Child(ui.Text(listingLabel(l)).FontSize(13).Truncate())
 			}
 		}
@@ -221,25 +217,24 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 		value, label string
 		color        ui.Color
 		tip          string
-		mark         ui.Element // drawn instead of icon when set
 	}
 	var stats []stat
 	switch {
 	case app.Popularity > 0:
 		stats = append(stats, stat{icons.Download, compact(app.Popularity), "Installs a year", t.TextMuted,
-			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year", nil})
+			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year"})
 	case app.Stars > 0:
-		stats = append(stats, stat{icons.Star, compact(app.Stars), "GitHub stars", t.TextMuted, "", nil})
+		stats = append(stats, stat{icons.Star, compact(app.Stars), "GitHub stars", t.TextMuted, ""})
 	}
 	if !app.Updated.IsZero() {
-		stats = append(stats, stat{icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "Latest release", t.TextMuted, "", nil})
+		stats = append(stats, stat{icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "Latest release", t.TextMuted, ""})
 	}
 	if listing.Version != "" {
-		stats = append(stats, stat{icons.Tag, shortVersion(listing.Version), "Version", t.TextMuted, listing.Version, nil})
+		stats = append(stats, stat{icons.Tag, shortVersion(listing.Version), "Version", t.TextMuted, listing.Version})
 	}
 	switch {
 	case listing.Verified:
-		stats = append(stats, stat{icons.ShieldCheck, "Verified", "Publisher", t.Success, verifiedTip, nil})
+		stats = append(stats, stat{icons.ShieldCheck, "Verified", "Publisher", t.Success, verifiedTip})
 	case listing.Trust != nil:
 		c := t.Success
 		if listing.Trust.Score < 50 {
@@ -248,10 +243,10 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 			c = t.Warning
 		}
 		stats = append(stats, stat{icons.ShieldCheck, fmt.Sprintf("%d / 100", listing.Trust.Score), "Trust score", c,
-			"How well kept the project is; see the breakdown below", nil})
+			"How well kept the project is; see the breakdown below"})
 	case listing.Source != "":
-		stats = append(stats, stat{mark: sourceMark(ctx, listing.Source, 22), value: listing.Source.Name(),
-			label: "Source", tip: sourceTips[listing.Source]})
+		stats = append(stats, stat{sourceIcons[listing.Source], listing.Source.Name(), "Source",
+			sourceColor(ctx, listing.Source), sourceTips[listing.Source]})
 	}
 	row := ui.Div().Row().Align(ui.Center).PaddingY(space2)
 	for i, s := range stats {
@@ -260,8 +255,7 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 		}
 		cell := ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space3).Grow(1).Basis(ui.Px(0)).
 			MinWidth(ui.Px(0)).
-			Child(ui.If(s.mark != nil, s.mark)).
-			Child(ui.If(s.mark == nil, ui.Element(ui.Icon(s.icon).Size(22).Color(s.color)))).
+			Child(ui.Icon(s.icon).Size(22).Color(s.color)).
 			Child(ui.Div().Column().Gap(2).
 				Child(ui.Text(s.value).FontSize(17).Semibold()).
 				Child(muted(ctx, s.label)))
@@ -291,7 +285,7 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 	panel := ui.Div().Column().Gap(space5)
 	if listing.Source != "" {
 		panel = panel.Child(field("Source", ui.Div().Row().Align(ui.Center).Gap(space2).
-			Child(sourceMark(ctx, listing.Source, 20)).
+			Child(ui.Icon(sourceIcons[listing.Source]).Size(20).Color(sourceColor(ctx, listing.Source))).
 			Child(ui.Text(listing.Source.Name()).FontSize(17).Semibold())))
 	}
 	if c := mainCategory(app.Categories); c != "" {
@@ -326,7 +320,7 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 	for _, n := range a.s.InstallNotes(listing) {
 		notes = notes.Child(note(icons.Info, t.TextMuted, n))
 	}
-	panel = panel.Child(card(ctx).Gap(space3).Padding(space4).Child(notes).Child(a.whyPanel(ctx, app, listing)))
+	panel = panel.Child(ui.Card().Gap(space3).Padding(space4).Child(notes).Child(a.whyPanel(ctx, app, listing)))
 
 	bugs := ""
 	for _, l := range app.Listings {
@@ -430,7 +424,7 @@ func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listin
 		bullet := func(s string) ui.Element {
 			return ui.Div().Row().Gap(8).Align(ui.Start).
 				Child(ui.Text("•").FontSize(13).TextColor(t.TextMuted)).
-				Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(ui.Text(s).FontSize(13)))
+				Child(ui.Text(s).FontSize(13).Grow(1).Basis(ui.Px(0)))
 		}
 		panel := ui.Div().Column().Gap(6).
 			Child(ui.Div().Row().Child(toggle.Icon(icons.ChevronUp))).
@@ -439,7 +433,7 @@ func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listin
 			panel = panel.Child(bullet(tr))
 		}
 		if alts := recommend.Alternatives(app, a.s.Available, listing); len(alts) > 0 {
-			panel = panel.Child(ui.Div().MarginTop(6).Child(ui.Text("Other sources:").FontSize(13).Semibold()))
+			panel = panel.Child(ui.Text("Other sources:").FontSize(13).Semibold().MarginTop(6))
 			for _, alt := range alts {
 				panel = panel.Child(bullet(listingLabel(alt.Listing) + ": not picked because " + alt.Because + "."))
 			}
@@ -571,7 +565,7 @@ func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 		Border(3, color).Background(color.Alpha(0.10)).Shrink(0).
 		Child(ui.Text(fmt.Sprint(tr.Score)).FontSize(26).Bold().TextColor(color)).
 		Child(caption(ctx, "of 100"))
-	panel := card(ctx).Gap(space4).Padding(space6).
+	panel := ui.Card().Gap(space4).Padding(space6).
 		Child(ui.Div().Row().Gap(space5).Align(ui.Center).
 			Child(score).
 			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
@@ -586,7 +580,7 @@ func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 			Child(ui.Div().Column().Gap(2).
 				Child(ui.Text(sg.Name).FontSize(13).Semibold()).
 				Child(caption(ctx, sg.Detail))).
-			Child(meter(ctx, frac, color)).
+			Child(ui.ProgressBar(frac).HideValue().Color(color).Label(sg.Name)).
 			Child(ui.Text(fmt.Sprintf("%d/%d", sg.Points, sg.Max)).FontSize(13).Semibold().Align(ui.End))
 	}
 	panel = panel.Child(grid)

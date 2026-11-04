@@ -99,7 +99,7 @@ func (a *App) categoryPage(ctx *ui.Context, key string) ui.Element {
 		}
 	}
 	return scroll(pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, glyph(ctx, icon, 28), ui.Color{}, categoryLabel(key), categoryTip(key), orderPicker(a.browseOrder, false))).
+		Child(a.listHeader(ctx, icon, ui.Color{}, categoryLabel(key), categoryTip(key), orderPicker(a.browseOrder, false))).
 		Child(a.resultList(ctx, res, "Nothing in this category yet.")))
 }
 
@@ -115,12 +115,12 @@ func (a *App) sourcePage(ctx *ui.Context, src catalog.SourceID) ui.Element {
 		sub += " This system can't install from it."
 	}
 	return scroll(pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, sourceMark(ctx, src, 28), sourceColor(ctx, src), src.Name(), sub, orderPicker(a.browseOrder, false))).
+		Child(a.listHeader(ctx, sourceIcons[src], sourceColor(ctx, src), src.Name(), sub, orderPicker(a.browseOrder, false))).
 		Child(a.resultList(ctx, res, "This source has no apps in the catalog.")))
 }
 
 // listHeader is the top of a category or source page: an icon tile, the title, a line about it, and the sort.
-func (a *App) listHeader(ctx *ui.Context, mark ui.Element, color ui.Color, titleText, sub string,
+func (a *App) listHeader(ctx *ui.Context, icon *icons.Icon, color ui.Color, titleText, sub string,
 	trailing ui.Element) ui.Element {
 	t := ctx.Theme()
 	if color == (ui.Color{}) {
@@ -128,7 +128,7 @@ func (a *App) listHeader(ctx *ui.Context, mark ui.Element, color ui.Color, title
 	}
 	return ui.Div().Row().Align(ui.Center).Gap(space4).
 		Child(ui.Div().Size(ui.Px(56), ui.Px(56)).Radius(radiusM).Background(color.Alpha(0.15)).Center().Shrink(0).
-			Child(mark)).
+			Child(ui.Icon(icon).Size(28).Color(color))).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(title(titleText)).
 			Child(muted(ctx, sub))).
@@ -149,16 +149,16 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 		Child(ui.Div().Column().Gap(space1).
 			Child(title("Sources")).
 			Child(muted(ctx, "Where uas finds apps, and how it treats each one. uas recommends the best fit for this system on every app's page."))).
-		Child(a.sourceTiles(ctx, 3))
+		Child(a.sourceTiles(ctx))
 	list := ui.Div().Column().Gap(space3)
 	for _, s := range catalog.SourcePrecedence {
 		status := statusPill(ctx, a.s.Backends[s] != nil, "Ready")
 		if a.s.Backends[s] == nil {
 			status = statusPill(ctx, false, "Not available here")
 		}
-		list = list.Child(card(ctx).Gap(space2).
+		list = list.Child(ui.Card().Gap(space2).
 			Child(ui.Div().Row().Align(ui.Center).Gap(space3).
-				Child(sourceMark(ctx, s, 20)).
+				Child(ui.Icon(sourceIcons[s]).Size(20).Color(sourceColor(ctx, s))).
 				Child(ui.Div().Grow(1).Child(subhead(s.Name()))).
 				Child(status)).
 			Child(ui.Text(notes[s]).FontSize(14)).

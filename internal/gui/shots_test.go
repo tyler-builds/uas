@@ -41,16 +41,19 @@ func TestShots(t *testing.T) {
 		setup    func(a *App)
 		h        float32
 		selected string
+		w        float32 // 0: 1440
 	}{
-		{"home", func(a *App) {}, 1250, ""},
-		{"detail-github", func(a *App) {}, 1400, "github:adileo/squirreldisk"},
-		{"detail-darktable", func(a *App) {}, 1400, "org.darktable.Darktable"},
-		{"detail-vscode", func(a *App) {}, 1100, "com.visualstudio.code"},
-		{"search", func(a *App) { a.query.Set("editor"); a.search.Set("editor"); a.goTo(view{page: pageSearch}) }, 1100, ""},
-		{"sources", func(a *App) { a.goTo(view{page: pageSources}) }, 1300, ""},
-		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 820, ""},
-		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, ""},
-		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, ""},
+		{"home", func(a *App) {}, 1250, "", 0},
+		{"detail-github", func(a *App) {}, 1400, "github:adileo/squirreldisk", 0},
+		{"detail-darktable", func(a *App) {}, 1400, "org.darktable.Darktable", 0},
+		{"detail-vscode", func(a *App) {}, 1100, "com.visualstudio.code", 0},
+		// Narrow enough that the side panel goes under the main column.
+		{"detail-narrow", func(a *App) {}, 1900, "org.darktable.Darktable", 1100},
+		{"search", func(a *App) { a.query.Set("editor"); a.search.Set("editor"); a.goTo(view{page: pageSearch}) }, 1100, "", 0},
+		{"sources", func(a *App) { a.goTo(view{page: pageSources}) }, 1300, "", 0},
+		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 820, "", 0},
+		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, "", 0},
+		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
 	}
 	for _, theme := range []struct {
 		name string
@@ -68,7 +71,11 @@ func TestShots(t *testing.T) {
 			if sh.selected != "" {
 				a.openApp(sh.selected)
 			}
-			u := uitest.New(t, a.Root, uitest.Size(1440, sh.h), uitest.Theme(theme.t))
+			w := sh.w
+			if w == 0 {
+				w = 1440
+			}
+			u := uitest.New(t, a.Root, uitest.Size(w, sh.h), uitest.Theme(theme.t))
 			for i := 0; i < 40; i++ {
 				u.Advance(100 * time.Millisecond)
 				time.Sleep(60 * time.Millisecond)

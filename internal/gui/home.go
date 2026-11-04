@@ -37,7 +37,7 @@ func (a *App) homePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		}))).
 		Child(a.cardRow(ctx, fresh, cols)).
 		Child(sectionHeader(ctx, "Browse by Source", "")).
-		Child(a.sourceTiles(ctx, 3))
+		Child(a.sourceTiles(ctx))
 	return scroll(page)
 }
 
@@ -78,7 +78,7 @@ func (a *App) featured(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	if system == "" {
 		system = "your system"
 	}
-	art2 := ui.Canvas(func(p *ui.Painter, w, h float32) {
+	draw := func(p *ui.Painter, w, h float32) {
 		p.FillRect(0, 0, w, h, ui.LinearPaint(0, 0, w, h,
 			ui.ColorStop{At: 0, Color: surface}, ui.ColorStop{At: 1, Color: art[0].Alpha(0.6)}))
 		shape := func(c ui.Color, alpha float32, pts ...[2]float32) {
@@ -95,17 +95,19 @@ func (a *App) featured(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		shape(art[1], 0.85, [2]float32{0.66, 1}, [2]float32{0.80, 0.42}, [2]float32{1, 0.26}, [2]float32{1, 1})
 		shape(art[2], 0.80, [2]float32{0.84, 1}, [2]float32{0.92, 0.58}, [2]float32{1, 0.48}, [2]float32{1, 1})
 		shape(art[2], 0.35, [2]float32{0.88, 0}, [2]float32{1, 0}, [2]float32{1, 0.30})
-	}).Absolute().Inset(0).Size(ui.Full, ui.Full).AccessHidden() // a canvas is 300x150 unless sized
-	// The art is a background layer; the words and the button sit on top as real elements, so assistive
-	// technology reads them (a canvas is exposed as one image).
-	return ui.Div().Height(ui.Px(220)).Radius(radiusXL).ClipContent().
-		Child(art2).
+	}
+	// The art is decoration (RoleUnknown: no image node), so the words and the button laid over it are read
+	// as plain elements.
+	// The padding is on a child: a canvas draws inside its padding, which would inset the art. The rounded
+	// clip is on a parent: a canvas's own Radius and ClipContent don't clip what it draws (see jamb-notes.md).
+	return ui.Div().Radius(radiusXL).ClipContent().Child(ui.Canvas(draw).Size(ui.Full, ui.Px(220)).
+		Role(access.RoleUnknown).
 		Child(ui.Div().Column().Justify(ui.Center).Gap(space3).PaddingX(space8 + 8).Height(ui.Full).
 			Child(ui.Text("FEATURED").FontSize(12).Semibold().TextColor(t.TextMuted)).
 			Child(display("Every app for " + system + ". One store.").FontSize(32)).
 			Child(ui.Text(compactThousands(info.Apps) + " apps from Flathub, Fedora, Homebrew, COPR and GitHub, " +
 				"checked and ranked in one place.").FontSize(15).TextColor(t.TextMuted)).
-			Child(ui.Div().Row().MarginTop(space1).Child(a.featuredButton(ctx))))
+			Child(ui.Div().Row().MarginTop(space1).Child(a.featuredButton(ctx)))))
 }
 
 // featuredButton is the banner's light call to action.
@@ -123,7 +125,7 @@ func (a *App) featuredButton(ctx *ui.Context) ui.Element {
 }
 
 // sourceTiles are the sources with their app counts, each opening its list.
-func (a *App) sourceTiles(ctx *ui.Context, cols int) ui.Element {
+func (a *App) sourceTiles(ctx *ui.Context) ui.Element {
 	t := ctx.Theme()
 	counts := ui.Query(ctx, a.key("source-counts"), func(c context.Context) (map[catalog.SourceID]int, error) {
 		db, err := a.catalog(c)
@@ -132,17 +134,16 @@ func (a *App) sourceTiles(ctx *ui.Context, cols int) ui.Element {
 		}
 		return db.SourceCounts(c)
 	}, ui.QueryStaleTime(time.Hour))
-	cols = min(cols, gridColumns(ctx, homeMaxWidth, 300, cols))
-	grid := ui.Div().Grid(repeatFr(cols)...).Gap(space4)
+	// At most three across on the widest page; fewer as the window narrows.
+	grid := ui.Div().Grid(ui.AutoFill(340)).Gap(space4)
 	for _, s := range catalog.SourcePrecedence {
 		s := s
 		c := sourceColor(ctx, s)
-		grid = grid.Child(clickable(ctx, ui.Div().Row().Align(ui.Center).Gap(space4).Padding(space5).
-			Radius(radiusL).Background(t.Surface), s.Name(),
-			func() { a.open(view{page: pageSource, arg: string(s)}) }).
+		grid = grid.Child(ui.Card().Row().Align(ui.Center).Gap(space4).
+			Label(s.Name()).OnClick(func() { a.open(view{page: pageSource, arg: string(s)}) }).
 			Tooltip(sourceTips[s]).
 			Child(ui.Div().Size(ui.Px(48), ui.Px(48)).Radius(radiusM).Background(c.Alpha(0.15)).Center().
-				Child(sourceMark(ctx, s, 26))).
+				Child(ui.Icon(sourceIcons[s]).Size(26).Color(c))).
 			Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 				Child(subhead(s.Name())).
 				Child(muted(ctx, plural(counts.Data[s], "app", "apps")))).

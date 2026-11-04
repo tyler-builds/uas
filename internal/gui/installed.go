@@ -19,7 +19,7 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 	res := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
 	ups := a.updates(ctx)
 	page := pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, glyph(ctx, icons.Download, 28), ui.Color{}, "Installed",
+		Child(a.listHeader(ctx, icons.Download, ui.Color{}, "Installed",
 			"Everything installed from every source. Packages layered onto the system image update with the system.",
 			a.refreshButton(ctx, res, ups)))
 	switch {
@@ -54,7 +54,7 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 			OnClick(func() { a.updateAll(ctx, with) }))).
 		Child(a.refreshButton(ctx, res, ups))
 	page := pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, glyph(ctx, icons.RefreshCw, 28), ui.Color{}, "Updates",
+		Child(a.listHeader(ctx, icons.RefreshCw, ui.Color{}, "Updates",
 			"Newer versions from Flathub, Homebrew and GitHub. Layered packages update with the system (ujust update).",
 			actions))
 	switch {

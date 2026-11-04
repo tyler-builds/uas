@@ -99,11 +99,14 @@ func testApp(t *testing.T) (*App, *fakeBackend, *fakeBackend) {
 	return a, fp, gh
 }
 
-// clickButton waits until a button is enabled, then clicks it.
+// clickButton waits until a button is there and ready (not disabled or busy), then clicks it.
 func clickButton(u *uitest.UI, name string) {
 	u.WaitFor("the "+name+" button", func() bool {
-		n := u.Tree().Find(access.RoleButton, name)
-		return n != nil && n.States&access.StateFocusable != 0 && n.States&access.StateDisabled == 0
+		if !u.HasRole(access.RoleButton, name) {
+			return false
+		}
+		b := u.ByRole(access.RoleButton, name)
+		return !b.Disabled() && !b.States().Has(access.StateBusy)
 	})
 	u.ByRole(access.RoleButton, name).Click()
 }
@@ -131,20 +134,18 @@ func TestBrowseAndInstall(t *testing.T) {
 	waitText(t, u, "detail:org.example.Notes", "Installed 1.0")
 	// No update yet, so no Update button.
 	waitText(t, u, "detail:org.example.Notes", "Up to date")
-	if u.Tree().Find(access.RoleButton, "Update") != nil {
+	if u.HasRole(access.RoleButton, "Update") {
 		t.Error("an Update button with no update available")
 	}
 
 	// Remove asks first.
 	clickButton(u, "Remove")
-	u.WaitFor("the remove dialog", func() bool { return u.Tree().Find(access.RoleAlertDialog, "Remove Notes?") != nil })
+	u.WaitFor("the remove dialog", func() bool { return u.HasRole(access.RoleAlertDialog, "Remove Notes?") })
 	if a.removing.Peek() == nil {
 		t.Fatal("Remove did not ask first")
 	}
-	// The page and the dialog both have a "Remove" button, and ByRole finds the page's. A destructive
-	// dialog focuses Cancel first, so Tab moves to the dialog's Remove and Enter presses it.
-	u.Press("tab")
-	u.Press("enter")
+	// The page and the dialog both have a "Remove" button: press the dialog's.
+	u.ByRole(access.RoleAlertDialog, "Remove Notes?").ByRole(access.RoleButton, "Remove").Click()
 	u.WaitFor("the removal", func() bool {
 		fp.mu.Lock()
 		defer fp.mu.Unlock()
@@ -157,11 +158,11 @@ func TestGitHubInstallAsksWithTrustScore(t *testing.T) {
 	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
 	defer u.Close()
 
-	u.WaitFor("the search field", func() bool { return u.Tree().Find(access.RoleTextField, "Search apps") != nil })
+	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
 	u.ByRole(access.RoleTextField, "Search apps").Type("tool")
 	u.Advance(searchDebounce + 10*time.Millisecond)
 	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
-	clickButton(u, "Details")
+	u.Get("row:github:example/tool").ByRole(access.RoleButton, "Details").Click()
 	waitText(t, u, "detail:github:example/tool", "Trust score")
 
 	clickButton(u, "Install") // the row's Install button installs from the recommended source
@@ -170,7 +171,7 @@ func TestGitHubInstallAsksWithTrustScore(t *testing.T) {
 		t.Fatal("installed before the user confirmed")
 	}
 	u.WaitFor("the confirmation dialog", func() bool {
-		return u.Tree().Find(access.RoleAlertDialog, "Install tool from GitHub · 0.1 (trust 45)?") != nil
+		return u.HasRole(access.RoleAlertDialog, "Install tool from GitHub · 0.1 (trust 45)?")
 	})
 	u.Press("escape")
 	if a.confirm.Peek() != nil {
@@ -213,7 +214,7 @@ func TestUpdateShownOnlyWhenAvailable(t *testing.T) {
 		return len(fp.updated) == 1
 	})
 	u.WaitFor("the update buttons to go", func() bool {
-		return u.Tree().Find(access.RoleButton, "Update to 1.1") == nil &&
-			u.Tree().Find(access.RoleButton, "Update 1 app") == nil
+		return !u.HasRole(access.RoleButton, "Update to 1.1") &&
+			!u.HasRole(access.RoleButton, "Update 1 app")
 	})
 }

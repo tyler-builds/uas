@@ -299,7 +299,8 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 		ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Download, Badge: len(installed.Data)},
 		ui.SidebarItem{Key: pageUpdates, Label: "Updates", Icon: icons.RefreshCw, Badge: len(a.updates(ctx).Data)},
 	)
-	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).
+	// The selected item's fill marks it; no bar beside it.
+	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).NoIndicator().
 		OnChange(func(key string) { a.goTo(navView(key)) }).
 		Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space5).PaddingBottom(space3).
 			Child(brandMark(ctx, 30)).

@@ -92,10 +92,14 @@ func buildTheme(t *ui.Theme, p palette) *ui.Theme {
 		Pane:         ui.Style{Background: h(p.panel)},
 		Item:         ui.Style{Radius: radiusS, FontSize: 14, MinHeight: ui.Px(40)},
 		ItemSelected: ui.Style{Background: h(p.surfaceActive), TextColor: h(p.text), FontWeight: ui.FontSemibold},
-		Indicator:    ui.Style{Clear: ui.ClearBackground}, // the fill alone marks the selected item
 		Heading:      ui.Style{TextColor: h(p.textSubtle), FontSize: 11},
 	}
 	t.Buttons.Primary = ui.ButtonStyle{Root: ui.Style{FontWeight: ui.FontSemibold}}
+	// Cards are one flat color, lighter than the page; a clickable one lightens under the pointer.
+	t.Card = ui.CardStyle{
+		Card:      ui.Style{Radius: radiusL, Padding: ui.All(space5), Gap: space3, Background: h(p.surface)},
+		CardHover: ui.Style{Background: h(p.surfaceHover), Cursor: ui.CursorPointer},
+	}
 	return t
 }
 
@@ -122,19 +126,6 @@ func caption(ctx *ui.Context, s string) *ui.TextElement {
 	return ui.Text(s).FontSize(12).TextColor(ctx.Theme().TextMuted)
 }
 
-// card is the standard container: a raised surface with a hairline border.
-func card(ctx *ui.Context) *ui.DivElement {
-	t := ctx.Theme()
-	return ui.Div().Column().Gap(space3).Padding(space5).Radius(radiusL).Background(t.Surface)
-}
-
-// clickable makes a card or row behave as a button: pointer, hover lift, focus and Enter or Space.
-func clickable(ctx *ui.Context, d *ui.DivElement, name string, onClick func()) *ui.DivElement {
-	t := ctx.Theme()
-	return d.Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
-		Role(access.RoleButton).Label(name).TabIndex(0).OnClick(onClick)
-}
-
 // sectionHeader is a section's title with optional controls on the right, such as a "See all" link.
 func sectionHeader(ctx *ui.Context, titleText, sub string, trailing ...ui.Element) ui.Element {
 	left := ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(heading(titleText))
@@ -148,15 +139,9 @@ func sectionHeader(ctx *ui.Context, titleText, sub string, trailing ...ui.Elemen
 	return row
 }
 
-// linkButton is text with an icon after it, such as "See all →". jamb buttons put their icon first, so this
-// is built from a focusable row.
-func linkButton(ctx *ui.Context, label string, icon *icons.Icon, onClick func()) ui.Element {
-	t := ctx.Theme()
-	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(space2).PaddingY(space1).Radius(radiusS).Shrink(0).
-		Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
-		Role(access.RoleButton).Label(label).TabIndex(0).OnClick(onClick).
-		Child(ui.Text(label).FontSize(14).TextColor(t.Text)).
-		Child(ui.Icon(icon).Size(16).Color(t.Text))
+// linkButton is a quiet button with an icon after its text, such as "See all →".
+func linkButton(_ *ui.Context, label string, icon *icons.Icon, onClick func()) ui.Element {
+	return ui.Button(label).IconEnd(icon).Ghost().Small().OnClick(onClick)
 }
 
 // chip is a rounded tag, such as a category on an app page.
@@ -190,16 +175,6 @@ var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
 }
 
-// sourceIcons give each source a mark: a Flatpak box, layers for packages layered onto the system image,
-// Homebrew's beer mug, a hammer for COPR's owner-built packages, and a branch for GitHub releases.
-var sourceIcons = map[catalog.SourceID]*icons.Icon{
-	catalog.SourceFlathub:  icons.PackageOpen,
-	catalog.SourceFedora:   icons.Layers,
-	catalog.SourceHomebrew: icons.Beer,
-	catalog.SourceCOPR:     icons.Hammer,
-	catalog.SourceGitHub:   icons.GitBranch,
-}
-
 // sourceTips explain each source in a sentence or two.
 var sourceTips = map[catalog.SourceID]string{
 	catalog.SourceFlathub: "On Flathub, the Flatpak app store. Flatpak apps run in a sandbox and install " +
@@ -227,15 +202,10 @@ func sourceColor(ctx *ui.Context, s catalog.SourceID) ui.Color { return tintColo
 const verifiedTip = "Flathub has confirmed that the publisher is the app's own developer, through the " +
 	"developer's website or code-hosting account"
 
-// glyph is an icon in the accent color, for page headers.
-func glyph(ctx *ui.Context, ic *icons.Icon, size float32) ui.Element {
-	return ui.Icon(ic).Size(size).Color(ctx.Theme().Accent)
-}
-
 // sourceTag is a source's icon in its color followed by its name, as the lists show where an app comes from.
 func sourceTag(ctx *ui.Context, s catalog.SourceID) ui.Element {
 	return ui.Div().Row().Align(ui.Center).Gap(6).Shrink(0).Tooltip(s.Name() + ": " + sourceTips[s]).
-		Child(sourceMark(ctx, s, 15)).
+		Child(ui.Icon(sourceIcons[s]).Size(15).Color(sourceColor(ctx, s))).
 		Child(ui.Text(s.Name()).FontSize(13).TextColor(ctx.Theme().TextMuted))
 }
 
@@ -274,7 +244,7 @@ func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
 	c := sourceColor(ctx, s)
 	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(10).Height(ui.Px(26)).Radius(13).Shrink(0).
 		Background(c.Alpha(0.14)).Tooltip(sourceTips[s]).
-		Child(sourceMark(ctx, s, 14)).
+		Child(ui.Icon(sourceIcons[s]).Size(14).Color(c)).
 		Child(ui.Text(s.Name()).FontSize(12.5).Semibold().TextColor(c))
 }
 
@@ -289,13 +259,6 @@ func statusPill(ctx *ui.Context, ok bool, label string) ui.Element {
 		Background(c.Alpha(0.14)).
 		Child(ui.Div().Size(ui.Px(6), ui.Px(6)).Radius(3).Background(c)).
 		Child(ui.Text(label).FontSize(12).Semibold().TextColor(c))
-}
-
-// meter is a thin bar filled to frac (0 to 1) in color.
-func meter(ctx *ui.Context, frac float64, color ui.Color) ui.Element {
-	frac = max(0, min(1, frac))
-	return ui.Div().Height(ui.Px(6)).Radius(3).Background(ctx.Theme().Border).ClipContent().
-		Child(ui.Div().Width(ui.Percent(float32(frac * 100))).Height(ui.Full).Radius(3).Background(color))
 }
 
 // statLine is an icon and a short figure, as the result rows show installs and release dates.

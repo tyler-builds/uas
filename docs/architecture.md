@@ -279,10 +279,9 @@ GitHub, COPR and Fedora installs ask first in an alert dialog that repeats the n
 removals always ask. Jobs run in the background with progress in the page and in a toast. Images are cached in
 `~/.cache/uas/images`. At start the app checks for a newer catalog in the background and switches to it.
 
-Jamb is pinned to its main branch (`47731b5`): the Linux platform landed after its last tag. Linux support is
-experimental (Wayland only, CPU rendering, no AT-SPI or input methods). Jamb picks Linux fonts from Debian paths
-only, so `cmd/uas-gui/fonts.go` registers the desktop's fonts through fontconfig. Problems found while building
-the UI are written up for the Jamb maintainers outside this repo.
+uas uses Jamb v0.6.0, its first release with Linux support. That support is experimental (Wayland only, CPU
+rendering, no AT-SPI or input methods). Jamb finds the desktop's fonts and emoji through fontconfig. Problems
+found while building the UI are written up for the Jamb maintainers outside this repo.
 
 ### Packaging the client
 
@@ -307,7 +306,7 @@ uas/
 ├── go.mod
 ├── cmd/
 │   ├── uas/                 # CLI: search, info, install, remove, update
-│   ├── uas-gui/             # Jamb desktop app (fonts.go: fontconfig font workaround)
+│   ├── uas-gui/             # Jamb desktop app
 │   └── uas-indexer/         # crawler, run in CI
 ├── internal/
 │   ├── catalog/             # shared types, SQLite schema, FTS queries (rebuilt each run, no migrations)

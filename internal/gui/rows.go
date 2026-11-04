@@ -59,9 +59,9 @@ func reachText(r catalog.SearchResult) (icon *icons.Icon, text, tip string) {
 // appCard is an app in a home page row: icon, name, summary and where it comes from.
 func (a *App) appCard(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 	t := ctx.Theme()
-	return clickable(ctx, ui.Div().Row().Align(ui.Center).Gap(space4).Padding(space5).Height(ui.Px(128)).
-		Radius(radiusL).Background(t.Surface).MinWidth(ui.Px(0)),
-		r.Name, func() { a.openApp(r.ID) }).
+	return ui.Card().Row().Align(ui.Center).Gap(space4).MinWidth(ui.Px(0)).
+		Styles(ui.CardStyle{Card: ui.Style{Height: ui.Px(128)}}).
+		Label(r.Name).OnClick(func() { a.openApp(r.ID) }).
 		Child(a.appIcon(ctx, r.IconURL, 60, r.Name)).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(r.Name).FontSize(16).Semibold().Truncate()).
@@ -189,13 +189,9 @@ func pageBody(maxWidth float32) *ui.DivElement {
 }
 
 // scroll puts a page in a scrolling column that fills the content area, centered up to its MaxWidth.
-//
-// The centering is a row with Justify(Center) and a growing page, not Align(Center) on the column: under
-// Align(Center), jamb sizes the page to its content, measures rows that use Basis(0) at no width, and the
-// page ends up far taller than its content (see jamb-notes.md).
 func scroll(page *ui.DivElement) ui.Element {
-	return ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).ScrollY().
-		Child(ui.Div().Row().Justify(ui.Center).Child(page.Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))))
+	return ui.Div().Column().Align(ui.Center).Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).ScrollY().
+		Child(page.Width(ui.Full))
 }
 
 // gridColumns fits items of about minWidth into the content area, up to most.

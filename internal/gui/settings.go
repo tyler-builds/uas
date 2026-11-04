@@ -19,8 +19,8 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
 		scope := ui.Local(ctx, "scope", a.s.Settings.FlatpakScope)
-		section := func(icon *icons.Icon, titleText, sub string) *ui.DivElement {
-			return card(ctx).Padding(space6).Gap(space4).
+		section := func(icon *icons.Icon, titleText, sub string) *ui.CardElement {
+			return ui.Card().Padding(space6).Gap(space4).
 				Child(ui.Div().Row().Gap(space3).Align(ui.Center).
 					Child(ui.Div().Size(ui.Px(36), ui.Px(36)).Radius(radiusM).Background(t.AccentSoft).Center().
 						Child(ui.Icon(icon).Size(18).Color(t.Accent))).

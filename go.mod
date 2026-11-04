@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/CalebQ42/squashfs v1.4.1
 	github.com/klauspost/compress v1.20.3
-	github.com/tyler-builds/jamb v0.5.1-0.20261103224934-47731b59dd95
+	github.com/tyler-builds/jamb v0.6.0
 	golang.org/x/image v0.47.0
 	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.61.1

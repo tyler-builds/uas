@@ -30,8 +30,8 @@ github.com/rasky/go-lzo v0.0.0-20200203143853-96a758eda86e h1:dCWirM5F3wMY+cmRda
 github.com/rasky/go-lzo v0.0.0-20200203143853-96a758eda86e/go.mod h1:9leZcVcItj6m9/CfHY5Em/iBrCz7js8LcRQGTKEEv2M=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/tyler-builds/jamb v0.5.1-0.20261103224934-47731b59dd95 h1:uTHedztWnADzvuEF6cOZjzZVJRpzJDAObu39hvo3K4g=
-github.com/tyler-builds/jamb v0.5.1-0.20261103224934-47731b59dd95/go.mod h1:1Af8ll+w7uRweN9L+AVLJCy8FH98mXZkZjHrB2JvqBs=
+github.com/tyler-builds/jamb v0.6.0 h1:ZqSArhqN/dlA/b12wzqZDcJXMA5oGTg6mMvy2fUHYcY=
+github.com/tyler-builds/jamb v0.6.0/go.mod h1:1Af8ll+w7uRweN9L+AVLJCy8FH98mXZkZjHrB2JvqBs=
 github.com/ulikunitz/xz v0.5.12 h1:37Nm15o69RwBkXM0J6A5OlE67RZTfzUxTj8fB3dfcsc=
 github.com/ulikunitz/xz v0.5.12/go.mod h1:nbz6k7qbPmH4IRqmfOplQw/tblSgqTqBwxkY0oWt/14=
 github.com/yuin/goldmark v1.8.6 h1:d0VcaP1sx9GkFVkoW+KtggpGi2KZ965i14b0+bDQST4=

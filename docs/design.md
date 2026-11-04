@@ -37,12 +37,14 @@ components instead of raw sizes and colors.
 - **Palette:** charcoal surfaces with a teal accent (`#2dd4bf` dark, `#0d9488` light). Primary buttons are
   teal with dark text in the dark theme. `gui.Themes()` builds both themes over jamb's, so every widget picks
   them up, and the window follows the system's light or dark mode.
-- **Sources:** each has a color and its own logo (`sourceMark`), shown with its name wherever an app's
+- **Sources:** each has a color and its own logo (`sourceIcons`), shown with its name wherever an app's
   sources are listed: Flathub blue, Fedora violet, Homebrew amber, GitHub gray. The logos are Simple Icons
-  SVGs tinted through `currentColor` (`internal/gui/logos`). COPR has no logo and shows a rose hammer. A Flathub-verified publisher gets a green shield. Hovering any of them explains it.
+  SVGs made into ordinary jamb icons with `icons.MustNew` (`internal/gui/logos.go`), so they tint and size
+  like any icon. COPR has no logo and shows a rose hammer. A Flathub-verified publisher gets a green shield. Hovering any of them explains it.
 
 - **Surfaces:** cards, rows and tiles are one flat color with no border, lighter than the page (the light
-  theme's page is a soft gray so white cards stand out). Hovering lightens a clickable one.
+  theme's page is a soft gray so white cards stand out). Hovering lightens a clickable one. They are jamb
+  `ui.Card`s, styled once in the theme (`Theme.Card`).
 
 ## Tokens
 
@@ -54,8 +56,9 @@ components instead of raw sizes and colors.
 
 ## Components
 
-- `card`, `clickable`: surfaces, and making one behave as a button.
-- `sectionHeader`, `linkButton`: section titles with a "See all →" style link.
+- `ui.Card()` for surfaces; with `OnClick` the whole card is a button.
+- `sectionHeader`, `linkButton`: section titles with a "See all →" style link (a ghost button with
+  `IconEnd`).
 - `chip`, `filterChip`: tags on an app page, and the search filters.
 - `sourceTag`, `sourceTags`, `verifiedTag`: a source's icon and name; `sourcePill` and `statusPill` for
   Settings and Sources.
@@ -70,5 +73,5 @@ components instead of raw sizes and colors.
 UAS_SHOTS=/tmp/uas-shots UAS_CATALOG=out/catalog.db go test ./internal/gui -run TestShots
 ```
 
-It uses jamb's embedded fonts (the app registers the desktop's fonts at start), so text looks slightly
-different from the running app.
+It uses jamb's embedded fonts (the running app gets the desktop's fonts from fontconfig), so text looks
+slightly different from the running app.
