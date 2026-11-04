@@ -1,6 +1,7 @@
 package recommend
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -60,23 +61,20 @@ func TestTraitsAndAlternatives(t *testing.T) {
 		got[a.Listing.Ref] = a.Because
 	}
 	want := map[string]string{
-		"fedora-45/x": "its publisher isn't verified",
-		"fedora-44/x": "built for a different Fedora release than this system's next boot",
-		"o/x":         "its publisher isn't verified",
+		"fedora-45/x": "it would be layered into the system image, which needs a restart and can hold up system updates",
+		"fedora-44/x": "it's built for a different Fedora release than the one this system boots next",
+		"o/x": "it runs as an AppImage outside any sandbox, and no distribution checks its builds. " +
+			"Its trust score of 70/100 rates how well kept the project is, not its code",
 	}
 	for ref, w := range want {
 		if got[ref] != w {
 			t.Errorf("because(%s) = %q, want %q", ref, got[ref], w)
 		}
 	}
-	// Against an unverified choice, the next reasons show.
-	unverified := flathub
-	unverified.Verified = false
-	for _, a := range Alternatives(app, available, unverified) {
-		if a.Listing.Ref == "fedora-45/x" && a.Because != "it would be layered into the system image, which needs a restart" {
-			t.Errorf("fedora because = %q", a.Because)
-		}
-		if a.Listing.Ref == "o/x" && a.Because != "nobody reviews it (trust score 70/100)" {
+	// A perfect trust score still loses to Flathub, and says why.
+	gh.Trust.Score = 100
+	for _, a := range Alternatives(app, available, catalog.Listing{Source: catalog.SourceFlathub, Ref: "app/x"}) {
+		if a.Listing.Ref == "o/x" && !strings.Contains(a.Because, "outside any sandbox") {
 			t.Errorf("github because = %q", a.Because)
 		}
 	}

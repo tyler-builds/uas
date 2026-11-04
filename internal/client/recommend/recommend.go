@@ -148,20 +148,36 @@ func Alternatives(app *catalog.App, available func(catalog.Listing) bool, chosen
 	return alts
 }
 
+// because says what makes l worse than chosen for this user. It names a concrete difference (a sandbox, a
+// review, a restart), not just the ranking.
 func because(l, chosen catalog.Listing, available bool) string {
 	switch {
-	case !available && l.Distro != "" && l.Distro != chosen.Distro && (l.Source == catalog.SourceFedora || l.Source == catalog.SourceCOPR):
-		return "built for a different Fedora release than this system's next boot"
+	case !available && l.Distro != "" && l.Distro != chosen.Distro && layered(l.Source):
+		return "it's built for a different Fedora release than the one this system boots next"
 	case !available:
-		return "can't be installed on this system"
-	case chosen.Verified && !l.Verified:
-		return "its publisher isn't verified"
+		return "it can't be installed on this system"
 	case layered(l.Source) && !layered(chosen.Source):
-		return "it would be layered into the system image, which needs a restart"
-	case l.Trust != nil && (chosen.Trust == nil || chosen.Trust.Score > l.Trust.Score):
-		return fmt.Sprintf("nobody reviews it (trust score %d/100)", l.Trust.Score)
+		what := "layered into the system image"
+		if l.Source == catalog.SourceCOPR {
+			what = "built by a COPR project owner without review, and layered into the system image"
+		}
+		return "it would be " + what + ", which needs a restart and can hold up system updates"
+	case l.Source == catalog.SourceGitHub:
+		why := "it runs as an AppImage outside any sandbox, and no distribution checks its builds"
+		if chosen.Source == catalog.SourceHomebrew {
+			why = "no distribution checks its builds, while Homebrew's maintainers review their formula"
+		}
+		if l.Trust != nil {
+			why += fmt.Sprintf(". Its trust score of %d/100 rates how well kept the project is, not its code",
+				l.Trust.Score)
+		}
+		return why
 	case l.Source == catalog.SourceHomebrew && chosen.Source == catalog.SourceFlathub:
 		return "it isn't sandboxed"
+	case l.Source == catalog.SourceFlathub && chosen.Verified && !l.Verified:
+		return "Flathub hasn't verified its publisher"
+	case l.Source == catalog.SourceFlathub:
+		return "you picked " + chosen.Source.Name()
 	}
 	return chosen.Source.Name() + " ranks higher on image-based systems like Bazzite"
 }

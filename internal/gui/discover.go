@@ -199,16 +199,33 @@ func compact(n int) string {
 
 func trimZero(s string) string { return strings.TrimSuffix(s, ".0") }
 
-// sourceBadges shows where an app is available.
+// sourceBadges shows where an app is available. Each badge explains its source on hover.
 func sourceBadges(sources []catalog.SourceID, verified bool) ui.Element {
 	row := ui.Div().Row().Gap(4).Shrink(0)
 	for _, s := range sources {
-		row = row.Child(ui.BadgeText(sourceLabel(s)).Variant(ui.BadgeNeutral))
+		row = row.Child(ui.Div().Tooltip(sourceTips[s]).
+			Child(ui.BadgeText(sourceLabel(s)).Variant(ui.BadgeNeutral)))
 	}
 	if verified {
-		row = row.Child(ui.BadgeText("Verified").Variant(ui.BadgeSuccess).StatusDot())
+		row = row.Child(ui.Div().Tooltip("Flathub has confirmed that the publisher is the app's own developer, " +
+			"through the developer's website or code-hosting account").
+			Child(ui.BadgeText("Verified").Variant(ui.BadgeSuccess).StatusDot()))
 	}
 	return row
+}
+
+// sourceTips explain each source in a sentence or two.
+var sourceTips = map[catalog.SourceID]string{
+	catalog.SourceFlathub: "On Flathub, the Flatpak app store. Flatpak apps run in a sandbox and install " +
+		"without a restart",
+	catalog.SourceFedora: "Packaged and signed by Fedora. Installing adds it to the system image " +
+		"(layering), which takes effect after a restart",
+	catalog.SourceHomebrew: "A Homebrew formula, mostly command-line tools. Installs for your user without " +
+		"a restart",
+	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage. No distribution reviews it; " +
+		"its page shows a trust score",
+	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
+		"and installing layers it into the system image",
 }
 
 func sourceLabel(s catalog.SourceID) string { return s.Name() }
