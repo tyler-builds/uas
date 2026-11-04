@@ -8,20 +8,25 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/flatpak"
+	"github.com/tyler-builds/uas/internal/client/backend/github"
 	"github.com/tyler-builds/uas/internal/client/backend/homebrew"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
+	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/recommend"
 	"github.com/tyler-builds/uas/internal/client/run"
 	"github.com/tyler-builds/uas/internal/client/settings"
+	"github.com/tyler-builds/uas/internal/client/state"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
 	"golang.org/x/term"
 )
@@ -36,7 +41,8 @@ type env struct {
 }
 
 // loadEnv reads settings and detects the system. scope, if set, overrides the Flatpak scope setting.
-func loadEnv(ctx context.Context, scope string) (*env, error) {
+// catalogPath is used to look up newer releases when updating GitHub apps.
+func loadEnv(ctx context.Context, scope, catalogPath string) (*env, error) {
 	path, err := settings.Path()
 	if err != nil {
 		return nil, err
@@ -65,6 +71,9 @@ func loadEnv(ctx context.Context, scope string) (*env, error) {
 	if e.platform.Brew != "" {
 		e.backends[catalog.SourceHomebrew] = &homebrew.Backend{
 			Runner: run.Exec{Env: []string{"HOMEBREW_NO_ENV_HINTS=1"}}, Path: e.platform.Brew}
+	}
+	if gh, err := githubBackend(catalogPath); err == nil {
+		e.backends[catalog.SourceGitHub] = gh
 	}
 	// Layering needs an image-based system. Package-based Fedora (dnf) is outside the Bazzite slice.
 	if e.platform.Atomic && e.platform.RPMOSTree != "" && e.platform.FedoraRelease() > 0 {
@@ -117,7 +126,7 @@ func runInstall(ctx context.Context, args []string) error {
 	if len(ids) != 1 {
 		return errors.New("install: give exactly one app ID (see \"uas search\")")
 	}
-	e, err := loadEnv(ctx, *scope)
+	e, err := loadEnv(ctx, *scope, *catalogPath)
 	if err != nil {
 		return err
 	}
@@ -160,6 +169,16 @@ func runInstall(ctx context.Context, args []string) error {
 			fmt.Println("Installs for your user account only.")
 		} else {
 			fmt.Println("Installs for all users. Flatpak will ask for your password.")
+		}
+	}
+	if l.Source == catalog.SourceGitHub {
+		a, _ := l.Asset(catalog.AssetAppImage)
+		fmt.Printf("Downloads %s (%s) from github.com/%s. Not reviewed by any distribution.\n", a.Name,
+			humanSize(a.Size), l.Ref)
+		fmt.Printf("Trust score %d/100:\n", l.Trust.Score)
+		printTrust(os.Stdout, l)
+		if !e.platform.LibFUSE2 {
+			fmt.Println("Note: FUSE 2 was not found; older AppImages may not start.")
 		}
 	}
 	if l.Source == catalog.SourceHomebrew {
@@ -219,7 +238,7 @@ func runOnInstalled(ctx context.Context, cmd, verb string, args []string,
 	if len(ids) != 1 {
 		return fmt.Errorf("%s: give exactly one app ID (see \"uas list\")", cmd)
 	}
-	e, err := loadEnv(ctx, "")
+	e, err := loadEnv(ctx, "", *catalogPath)
 	if err != nil {
 		return err
 	}
@@ -293,6 +312,53 @@ func installNames(ctx context.Context, catalogPath, id string) map[string]bool {
 	return names
 }
 
+// githubBackend sets up AppImage installs, looking up updates in the catalog at catalogPath.
+func githubBackend(catalogPath string) (*github.Backend, error) {
+	dirs, err := github.DefaultDirs()
+	if err != nil {
+		return nil, err
+	}
+	statePath, err := state.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return &github.Backend{
+		State:  state.Store{Path: statePath},
+		Dirs:   dirs,
+		Client: &http.Client{Timeout: 30 * time.Minute},
+		Runner: run.Exec{},
+		Latest: func(ctx context.Context, repo string) (catalog.Listing, error) {
+			db, err := catalog.Open(catalogPath)
+			if err != nil {
+				return catalog.Listing{}, err
+			}
+			defer db.Close()
+			app, err := db.Resolve(ctx, repo)
+			if err != nil {
+				return catalog.Listing{}, err
+			}
+			for _, l := range app.Listings {
+				if l.Source == catalog.SourceGitHub && l.Ref == repo {
+					return l, nil
+				}
+			}
+			return catalog.Listing{}, fmt.Errorf("%s is no longer in the catalog", repo)
+		},
+	}, nil
+}
+
+func humanSize(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d bytes", n)
+}
+
 func runList(ctx context.Context, w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the list as JSON")
@@ -301,7 +367,8 @@ func runList(ctx context.Context, w io.Writer, args []string) error {
 	} else if len(rest) > 0 {
 		return errors.New("list: takes no arguments")
 	}
-	e, err := loadEnv(ctx, "")
+	catalogPath, _ := paths.Catalog()
+	e, err := loadEnv(ctx, "", catalogPath)
 	if err != nil {
 		return err
 	}

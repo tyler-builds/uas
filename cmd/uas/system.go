@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
+	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/settings"
 )
 
@@ -22,7 +23,8 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 	} else if len(rest) > 0 {
 		return errors.New("system: takes no arguments")
 	}
-	e, err := loadEnv(ctx, "")
+	catalogPath, _ := paths.Catalog()
+	e, err := loadEnv(ctx, "", catalogPath)
 	if err != nil {
 		return err
 	}

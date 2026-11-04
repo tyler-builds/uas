@@ -265,14 +265,35 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 				verified += " (" + l.VerifiedAs + ")"
 			}
 		}
+		if l.Trust != nil {
+			verified = fmt.Sprintf("trust %d/100", l.Trust.Score)
+		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", l.Source, l.Version, released, verified, l.Ref)
 	}
 	tw.Flush()
+	for _, l := range a.Listings {
+		if l.Trust != nil {
+			fmt.Fprintf(w, "\nTrust score for %s %s:\n", l.Source, l.Ref)
+			printTrust(w, l)
+		}
+	}
 
 	if a.Description != "" {
 		fmt.Fprintf(w, "\n%s\n", a.Description)
 	}
 	return nil
+}
+
+// printTrust shows a listing's trust score breakdown and warnings.
+func printTrust(w io.Writer, l catalog.Listing) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, s := range l.Trust.Signals {
+		fmt.Fprintf(tw, "  %s\t%d/%d\t%s\n", s.Name, s.Points, s.Max, s.Detail)
+	}
+	tw.Flush()
+	for _, f := range l.Trust.Flags {
+		fmt.Fprintf(w, "  Warning: %s\n", f)
+	}
 }
 
 func truncate(s string, n int) string {

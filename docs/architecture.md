@@ -65,10 +65,14 @@ All endpoints below need confirming during the first spike.
   Linux bottle and at least 1,000 installs-on-request a year (about 2,500), which drops most libraries;
   keg-only, deprecated and disabled formulae are skipped. The install count is stored on the listing for
   search ranking later.
-- **GitHub:** GraphQL API. A curated seed list plus discovery searches for repos whose latest release has a
-  Linux x86_64 `.AppImage`, `.flatpak` or `.rpm` asset. Uses a GitHub App token (higher rate limit than
-  `GITHUB_TOKEN`) and ETags for incremental runs. Search caps out at 1,000 results per query, so queries are
-  sliced by stars and dates.
+- **GitHub:** GraphQL searches (repos mentioning AppImage in their README, sliced by stars to stay under the
+  1,000-result cap, plus the `appimage` and `linux-app` topics). Each search page also reads the repo's latest
+  release with its files and the dates of recent releases. Asking for files of several releases per repo
+  exceeds GitHub's per-query limits, and so did a separate batched release lookup, so this single pass is the
+  design. A full pass is about 5 minutes (~2,000 repos, ~6 s per page of 50), so results are cached for 20
+  hours and only one of the four daily runs searches. The workflow's built-in `GITHUB_TOKEN` is enough
+  (about 30 GraphQL points per pass). Pages that GitHub refuses as too costly are retried at half size;
+  timeouts and secondary rate limits are retried with backoff.
 
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
@@ -77,9 +81,9 @@ Each fetcher returns `[]catalog.Listing` (one app from one source) and stores ra
 Listings are linked into one `App` when, in order of confidence:
 
 1. They share an AppStream ID (Flathub and Fedora).
-2. They point at the same upstream repo (AppStream `vcs-browser` or homepage URL, GitHub repo URL, COPR/Homebrew
-   source URLs).
-3. They share a normalized homepage URL.
+2. They point at the same code-forge repo (`github.com/owner/repo` and the like), from AppStream `vcs-browser`,
+   the GitHub repo URL, or Homebrew's head URL. A repo path is specific enough to link without the name.
+3. They have the same name and the same normalized homepage or source-code URL.
 
 Rules 2 and 3 use the app name plus the URL, merge only groups from different sources, and only when exactly
 two groups share the key, so ambiguous cases (Fedora's `ardour8` and `ardour9`) stay separate. Bare forge
@@ -167,9 +171,13 @@ type Backend interface {
   first use uas adds Flathub as a user remote (`flatpak remote-add --user --if-not-exists`, no root). A setting
   switches the default to system scope. Apps from both scopes appear under Installed and Updates.
 - **homebrew:** Calls `brew` and reads its JSON output.
-- **github:** Downloads the asset, checks it against the GitHub asset digest. AppImages go to
-  `~/.local/share/uas/appimages`, and their `.desktop` file and icon are read from the squashfs in Go, without
-  running the AppImage. `.flatpak` bundles go to the flatpak backend and `.rpm` files go to rpm-ostree.
+- **github:** Downloads the AppImage, checks its size and the SHA-256 GitHub publishes (no checksum, no
+  install), and saves it as `~/.local/share/uas/appimages/<owner>__<repo>.AppImage`. The `.desktop` file and
+  icon are read from the squashfs image inside it (`internal/client/appimage`), without running it, and a
+  launcher is written to `~/.local/share/applications/uas-<owner>__<repo>.desktop` with `Exec` rebuilt to run
+  only the AppImage. Installs are recorded in `~/.local/share/uas/state.json` (`internal/client/state`).
+  Update compares the installed checksum with the catalog's current release. `.flatpak` bundles and `.rpm`
+  files from releases are in the catalog but not installable yet.
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
   New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers
@@ -224,10 +232,11 @@ uas/
 │   │   │   ├── copr/
 │   │   │   ├── homebrew/
 │   │   │   └── github/
-│   │   ├── merge/           # dedupe and linking, overrides
+│   │   ├── merge/           # dedupe and linking
 │   │   ├── trust/           # scoring
 │   │   └── publish/         # build db, compress, sign, upload
 │   ├── client/
+│   │   ├── appimage/        # reads .desktop and icon from an AppImage; writes the launcher
 │   │   ├── paths/
 │   │   ├── platform/
 │   │   ├── refresh/         # download, verify and install the catalog
@@ -266,7 +275,8 @@ uas/
 4. **Fedora + rpm-ostree:** layering, reboot-needed state. Done.
 5. **Homebrew.** Done. `uas install tree` works by package name: the CLI resolves app IDs, package names,
    AppStream IDs and refs, and lists the choices when a name is ambiguous.
-6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking.
+6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking. Done. Follow-ups: installing
+   `.flatpak` bundles and `.rpm` files from releases.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling.
 8. **Jamb UI** on top of the finished core. Can start in parallel after milestone 2.
 

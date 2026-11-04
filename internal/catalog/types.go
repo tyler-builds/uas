@@ -86,6 +86,53 @@ type Listing struct {
 	Package string `json:"package,omitempty"`
 	// Distro limits the listing to one distribution release, such as "fedora-45". Empty means any.
 	Distro string `json:"distro,omitempty"`
+
+	// Assets are downloadable files, for sources that ship release files (GitHub), best first.
+	Assets []Asset `json:"assets,omitempty"`
+	// Trust explains how far a listing from an unreviewed source (GitHub, COPR) can be trusted.
+	Trust *Trust `json:"trust,omitempty"`
+}
+
+// Asset kinds.
+const (
+	AssetAppImage = "appimage"
+	AssetFlatpak  = "flatpak"
+	AssetRPM      = "rpm"
+)
+
+// Asset is one downloadable release file.
+type Asset struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256,omitempty"` // hex; empty when the source publishes no checksum
+	Downloads int    `json:"downloads,omitempty"`
+}
+
+// Asset returns the listing's first asset of the given kind.
+func (l *Listing) Asset(kind string) (Asset, bool) {
+	for _, a := range l.Assets {
+		if a.Kind == kind {
+			return a, true
+		}
+	}
+	return Asset{}, false
+}
+
+// Trust is a 0-100 score with the signals behind it. Flags are warnings shown whatever the score.
+type Trust struct {
+	Score   int           `json:"score"`
+	Signals []TrustSignal `json:"signals"`
+	Flags   []string      `json:"flags,omitempty"`
+}
+
+// TrustSignal is one part of a trust score.
+type TrustSignal struct {
+	Name   string `json:"name"`   // for example "Stars"
+	Detail string `json:"detail"` // for example "1,204 stars"
+	Points int    `json:"points"`
+	Max    int    `json:"max"`
 }
 
 // FedoraDistro returns the Distro value for a Fedora release.

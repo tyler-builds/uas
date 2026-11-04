@@ -34,3 +34,4 @@ jobs:
           CATALOG_URL: https://uas-catalog.tylerccarr.workers.dev
           UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
           UAS_UPLOAD_TOKEN: ${{ secrets.UAS_UPLOAD_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

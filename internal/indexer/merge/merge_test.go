@@ -43,6 +43,22 @@ func TestMergeByAppStreamID(t *testing.T) {
 	}
 }
 
+func TestMergeByRepo(t *testing.T) {
+	apps := Merge([]catalog.Listing{
+		{Source: catalog.SourceFlathub, Ref: "app/it.mijorus.gearlever/x86_64/stable", AppStreamID: "it.mijorus.gearlever",
+			Name: "Gear Lever", VCSURL: "https://github.com/mijorus/gearlever"},
+		{Source: catalog.SourceGitHub, Ref: "mijorus/gearlever", Name: "gearlever",
+			VCSURL: "https://github.com/mijorus/gearlever"},
+		// An owner page is not a repo.
+		{Source: catalog.SourceGitHub, Ref: "example/thing", Name: "thing", VCSURL: "https://github.com/example/thing"},
+		{Source: catalog.SourceFedora, Ref: "fedora-45/other", AppStreamID: "other", Name: "Other",
+			VCSURL: "https://github.com/example"},
+	})
+	if len(apps) != 3 || apps[1].ID != "it.mijorus.gearlever" || len(apps[1].Listings) != 2 {
+		t.Errorf("apps = %+v", apps)
+	}
+}
+
 func TestMergeByNameAndURL(t *testing.T) {
 	apps := Merge([]catalog.Listing{
 		{Source: catalog.SourceFlathub, Ref: "app/app.rednotebook.RedNotebook/x86_64/stable",

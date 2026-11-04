@@ -1,8 +1,9 @@
 // Package merge combines listings from different sources into apps.
 //
-// Listings merge when they share an AppStream ID. Groups that are still separate then merge when they have the
-// same name and the same homepage or source-code URL, come from different sources, and the match is
-// unambiguous (exactly two groups share the key). That catches distros that use old-style IDs such as
+// Listings merge when they share an AppStream ID. Groups that are still separate then merge when they point at
+// the same code-forge repo (github.com/owner/repo), or have the same name and the same homepage or
+// source-code URL, as long as they come from different sources and the match is unambiguous (exactly two
+// groups share the key). That catches distros that use old-style IDs such as
 // "rednotebook" for the app Flathub calls "app.rednotebook.RedNotebook".
 package merge
 
@@ -35,8 +36,11 @@ func Merge(listings []catalog.Listing) []catalog.App {
 		groups[key] = append(groups[key], l)
 	}
 
-	order = linkByURL(groups, order, func(l catalog.Listing) string { return l.Homepage })
-	order = linkByURL(groups, order, func(l catalog.Listing) string { return l.VCSURL })
+	// A repo URL on a code forge names one project, so it links without the name. Homepages and other
+	// URLs also need the same name.
+	order = linkGroups(groups, order, func(l catalog.Listing) string { return forgeRepo(l.VCSURL) })
+	order = linkGroups(groups, order, nameAnd(func(l catalog.Listing) string { return l.Homepage }))
+	order = linkGroups(groups, order, nameAnd(func(l catalog.Listing) string { return l.VCSURL }))
 
 	apps := make([]catalog.App, 0, len(groups))
 	seen := map[string]bool{}
@@ -54,14 +58,39 @@ func Merge(listings []catalog.Listing) []catalog.App {
 	return apps
 }
 
-// linkByURL merges pairs of groups that share a name and a URL picked by urlOf. It returns the new group order.
-func linkByURL(groups map[string][]catalog.Listing, order []string, urlOf func(catalog.Listing) string) []string {
+// nameAnd returns a key of a listing's name plus its normalized URL, or "" if either is missing.
+func nameAnd(urlOf func(catalog.Listing) string) func(catalog.Listing) string {
+	return func(l catalog.Listing) string {
+		u := normalizeURL(urlOf(l))
+		if u == "" || l.Name == "" {
+			return ""
+		}
+		return strings.ToLower(strings.TrimSpace(l.Name)) + "\x00" + u
+	}
+}
+
+// forgeRepo returns "host/owner/repo" for a repo URL on a known code forge, or "".
+func forgeRepo(raw string) string {
+	u := normalizeURL(raw)
+	host, path, ok := strings.Cut(u, "/")
+	if !ok || !genericHosts[host] || host == "sourceforge.net" {
+		return ""
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return u
+}
+
+// linkGroups merges pairs of groups that share a key. It returns the new group order.
+func linkGroups(groups map[string][]catalog.Listing, order []string, keyOf func(catalog.Listing) string) []string {
 	byKey := map[string][]string{}
 	for _, g := range order {
 		keys := map[string]bool{}
 		for _, l := range groups[g] {
-			if u := normalizeURL(urlOf(l)); u != "" && l.Name != "" {
-				keys[strings.ToLower(strings.TrimSpace(l.Name))+"\x00"+u] = true
+			if k := keyOf(l); k != "" {
+				keys[k] = true
 			}
 		}
 		for k := range keys {
@@ -71,11 +100,11 @@ func linkByURL(groups map[string][]catalog.Listing, order []string, urlOf func(c
 	merged := map[string]bool{}
 	for _, g := range order {
 		for _, l := range groups[g] {
-			u := normalizeURL(urlOf(l))
-			if u == "" || merged[g] {
+			k := keyOf(l)
+			if k == "" || merged[g] {
 				continue
 			}
-			pair := byKey[strings.ToLower(strings.TrimSpace(l.Name))+"\x00"+u]
+			pair := byKey[k]
 			if len(pair) != 2 || merged[pair[0]] || merged[pair[1]] {
 				continue
 			}

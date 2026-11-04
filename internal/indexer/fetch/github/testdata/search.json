@@ -1,0 +1,289 @@
+{
+ "data": {
+  "search": {
+   "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": "c1"
+   },
+   "nodes": [
+    {
+     "id": "R_example/notes",
+     "nameWithOwner": "example/notes",
+     "name": "notes",
+     "description": " Take notes ",
+     "homepageUrl": "https://notes.example.org",
+     "url": "https://github.com/example/notes",
+     "stargazerCount": 4200,
+     "createdAt": "2021-01-01T00:00:00Z",
+     "isArchived": false,
+     "isFork": false,
+     "licenseInfo": {
+      "spdxId": "MIT"
+     },
+     "owner": {
+      "login": "example"
+     },
+     "latestRelease": {
+      "tagName": "v2.4.0",
+      "publishedAt": "2026-10-01T00:00:00Z",
+      "isPrerelease": false,
+      "isDraft": false,
+      "releaseAssets": {
+       "nodes": [
+        {
+         "name": "Notes-2.4.0-arm64.AppImage",
+         "downloadUrl": "https://github.com/example/notes/releases/download/v2.4.0/Notes-2.4.0-arm64.AppImage",
+         "size": 90,
+         "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "downloadCount": 100
+        },
+        {
+         "name": "Notes-2.4.0.AppImage",
+         "downloadUrl": "https://github.com/example/notes/releases/download/v2.4.0/Notes-2.4.0.AppImage",
+         "size": 100,
+         "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "downloadCount": 5000
+        },
+        {
+         "name": "Notes-2.4.0-x86_64.AppImage",
+         "downloadUrl": "https://github.com/example/notes/releases/download/v2.4.0/Notes-2.4.0-x86_64.AppImage",
+         "size": 101,
+         "digest": "sha256:CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+         "downloadCount": 6000
+        },
+        {
+         "name": "Notes-2.4.0.AppImage.zsync",
+         "downloadUrl": "https://github.com/example/notes/releases/download/v2.4.0/Notes-2.4.0.AppImage.zsync",
+         "size": 1,
+         "digest": null,
+         "downloadCount": 1
+        },
+        {
+         "name": "notes-2.4.0-1.x86_64.rpm",
+         "downloadUrl": "https://github.com/example/notes/releases/download/v2.4.0/notes-2.4.0-1.x86_64.rpm",
+         "size": 80,
+         "digest": null,
+         "downloadCount": 300
+        },
+        {
+         "name": "notes-2.4.0-1.src.rpm",
+         "downloadUrl": "https://github.com/example/notes/releases/download/v2.4.0/notes-2.4.0-1.src.rpm",
+         "size": 80,
+         "digest": null,
+         "downloadCount": 3
+        }
+       ]
+      }
+     },
+     "releases": {
+      "nodes": [
+       {
+        "publishedAt": "2026-10-30T00:00:00Z",
+        "isPrerelease": true,
+        "isDraft": false
+       },
+       {
+        "publishedAt": "2026-10-01T00:00:00Z",
+        "isPrerelease": false,
+        "isDraft": false
+       },
+       {
+        "publishedAt": "2026-06-01T00:00:00Z",
+        "isPrerelease": false,
+        "isDraft": false
+       }
+      ]
+     }
+    },
+    {
+     "id": "R_example/winonly",
+     "nameWithOwner": "example/winonly",
+     "name": "winonly",
+     "description": null,
+     "homepageUrl": null,
+     "url": "https://github.com/example/winonly",
+     "stargazerCount": 9000,
+     "createdAt": "2020-01-01T00:00:00Z",
+     "isArchived": false,
+     "isFork": false,
+     "licenseInfo": null,
+     "owner": {
+      "login": "example"
+     },
+     "latestRelease": {
+      "tagName": "1.0",
+      "publishedAt": "2026-09-01T00:00:00Z",
+      "isPrerelease": false,
+      "isDraft": false,
+      "releaseAssets": {
+       "nodes": [
+        {
+         "name": "setup.exe",
+         "downloadUrl": "https://github.com/example/winonly/releases/download/1.0/setup.exe",
+         "size": 100,
+         "digest": null,
+         "downloadCount": 1
+        }
+       ]
+      }
+     },
+     "releases": {
+      "nodes": [
+       {
+        "publishedAt": "2026-09-01T00:00:00Z",
+        "isPrerelease": false,
+        "isDraft": false
+       }
+      ]
+     }
+    },
+    {
+     "id": "R_example/tiny",
+     "nameWithOwner": "example/tiny",
+     "name": "tiny",
+     "description": null,
+     "homepageUrl": null,
+     "url": "https://github.com/example/tiny",
+     "stargazerCount": 2,
+     "createdAt": "2026-10-25T00:00:00Z",
+     "isArchived": false,
+     "isFork": false,
+     "licenseInfo": null,
+     "owner": {
+      "login": "example"
+     },
+     "latestRelease": {
+      "tagName": "0.1",
+      "publishedAt": "2026-10-26T00:00:00Z",
+      "isPrerelease": false,
+      "isDraft": false,
+      "releaseAssets": {
+       "nodes": [
+        {
+         "name": "tiny.AppImage",
+         "downloadUrl": "https://github.com/example/tiny/releases/download/0.1/tiny.AppImage",
+         "size": 100,
+         "digest": null,
+         "downloadCount": 1
+        }
+       ]
+      }
+     },
+     "releases": {
+      "nodes": [
+       {
+        "publishedAt": "2026-10-26T00:00:00Z",
+        "isPrerelease": false,
+        "isDraft": false
+       }
+      ]
+     }
+    },
+    {
+     "id": "R_example/old",
+     "nameWithOwner": "example/old",
+     "name": "old",
+     "description": null,
+     "homepageUrl": null,
+     "url": "https://github.com/example/old",
+     "stargazerCount": 5000,
+     "createdAt": "2015-01-01T00:00:00Z",
+     "isArchived": true,
+     "isFork": false,
+     "licenseInfo": null,
+     "owner": {
+      "login": "example"
+     },
+     "latestRelease": {
+      "tagName": "9",
+      "publishedAt": "2020-01-01T00:00:00Z",
+      "isPrerelease": false,
+      "isDraft": false,
+      "releaseAssets": {
+       "nodes": [
+        {
+         "name": "old.AppImage",
+         "downloadUrl": "https://github.com/example/old/releases/download/9/old.AppImage",
+         "size": 100,
+         "digest": null,
+         "downloadCount": 1
+        }
+       ]
+      }
+     },
+     "releases": {
+      "nodes": [
+       {
+        "publishedAt": "2020-01-01T00:00:00Z",
+        "isPrerelease": false,
+        "isDraft": false
+       }
+      ]
+     }
+    },
+    {
+     "id": "R_example/sneaky",
+     "nameWithOwner": "example/sneaky",
+     "name": "sneaky",
+     "description": null,
+     "homepageUrl": null,
+     "url": "https://github.com/example/sneaky",
+     "stargazerCount": 5000,
+     "createdAt": "2015-01-01T00:00:00Z",
+     "isArchived": false,
+     "isFork": false,
+     "licenseInfo": null,
+     "owner": {
+      "login": "example"
+     },
+     "latestRelease": {
+      "tagName": "1",
+      "publishedAt": "2026-09-01T00:00:00Z",
+      "isPrerelease": false,
+      "isDraft": false,
+      "releaseAssets": {
+       "nodes": [
+        {
+         "name": "sneaky.AppImage",
+         "downloadUrl": "https://evil.example/sneaky.AppImage",
+         "size": 100,
+         "digest": null,
+         "downloadCount": 1
+        }
+       ]
+      }
+     },
+     "releases": {
+      "nodes": [
+       {
+        "publishedAt": "2026-09-01T00:00:00Z",
+        "isPrerelease": false,
+        "isDraft": false
+       }
+      ]
+     }
+    },
+    {
+     "id": "R_example/norelease",
+     "nameWithOwner": "example/norelease",
+     "name": "norelease",
+     "description": null,
+     "homepageUrl": null,
+     "url": "https://github.com/example/norelease",
+     "stargazerCount": 5000,
+     "createdAt": "2015-01-01T00:00:00Z",
+     "isArchived": false,
+     "isFork": false,
+     "licenseInfo": null,
+     "owner": {
+      "login": "example"
+     },
+     "latestRelease": null,
+     "releases": {
+      "nodes": []
+     }
+    }
+   ]
+  }
+ }
+}
