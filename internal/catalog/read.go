@@ -90,13 +90,34 @@ func (d *DB) search(ctx context.Context, match, exactName string, limit int) ([]
 		FROM apps_fts
 		JOIN apps a ON a.id = apps_fts.app_id
 		WHERE apps_fts MATCH ?
-		ORDER BY lower(a.name) = ? DESC, bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5)
+		ORDER BY lower(a.name) = ? DESC, bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost
 		LIMIT ?`, match, exactName, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
-	defer rows.Close()
+	return scanResults(rows)
+}
 
+// Browse lists apps for browsing: desktop apps with an icon, in a category if one is given, most popular
+// first.
+func (d *DB) Browse(ctx context.Context, category string, limit int) ([]SearchResult, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT a.id, a.name, a.summary, a.kind, a.icon_url,
+		       (SELECT group_concat(DISTINCT source) FROM listings l WHERE l.app_id = a.id),
+		       (SELECT max(verified) FROM listings l WHERE l.app_id = a.id)
+		FROM apps a
+		WHERE (?1 = '' OR a.id IN (SELECT app_id FROM app_categories WHERE category = ?1))
+		  AND a.kind = 'desktop-application' AND a.icon_url != ''
+		ORDER BY a.popularity DESC, a.name
+		LIMIT ?2`, category, limit)
+	if err != nil {
+		return nil, fmt.Errorf("browse: %w", err)
+	}
+	return scanResults(rows)
+}
+
+func scanResults(rows *sql.Rows) ([]SearchResult, error) {
+	defer rows.Close()
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
@@ -181,10 +202,10 @@ func (d *DB) App(ctx context.Context, id string) (*App, error) {
 	var kind, categories, keywords, screenshots string
 	err := d.db.QueryRowContext(ctx, `
 		SELECT kind, name, summary, description, developer, license, homepage, vcs_url, icon_url,
-		       categories, keywords, screenshots
+		       categories, keywords, screenshots, popularity
 		FROM apps WHERE id = ?`, id).
 		Scan(&kind, &a.Name, &a.Summary, &a.Description, &a.Developer, &a.License, &a.Homepage, &a.VCSURL,
-			&a.IconURL, &categories, &keywords, &screenshots)
+			&a.IconURL, &categories, &keywords, &screenshots, &a.Popularity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("app %q: %w", id, ErrNotFound)
 	}

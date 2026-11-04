@@ -39,7 +39,7 @@ func TestChoose(t *testing.T) {
 		{Source: catalog.SourceHomebrew, Ref: "tool"},
 	}}
 	if c, err := Choose(tool, all, ""); err != nil || c.Listing.Source != catalog.SourceHomebrew ||
-		c.Reason != "homebrew installs without a restart" {
+		c.Reason != "Homebrew installs without a restart" {
 		t.Errorf("Choose(tool) = %+v, %v", c, err)
 	}
 }

@@ -162,3 +162,31 @@ func TestOpenMissing(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestBrowse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	app := func(id, cat string, pop int, icon string) App {
+		return App{ID: id, Kind: KindDesktopApp, Name: id, IconURL: icon, Categories: []string{cat}, Popularity: pop,
+			Listings: []Listing{{Source: SourceFlathub, Ref: "app/" + id + "/x86_64/stable", Name: id}}}
+	}
+	apps := []App{app("a.Small", "Game", 10, "i"), app("b.Big", "Game", 9000, "i"), app("c.Office", "Office", 500, "i"),
+		app("d.NoIcon", "Game", 99999, "")}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rs, err := db.Browse(context.Background(), "Game", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rs) != 2 || rs[0].ID != "b.Big" || rs[1].ID != "a.Small" {
+		t.Errorf("Game = %+v", rs)
+	}
+	if rs, _ := db.Browse(context.Background(), "", 10); len(rs) != 3 {
+		t.Errorf("all = %+v", rs)
+	}
+}

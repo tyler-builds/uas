@@ -209,6 +209,7 @@ func build(ls []catalog.Listing) catalog.App {
 		if len(a.Screenshots) == 0 {
 			a.Screenshots = l.Screenshots
 		}
+		a.Popularity = max(a.Popularity, l.Installs)
 	}
 	return a
 }

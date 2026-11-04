@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,11 @@ CREATE TABLE apps (
 	icon_url    TEXT NOT NULL,
 	categories  TEXT NOT NULL, -- JSON array
 	keywords    TEXT NOT NULL, -- JSON array
-	screenshots TEXT NOT NULL  -- JSON array
+	screenshots TEXT NOT NULL, -- JSON array
+	popularity  INTEGER NOT NULL,
+	-- boost multiplies the search score (bm25, where lower is better): 1 for unknown apps, up to about 2 for
+	-- the most installed ones. Precomputed because SQLite's math functions may not be compiled in.
+	boost       REAL NOT NULL
 );
 
 -- One row per app per source. data holds the full Listing as JSON; the other columns are for filtering.
@@ -115,8 +120,8 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 
 	insApp, err := tx.PrepareContext(ctx, `INSERT INTO apps
 		(id, kind, name, summary, description, developer, license, homepage, vcs_url, icon_url,
-		 categories, keywords, screenshots)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		 categories, keywords, screenshots, popularity, boost)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -140,7 +145,8 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 		a := &apps[i]
 		if _, err := insApp.ExecContext(ctx, a.ID, string(a.Kind), a.Name, a.Summary, a.Description, a.Developer,
 			a.License, a.Homepage, a.VCSURL, a.IconURL,
-			jsonArray(a.Categories), jsonArray(a.Keywords), jsonArray(a.Screenshots)); err != nil {
+			jsonArray(a.Categories), jsonArray(a.Keywords), jsonArray(a.Screenshots), a.Popularity,
+			1+math.Log10(float64(a.Popularity)+1)/6); err != nil {
 			return fmt.Errorf("insert app %s: %w", a.ID, err)
 		}
 		for _, l := range a.Listings {

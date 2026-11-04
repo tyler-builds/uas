@@ -10,7 +10,7 @@ import (
 )
 
 // SchemaVersion is the version of the catalog database layout. Bump it on any incompatible change.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // SourceID names a place apps come from.
 type SourceID string
@@ -23,6 +23,23 @@ const (
 	SourceHomebrew SourceID = "homebrew"
 	SourceGitHub   SourceID = "github"
 )
+
+// Name is the source's name for people, such as "Flathub".
+func (s SourceID) Name() string {
+	switch s {
+	case SourceFlathub:
+		return "Flathub"
+	case SourceFedora:
+		return "Fedora"
+	case SourceHomebrew:
+		return "Homebrew"
+	case SourceCOPR:
+		return "COPR"
+	case SourceGitHub:
+		return "GitHub"
+	}
+	return string(s)
+}
 
 // SourcePrecedence orders sources for display: when several listings describe one app, fields such as the
 // name and screenshots come from the earliest source in this list that has them.
@@ -79,7 +96,8 @@ type Listing struct {
 	// Runtime is the Flatpak runtime the app needs, if any.
 	Runtime string `json:"runtime,omitempty"`
 
-	// Installs is how many times the app was installed in the past year, where the source publishes it.
+	// Installs is a yearly install count, where the source publishes one (Homebrew: installs on request in the
+	// past year; Flathub: last month's installs times 12). It ranks search results and browsing.
 	Installs int `json:"installs,omitempty"`
 
 	// Package is the name of the package to install, for package-based sources such as Fedora.
@@ -155,6 +173,8 @@ type App struct {
 	Categories  []string
 	Keywords    []string
 	Screenshots []Screenshot
+	// Popularity is the highest Installs of the app's listings.
+	Popularity int
 	// Listings are ordered by SourcePrecedence.
 	Listings []Listing
 }

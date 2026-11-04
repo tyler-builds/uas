@@ -39,7 +39,7 @@ func Choose(app *catalog.App, available func(catalog.Listing) bool, want catalog
 	}
 	if len(candidates) == 0 {
 		if want != "" {
-			return Choice{}, fmt.Errorf("%s is not available from %s on this system", app.Name, want)
+			return Choice{}, fmt.Errorf("%s is not available from %s on this system", app.Name, want.Name())
 		}
 		return Choice{}, fmt.Errorf("%s is not available from any source this system supports", app.Name)
 	}
@@ -59,17 +59,17 @@ func Choose(app *catalog.App, available func(catalog.Listing) bool, want catalog
 	var reason string
 	switch {
 	case want != "":
-		reason = "you asked for " + string(want)
+		reason = "you asked for " + want.Name()
 	case len(app.Listings) == 1:
 		reason = "the only source that offers it"
 	case len(candidates) == 1:
 		reason = "the only one of its sources this system supports"
 	case best.Verified:
-		reason = "verified publisher on " + string(best.Source)
+		reason = "verified publisher on " + best.Source.Name()
 	case !layered(best.Source) && slices.ContainsFunc(candidates, func(l catalog.Listing) bool { return layered(l.Source) }):
-		reason = string(best.Source) + " installs without a restart"
+		reason = best.Source.Name() + " installs without a restart"
 	default:
-		reason = string(best.Source) + " is the preferred source on this system"
+		reason = best.Source.Name() + " is the preferred source on this system"
 	}
 	return Choice{Listing: best, Reason: reason}, nil
 }

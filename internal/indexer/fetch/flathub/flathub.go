@@ -3,6 +3,7 @@ package flathub
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,60 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 		return nil, fmt.Errorf("flathub: %w", err)
 	}
 	defer r.Close()
-	return Parse(r, f.Arch)
+	listings, err := Parse(r, f.Arch)
+	if err != nil || f.File != "" {
+		return listings, err
+	}
+	// Popularity is a nice-to-have: without it the catalog still works, just ranked less well.
+	if installs, err := f.popular(ctx); err == nil {
+		for i := range listings {
+			// Flathub counts the last month; times 12 puts it on the same yearly scale as Homebrew's.
+			listings[i].Installs = installs[listings[i].AppStreamID] * 12
+		}
+	}
+	return listings, nil
+}
+
+// PopularURL lists apps with their installs in the last month, most popular first.
+const PopularURL = "https://flathub.org/api/v2/collection/popular"
+
+// popular returns each app's installs in the last month.
+func (f *Fetcher) popular(ctx context.Context) (map[string]int, error) {
+	installs := map[string]int{}
+	for page := 1; page <= 100; page++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			fmt.Sprintf("%s?page=%d&per_page=250", PopularURL, page), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", fetch.UserAgent)
+		resp, err := f.Client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		var res struct {
+			Hits []struct {
+				AppID    string `json:"app_id"`
+				Installs int    `json:"installs_last_month"`
+			} `json:"hits"`
+			TotalPages int `json:"totalPages"`
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&res)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("flathub popular: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("flathub popular: %s", resp.Status)
+		}
+		for _, h := range res.Hits {
+			installs[h.AppID] = h.Installs
+		}
+		if page >= res.TotalPages || len(res.Hits) == 0 {
+			break
+		}
+	}
+	return installs, nil
 }
 
 // Parse turns a Flathub AppStream catalog into listings. Only desktop and console apps are kept; runtimes,
