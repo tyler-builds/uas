@@ -106,3 +106,11 @@ func TestFetchRejectsUnknownArch(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestFlatpakID(t *testing.T) {
+	// Flathub's install stats use the Flatpak ID, which differs from an old-style AppStream ID.
+	l := catalog.Listing{Ref: "app/org.godotengine.Godot/x86_64/stable", AppStreamID: "org.godotengine.Godot.desktop"}
+	if got := flatpakID(l); got != "org.godotengine.Godot" {
+		t.Errorf("flatpakID = %q", got)
+	}
+}

@@ -56,10 +56,20 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	if installs, err := f.popular(ctx); err == nil {
 		for i := range listings {
 			// Flathub counts the last month; times 12 puts it on the same yearly scale as Homebrew's.
-			listings[i].Installs = installs[listings[i].AppStreamID] * 12
+			listings[i].Installs = installs[flatpakID(listings[i])] * 12
 		}
 	}
 	return listings, nil
+}
+
+// flatpakID is the Flatpak app ID of a listing, from its ref (app/<id>/<arch>/<branch>). Flathub's stats are
+// keyed by it, and it differs from the AppStream ID for apps whose AppStream ID is an old-style
+// "org.godotengine.Godot.desktop".
+func flatpakID(l catalog.Listing) string {
+	if parts := strings.Split(l.Ref, "/"); len(parts) == 4 && parts[1] != "" {
+		return parts[1]
+	}
+	return l.AppStreamID
 }
 
 // cachedIconFormat is where Flathub serves the icons its catalog lists as cached: architecture, width,
