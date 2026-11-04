@@ -191,18 +191,19 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	for _, l := range available {
 		opts = append(opts, ui.Option[string]{Value: listingKey(l), Label: listingLabel(l)})
 	}
-	picker := ui.Select(chosen, opts...).Label("Install from").Small().Width(ui.Full).
-		RenderValue(func(opt ui.Option[string], _ ui.PartState) ui.Element {
-			v := opt.Value
-			for _, l := range available {
-				if listingKey(l) == v {
-					return ui.Div().Row().Align(ui.Center).Gap(space2).
-						Child(sourceMark(ctx, l.Source, 16)).
-						Child(ui.Text(listingLabel(l)).FontSize(13).Truncate())
-				}
+	// The source's logo before its label, in the closed picker and in its list.
+	withMark := func(opt ui.Option[string], _ ui.PartState) ui.Element {
+		for _, l := range available {
+			if listingKey(l) == opt.Value {
+				return ui.Div().Row().Align(ui.Center).Gap(space2).
+					Child(sourceMark(ctx, l.Source, 16)).
+					Child(ui.Text(listingLabel(l)).FontSize(13).Truncate())
 			}
-			return ui.Text(v)
-		})
+		}
+		return ui.Text(opt.Label)
+	}
+	picker := ui.Select(chosen, opts...).Label("Install from").Small().Width(ui.Full).
+		RenderValue(withMark).RenderOption(withMark)
 	col := ui.Div().Column().Gap(space3).Width(ui.Px(200)).Shrink(0).Child(action).Child(picker)
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
