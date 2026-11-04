@@ -124,9 +124,11 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 	var content ui.Element
 	switch {
 	case res.Loading:
-		content = ui.Div().Column().Center().Gap(16).Grow(1).
-			Child(ui.ProgressRing().Size(ui.RingLarge).Label("Loading the app catalog")).
-			Child(ui.Text("Loading the app catalog…").TextColor(t.TextMuted))
+		content = ui.Div().Column().Center().Gap(space4).Grow(1).
+			Child(brandMark(ctx, 64)).
+			Child(heading("Getting the app catalog ready")).
+			Child(muted(ctx, "The first start downloads about 8 MB.")).
+			Child(ui.ProgressRing().Size(ui.RingMedium).Label("Loading the app catalog"))
 	case res.Err != nil:
 		content = ui.Div().Column().Center().Grow(1).Child(
 			ui.Empty("Could not load the app catalog").Icon(icons.CloudOff).Description(res.Err.Error()).
@@ -140,7 +142,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		case pageSettings:
 			content = a.settingsPage(ctx, res.Data)
 		default:
-			content = a.discoverPage(ctx)
+			content = a.discoverPage(ctx, res.Data)
 		}
 	}
 
@@ -150,14 +152,39 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 			ui.SidebarItem{Key: pageDiscover, Label: "Discover", Icon: icons.Compass},
 			ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Package, Badge: pendingUpdates},
 			ui.SidebarItem{Key: pageSettings, Label: "Settings", Icon: icons.Settings},
-		).Label("uas").Width(ui.Px(200)).OnChange(func(string) { a.selected.Set("") }).
-			Header(ui.Div().Row().Align(ui.Center).Gap(10).PaddingX(16).PaddingY(14).
-				Child(ui.Icon(icons.Store).Size(22).Color(t.Accent)).
-				Child(ui.Text("uas").FontSize(18).Semibold()))).
+		).Label("uas").Width(ui.Px(sidebarWidth)).OnChange(func(string) { a.selected.Set("") }).
+			Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space5).PaddingBottom(space4).
+				Child(brandMark(ctx, 34)).
+				Child(ui.Div().Column().
+					Child(ui.Text("uas").FontSize(18).Bold()).
+					Child(caption(ctx, "App store")))).
+			Footer(a.sidebarFooter(ctx, res.Data, !res.Loading && res.Err == nil))).
+		Child(ui.Div().Width(ui.Px(1)).Height(ui.Full).Background(t.Border)).
 		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(content)).
 		Child(a.confirmDialog(ctx)).
 		Child(a.removeDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
+}
+
+// sidebarWidth is the width of the navigation pane.
+const sidebarWidth = 228
+
+// sidebarFooter shows how fresh the catalog is.
+func (a *App) sidebarFooter(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.Element {
+	t := ctx.Theme()
+	if !ready {
+		return ui.Div()
+	}
+	_, checking := a.running("catalog")
+	status := "Updated " + ui.FormatRelative(info.BuiltAt, time.Now())
+	if checking {
+		status = "Checking for a newer catalog…"
+	}
+	return ui.Div().Column().Gap(2).PaddingX(space4).PaddingY(space4).
+		Child(ui.Div().Row().Align(ui.Center).Gap(6).
+			Child(ui.Div().Size(ui.Px(7), ui.Px(7)).Radius(4).Background(t.Success)).
+			Child(ui.Text(compactThousands(info.Apps) + " apps").FontSize(12).Semibold())).
+		Child(caption(ctx, status))
 }
 
 // updates returns the available updates by InstalledApp.Key. Checking asks the network, so it is kept for

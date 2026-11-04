@@ -25,12 +25,15 @@ func main() {
 		os.Exit(1)
 	}
 	g := gui.New(s)
+	light, dark := gui.Themes()
 	useSystemFonts(app.New()).Run(app.Window{
-		Title:     "uas",
-		Width:     1180,
-		Height:    780,
-		MinWidth:  760,
-		MinHeight: 520,
-		Root:      g.Root,
+		Title:      "uas",
+		Width:      1180,
+		Height:     780,
+		MinWidth:   760,
+		MinHeight:  520,
+		LightTheme: light,
+		DarkTheme:  dark,
+		Root:       g.Root,
 	})
 }

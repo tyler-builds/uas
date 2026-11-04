@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,7 +35,6 @@ func listingKey(l catalog.Listing) string { return string(l.Source) + "|" + l.Re
 // detailPage shows one app.
 func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
-		t := ctx.Theme()
 		res := ui.Query(ctx, a.key("app", id), func(c context.Context) (*catalog.App, error) {
 			db, err := a.catalog(c)
 			if err != nil {
@@ -42,8 +42,9 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			}
 			return db.Resolve(c, id)
 		})
-		back := ui.Button("Back").Icon(icons.ArrowLeft).Ghost().OnClick(func() { a.selected.Set("") })
-		page := ui.Div().Column().Gap(20).Padding(24).MaxWidth(ui.Px(960)).Child(back)
+		back := ui.Div().Row().Child(ui.Button("Back").Icon(icons.ArrowLeft).Ghost().Small().
+			OnClick(func() { a.selected.Set("") }))
+		page := ui.Div().Column().Gap(space6).Padding(space8).MaxWidth(ui.Px(1040)).Child(back)
 		switch {
 		case res.Loading:
 			return scroll(page.Child(ui.Skeleton().Height(ui.Px(96))).Child(ui.Skeleton().Height(ui.Px(240))))
@@ -71,13 +72,7 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			}
 		}
 
-		header := ui.Div().Row().Gap(20).Align(ui.Start).
-			Child(a.appIcon(ctx, app.IconURL, 96, app.Name)).
-			Child(ui.Div().Column().Gap(6).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-				Child(ui.Text(app.Name).FontSize(26).Semibold()).
-				Child(ui.If(app.Developer != "", ui.Text(app.Developer).TextColor(t.TextMuted))).
-				Child(ui.Text(app.Summary).FontSize(15)))
-		page = page.Child(header)
+		page = page.Child(a.detailHero(ctx, app))
 
 		if len(available) == 0 {
 			msg := "None of this app's sources can be installed on this system."
@@ -94,7 +89,8 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			page = page.Child(trustPanel(ctx, listing))
 		}
 		if len(app.Screenshots) > 0 {
-			shots := ui.Div().Row().Gap(16).ScrollX().PaddingBottom(8)
+			page = page.Child(sectionHeader(ctx, "Screenshots", ""))
+			shots := ui.Div().Row().Gap(space4).ScrollX().PaddingBottom(space2)
 			for i, s := range app.Screenshots {
 				if i == 3 {
 					break
@@ -108,12 +104,59 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			page = page.Child(shots)
 		}
 		if app.Description != "" {
-			page = page.Child(markdown.View(app.Description).Key("desc:" + app.ID).Label("Description").
-				OnLink(openURL))
+			page = page.Child(sectionHeader(ctx, "About", "")).
+				Child(card(ctx).Padding(space6).Child(markdown.View(app.Description).Key("desc:" + app.ID).
+					Label("Description").OnLink(openURL)))
 		}
-		page = page.Child(a.details(ctx, app))
+		page = page.Child(sectionHeader(ctx, "Details", "")).Child(a.details(ctx, app))
 		return scroll(page)
 	}).Key("detail:" + id)
+}
+
+// detailHero is the top of an app page: the icon, the name, where it comes from and its key numbers.
+func (a *App) detailHero(ctx *ui.Context, app *catalog.App) ui.Element {
+	t := ctx.Theme()
+	var sources []catalog.SourceID
+	verified := false
+	for _, l := range app.Listings {
+		if !slices.Contains(sources, l.Source) {
+			sources = append(sources, l.Source)
+		}
+		verified = verified || l.Verified
+	}
+	chips := ui.Div().Row().Wrap().Gap(space2)
+	switch {
+	case app.Popularity > 0:
+		chips = chips.Child(statChip(ctx, icons.TrendingUp, compact(app.Popularity), "installs a year",
+			"Flathub's installs last month times 12, or Homebrew's installs on request in the past year"))
+	case app.Stars > 0:
+		chips = chips.Child(statChip(ctx, icons.Star, compact(app.Stars), "GitHub stars", ""))
+	}
+	if !app.Updated.IsZero() {
+		chips = chips.Child(statChip(ctx, icons.Clock, app.Updated.Local().Format("Jan 2, 2006"), "latest release", ""))
+	}
+	if app.License != "" {
+		chips = chips.Child(statChip(ctx, icons.Scale, app.License, "license", ""))
+	}
+	chips = chips.Child(statChip(ctx, icons.Layers, fmt.Sprint(len(app.Listings)), sourcesNoun(len(app.Listings)),
+		"How many listings of this app uas found across its sources"))
+
+	return hero(ctx).Padding(space8).Gap(space6).
+		Child(ui.Div().Row().Gap(space6).Align(ui.Center).
+			Child(ui.Div().Shadow(ui.ShadowMd).Radius(28).Child(a.iconTile(ctx, app.IconURL, 112, app.Name))).
+			Child(ui.Div().Column().Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(display(app.Name)).
+				Child(ui.If(app.Developer != "", ui.Text("by "+app.Developer).FontSize(14).TextColor(t.TextMuted))).
+				Child(ui.Text(app.Summary).FontSize(16)).
+				Child(ui.Div().MarginTop(space1).Child(sourcePills(ctx, sources, verified))))).
+		Child(chips)
+}
+
+func sourcesNoun(n int) string {
+	if n == 1 {
+		return "source listing"
+	}
+	return "source listings"
 }
 
 // scroll puts a page in a scrolling column that fills the content area, centered up to its MaxWidth.
@@ -165,21 +208,28 @@ func (a *App) installBox(ctx *ui.Context, app *catalog.App, available []catalog.
 		})
 	}
 
-	box := ui.Div().Column().Gap(10).Padding(16).Radius(10).Border(1, t.Border).Background(t.Surface).
-		Child(ui.Div().Row().Gap(12).Align(ui.End).Wrap().Child(picker).Child(action))
+	box := card(ctx).Gap(space4).Padding(space6).
+		Child(sectionHeader(ctx, "Install", "Pick where to install it from; uas preselects the best fit for this system")).
+		Child(ui.Div().Row().Gap(space3).Align(ui.End).Wrap().Child(picker).Child(action))
+	note := func(icon *icons.Icon, color ui.Color, text string) ui.Element {
+		return ui.Div().Row().Gap(space2).Align(ui.Start).
+			Child(ui.Div().PaddingTop(1).Child(ui.Icon(icon).Size(15).Color(color))).
+			Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(ui.Text(text).FontSize(13)))
+	}
+	notes := ui.Div().Column().Gap(space2)
 	if chosen.Get() == recommended && reason != "" {
-		box = box.Child(ui.Text("Recommended: " + reason + ".").FontSize(13).TextColor(t.TextMuted))
+		notes = notes.Child(note(icons.Sparkles, t.Accent, "Recommended: "+reason+"."))
 	} else if reason != "" {
 		for _, l := range available {
 			if listingKey(l) == recommended {
-				box = box.Child(ui.Text("uas recommends " + listingLabel(l) + ": " + reason + ".").FontSize(13).
-					TextColor(t.TextMuted))
+				notes = notes.Child(note(icons.Sparkles, t.Accent, "uas recommends "+listingLabel(l)+": "+reason+"."))
 			}
 		}
 	}
 	for _, n := range a.s.InstallNotes(listing) {
-		box = box.Child(ui.Text(n).FontSize(13).TextColor(t.TextMuted))
+		notes = notes.Child(note(icons.Info, t.TextMuted, n))
 	}
+	box = box.Child(notes)
 	box = box.Child(a.whyPanel(ctx, app, listing))
 	if busy {
 		box = box.Child(ui.Div().Row().Gap(8).Align(ui.Center).
@@ -355,47 +405,72 @@ func (a *App) removeDialog(ctx *ui.Context) ui.Element {
 func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 	t := ctx.Theme()
 	tr := l.Trust
-	variant := ui.BadgeSuccess
+	color, verdict := t.Success, "Well kept"
 	switch {
 	case tr.Score < 50:
-		variant = ui.BadgeDanger
+		color, verdict = t.Danger, "Little evidence"
 	case tr.Score < 70:
-		variant = ui.BadgeWarning
+		color, verdict = t.Warning, "Some evidence"
 	}
-	panel := ui.Div().Column().Gap(8).Padding(16).Radius(10).Border(1, t.Border).
-		Child(ui.Div().Row().Gap(10).Align(ui.Center).
-			Child(ui.Text("Trust score").FontSize(15).Semibold()).
-			Child(ui.BadgeText(fmt.Sprintf("%d / 100", tr.Score)).Variant(variant))).
-		Child(ui.ProgressBar(float64(tr.Score) / 100).Label("Trust score"))
-	for _, s := range tr.Signals {
-		panel = panel.Child(ui.Div().Row().Gap(12).
-			Child(ui.Text(s.Name).Width(ui.Px(170)).FontSize(13)).
-			Child(ui.Text(fmt.Sprintf("%d/%d", s.Points, s.Max)).Width(ui.Px(48)).FontSize(13).Semibold()).
-			Child(ui.Text(s.Detail).FontSize(13).TextColor(t.TextMuted).Grow(1)))
+	what := "How well kept this GitHub project is. It doesn't review the code."
+	if l.Source == catalog.SourceCOPR {
+		what = "How well kept this COPR project is, from its build history. Fedora doesn't review it."
 	}
+	score := ui.Div().Column().Align(ui.Center).Justify(ui.Center).Size(ui.Px(84), ui.Px(84)).Radius(42).
+		Border(3, color).Background(color.Alpha(0.10)).Shrink(0).
+		Child(ui.Text(fmt.Sprint(tr.Score)).FontSize(26).Bold().TextColor(color)).
+		Child(caption(ctx, "of 100"))
+	panel := card(ctx).Gap(space4).Padding(space6).
+		Child(ui.Div().Row().Gap(space5).Align(ui.Center).
+			Child(score).
+			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(ui.Div().Row().Gap(space2).Align(ui.Center).
+					Child(heading("Trust score")).
+					Child(pill(ctx, verdict, color, ""))).
+				Child(muted(ctx, what))))
+	grid := ui.Div().Grid(ui.Px(220), ui.Fr(1), ui.Px(52)).Gap(space4).Align(ui.Center)
+	for _, sg := range tr.Signals {
+		frac := float64(sg.Points) / float64(max(sg.Max, 1))
+		grid = grid.
+			Child(ui.Div().Column().Gap(2).
+				Child(ui.Text(sg.Name).FontSize(13).Semibold()).
+				Child(caption(ctx, sg.Detail))).
+			Child(meter(ctx, frac, color)).
+			Child(ui.Text(fmt.Sprintf("%d/%d", sg.Points, sg.Max)).FontSize(13).Semibold().Align(ui.End))
+	}
+	panel = panel.Child(grid)
 	for _, f := range tr.Flags {
 		panel = panel.Child(ui.Alert(f).Warning())
 	}
 	return panel
 }
 
-// details lists the app's links and license.
+// details lists the app's license and links.
 func (a *App) details(ctx *ui.Context, app *catalog.App) ui.Element {
 	t := ctx.Theme()
-	rows := ui.Div().Column().Gap(6)
-	add := func(label string, value ui.Element) {
-		rows = rows.Child(ui.Div().Row().Gap(12).Align(ui.Center).MinHeight(ui.Px(28)).
-			Child(ui.Text(label).Width(ui.Px(120)).TextColor(t.TextMuted).FontSize(13)).Child(value))
+	rows := card(ctx).Gap(0).Padding(space2)
+	add := func(icon *icons.Icon, label string, value ui.Element) {
+		rows = rows.Child(ui.Div().Row().Gap(space3).Align(ui.Center).PaddingX(space3).MinHeight(ui.Px(44)).
+			Child(ui.Icon(icon).Size(16).Color(t.TextMuted)).
+			Child(ui.Text(label).Width(ui.Px(120)).TextColor(t.TextMuted).FontSize(13)).
+			Child(value))
 	}
 	if app.License != "" {
-		add("License", ui.Text(app.License).FontSize(13))
+		add(icons.Scale, "License", ui.Text(app.License).FontSize(13))
 	}
-	for _, u := range []struct{ label, url string }{{"Website", app.Homepage}, {"Source code", app.VCSURL}} {
+	if app.Developer != "" {
+		add(icons.Users, "Developer", ui.Text(app.Developer).FontSize(13))
+	}
+	for _, u := range []struct {
+		icon       *icons.Icon
+		label, url string
+	}{{icons.Globe, "Website", app.Homepage}, {icons.Code, "Source code", app.VCSURL}} {
 		if strings.HasPrefix(u.url, "https://") || strings.HasPrefix(u.url, "http://") {
 			url := u.url
-			add(u.label, ui.Button(url).Ghost().Small().Icon(icons.ExternalLink).OnClick(func() { openURL(url) }))
+			add(u.icon, u.label, ui.Button(url).Ghost().Small().Icon(icons.ArrowUpRight).OnClick(func() { openURL(url) }))
 		}
 	}
+	add(icons.Hash, "App ID", ui.Text(app.ID).FontSize(13).Mono())
 	return rows
 }
 

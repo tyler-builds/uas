@@ -14,18 +14,21 @@ import (
 )
 
 // categories are the main AppStream categories, shown as chips when nothing is searched.
-var categories = []struct{ key, label, tip string }{
-	{"", "Popular", "The most installed desktop apps from every source"},
-	{"AudioVideo", "Audio & Video", "Music and video players, editors, recorders and streaming apps"},
-	{"Development", "Development", "Code editors, IDEs, debuggers and other tools for programmers"},
-	{"Education", "Education", "Learning apps, language tools, and apps for schools and teaching"},
-	{"Game", "Games", "Games, game launchers and emulators"},
-	{"Graphics", "Graphics", "Image editors, drawing and painting, photo tools, 3D and design apps"},
-	{"Network", "Internet", "Browsers, chat, email, file sharing and remote desktop apps"},
-	{"Office", "Office", "Documents, spreadsheets, notes, calendars and other productivity apps"},
-	{"Science", "Science", "Maths, astronomy, chemistry, data analysis and other science apps"},
-	{"System", "System", "System monitors, settings, terminals, disk and hardware tools"},
-	{"Utility", "Utilities", "Small tools: calculators, archivers, clipboard managers and the like"},
+var categories = []struct {
+	key, label, tip string
+	icon            *icons.Icon
+}{
+	{"", "Popular", "The most installed desktop apps from every source", icons.Flame},
+	{"AudioVideo", "Audio & Video", "Music and video players, editors, recorders and streaming apps", icons.Clapperboard},
+	{"Development", "Development", "Code editors, IDEs, debuggers and other tools for programmers", icons.Code},
+	{"Education", "Education", "Learning apps, language tools, and apps for schools and teaching", icons.GraduationCap},
+	{"Game", "Games", "Games, game launchers and emulators", icons.Gamepad2},
+	{"Graphics", "Graphics", "Image editors, drawing and painting, photo tools, 3D and design apps", icons.Palette},
+	{"Network", "Internet", "Browsers, chat, email, file sharing and remote desktop apps", icons.Globe},
+	{"Office", "Office", "Documents, spreadsheets, notes, calendars and other productivity apps", icons.Briefcase},
+	{"Science", "Science", "Maths, astronomy, chemistry, data analysis and other science apps", icons.FlaskConical},
+	{"System", "System", "System monitors, settings, terminals, disk and hardware tools", icons.Cpu},
+	{"Utility", "Utilities", "Small tools: calculators, archivers, clipboard managers and the like", icons.Wrench},
 }
 
 // The sort choices; browsing has no query, so no relevance.
@@ -41,17 +44,21 @@ var (
 
 const listLimit = 200
 
-// discoverPage is the search field, the category chips and the matching apps.
-func (a *App) discoverPage(ctx *ui.Context) ui.Element {
+// cardHeight fits a card's icon, name, two lines of summary and its footer.
+const cardHeight = 208
+
+// discoverPage is the hero with the search field, the category chips, the top picks and the list.
+func (a *App) discoverPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	t := ctx.Theme()
 	q := strings.TrimSpace(a.search.Get())
 	cat := a.category.Get()
 
 	var key string
 	var fetch func(context.Context) ([]catalog.SearchResult, error)
+	var order catalog.Order
 	var sortPicker ui.Element
 	if q != "" {
-		order := a.searchOrder.Get()
+		order = a.searchOrder.Get()
 		key = a.key("search", q, string(order))
 		fetch = func(c context.Context) ([]catalog.SearchResult, error) {
 			db, err := a.catalog(c)
@@ -60,10 +67,10 @@ func (a *App) discoverPage(ctx *ui.Context) ui.Element {
 			}
 			return db.Search(c, q, listLimit, order)
 		}
-		sortPicker = ui.Select(a.searchOrder, searchOrders...).Label("Sort by").Width(ui.Px(190)).Small().
+		sortPicker = ui.Select(a.searchOrder, searchOrders...).Label("Sort by").Width(ui.Px(180)).Small().
 			Tooltip("Best match weighs how well the words match with how popular the app is")
 	} else {
-		order := a.browseOrder.Get()
+		order = a.browseOrder.Get()
 		key = a.key("browse", cat, string(order))
 		fetch = func(c context.Context) ([]catalog.SearchResult, error) {
 			db, err := a.catalog(c)
@@ -72,14 +79,107 @@ func (a *App) discoverPage(ctx *ui.Context) ui.Element {
 			}
 			return db.Browse(c, cat, listLimit, order)
 		}
-		sortPicker = ui.Select(a.browseOrder, browseOrders...).Label("Sort by").Width(ui.Px(190)).Small()
+		sortPicker = ui.Select(a.browseOrder, browseOrders...).Label("Sort by").Width(ui.Px(180)).Small()
 	}
 	res := ui.Query(ctx, key, fetch, ui.QueryKeepPrevious(), ui.QueryStaleTime(time.Hour))
 
-	chips := ui.Div().Row().Wrap().Gap(8)
+	page := ui.Div().Column().Gap(space6).Padding(space8).MaxWidth(ui.Px(1180)).
+		Child(a.discoverHero(ctx, info)).
+		Child(ui.If(q == "", a.categoryChips(ctx, cat)))
+
+	label := "Popular"
+	for _, c := range categories {
+		if c.key == cat {
+			label = c.label
+		}
+	}
+	var sub string
+	switch {
+	case q != "":
+		sub = fmt.Sprintf("%d apps", len(res.Data))
+		if len(res.Data) == 1 {
+			sub = "1 app"
+		}
+		if len(res.Data) == listLimit {
+			sub = "The first 200 apps; add words to narrow it down"
+		}
+	case order == catalog.OrderPopular:
+		sub = "Ranked by installs in the past year"
+	case order == catalog.OrderUpdated:
+		sub = "Newest releases first"
+	default:
+		sub = "In alphabetical order"
+	}
+	titleText := label
+	if q != "" {
+		titleText = "Results for “" + q + "”"
+	}
+	busy := ui.If(res.Fetching && !res.Loading, ui.ProgressRing().Size(ui.RingSmall).Label("Loading"))
+	page = page.Child(sectionHeader(ctx, titleText, sub, busy, sortPicker))
+
+	switch {
+	case res.Loading:
+		return scroll(page.Child(a.skeletonGrid(ctx)))
+	case res.Err != nil:
+		return scroll(page.Child(ui.Empty("Search failed").Icon(icons.TriangleAlert).Description(errText(res.Err))))
+	case len(res.Data) == 0:
+		return scroll(page.Child(ui.Empty("No apps found").Icon(icons.Search).
+			Description("Try other words, or check the spelling.")))
+	}
+
+	items := res.Data
+	// Browsing the most popular apps leads with a grid of cards; everything else is a list.
+	if q == "" && order == catalog.OrderPopular {
+		cols := a.gridColumns(ctx)
+		n := min(len(items), cols*2)
+		grid := ui.Div().Grid(repeatFr(cols)...).Gap(space4)
+		for _, r := range items[:n] {
+			grid = grid.Child(a.appCard(ctx, r))
+		}
+		page = page.Child(grid)
+		items = items[n:]
+		if len(items) > 0 {
+			page = page.Child(sectionHeader(ctx, "More in "+label, fmt.Sprintf("%d more apps", len(items))))
+		}
+	}
+	if len(items) > 0 {
+		list := ui.Div().Column().Gap(2).Padding(space2).Radius(radiusL).Background(t.Surface).Border(1, t.Border)
+		for _, r := range items {
+			list = list.Child(a.appRow(ctx, r))
+		}
+		page = page.Child(list)
+	}
+	return scroll(page)
+}
+
+// discoverHero welcomes the user and holds the search field.
+func (a *App) discoverHero(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
+	t := ctx.Theme()
+	system := a.s.Platform.PrettyName
+	if system == "" {
+		system = "your system"
+	}
+	return hero(ctx).
+		Child(ui.Div().Row().Align(ui.Center).Gap(space2).
+			Child(ui.Icon(icons.Sparkles).Size(16).Color(t.Accent)).
+			Child(ui.Text("EVERY SOURCE, ONE STORE").FontSize(11.5).Semibold().TextColor(t.Accent))).
+		Child(display("Discover apps")).
+		Child(ui.Text(fmt.Sprintf("%s apps from Flathub, Fedora, Homebrew, COPR and GitHub, ranked by popularity "+
+			"and checked for %s.", compactThousands(info.Apps), system)).FontSize(15).TextColor(t.TextMuted)).
+		Child(ui.Div().MaxWidth(ui.Px(640)).Child(
+			ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps by name or what they do").
+				Icon(icons.Search).Large().Width(ui.Full).
+				OnChange(func(s string) { a.scheduleSearch(ctx, s) }).
+				OnSubmit(func(s string) { a.search.Set(s) })))
+}
+
+// categoryChips picks the category to browse.
+func (a *App) categoryChips(ctx *ui.Context, cat string) ui.Element {
+	chips := ui.Div().Row().Wrap().Gap(space2)
 	for _, c := range categories {
 		c := c
-		b := ui.Button(c.label).Small().Tooltip(c.tip).OnClick(func() { a.category.Set(c.key) }).Key("cat:" + c.key)
+		b := ui.Button(c.label).Icon(c.icon).Small().Tooltip(c.tip).
+			OnClick(func() { a.category.Set(c.key) }).Key("cat:" + c.key)
 		if c.key == cat {
 			b = b.Primary()
 		} else {
@@ -87,48 +187,32 @@ func (a *App) discoverPage(ctx *ui.Context) ui.Element {
 		}
 		chips = chips.Child(b)
 	}
+	return chips
+}
 
-	heading := "Popular apps"
-	for _, c := range categories {
-		if c.key == cat && c.key != "" {
-			heading = c.label
-		}
-	}
-	if q != "" {
-		heading = "Results for “" + q + "”"
-	}
+// gridColumns fits cards of about 280 px into the content area.
+func (a *App) gridColumns(ctx *ui.Context) int {
+	w, _ := ctx.WindowSize()
+	content := min(w-sidebarWidth, 1180) - 2*space8
+	return max(1, min(4, int(content/280)))
+}
 
-	var body ui.Element
-	switch {
-	case res.Loading:
-		body = ui.Div().Column().Gap(8).Padding(4).
-			Child(ui.Skeleton().Height(ui.Px(64))).Child(ui.Skeleton().Height(ui.Px(64))).
-			Child(ui.Skeleton().Height(ui.Px(64)))
-	case res.Err != nil:
-		body = ui.Empty("Search failed").Icon(icons.TriangleAlert).Description(errText(res.Err))
-	case len(res.Data) == 0:
-		body = ui.Empty("No apps found").Icon(icons.Search).
-			Description("Try other words, or check the spelling.")
-	default:
-		items := res.Data
-		body = ui.UniformList(len(items), func(i int) ui.Element { return a.resultRow(ctx, items[i]) }).
-			Style(ui.Style{Grow: 1})
+func repeatFr(n int) []ui.Length {
+	cols := make([]ui.Length, n)
+	for i := range cols {
+		cols[i] = ui.Fr(1)
 	}
+	return cols
+}
 
-	return ui.Div().Column().Grow(1).Gap(16).Padding(24).MinHeight(ui.Px(0)).
-		Child(ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps").Icon(icons.Search).Large().
-			OnChange(func(s string) { a.scheduleSearch(ctx, s) }).
-			OnSubmit(func(s string) { a.search.Set(s) })).
-		Child(ui.If(q == "", chips)).
-		Child(ui.Div().Row().Align(ui.Center).Gap(8).
-			Child(ui.Text(heading).FontSize(18).Semibold()).
-			Child(ui.If(res.Fetching && !res.Loading, ui.ProgressRing().Size(ui.RingSmall).Label("Searching"))).
-			Child(ui.Spacer()).
-			Child(ui.Text("Sort by").FontSize(13).TextColor(t.TextMuted)).
-			Child(sortPicker)).
-		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).Child(body)).
-		Child(ui.If(len(res.Data) == listLimit, ui.Text("Showing the first 200. Search to narrow it down.").
-			FontSize(12).TextColor(t.TextMuted)))
+// skeletonGrid stands in for the cards while they load.
+func (a *App) skeletonGrid(ctx *ui.Context) ui.Element {
+	cols := a.gridColumns(ctx)
+	grid := ui.Div().Grid(repeatFr(cols)...).Gap(space4)
+	for range cols * 2 {
+		grid = grid.Child(ui.Skeleton().Height(ui.Px(cardHeight)))
+	}
+	return grid
 }
 
 // searchDebounce is how long typing must pause before a search runs.
@@ -142,46 +226,94 @@ func (a *App) scheduleSearch(ctx *ui.Context, s string) {
 	a.cancelSearch = ctx.After(searchDebounce, func() { a.search.Set(s) })
 }
 
-// resultRow is one app in a list: icon, name, summary and where it comes from.
-func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult) ui.Element {
+// appCard is one of the top picks: a large, clickable card.
+func (a *App) appCard(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 	t := ctx.Theme()
-	return ui.Div().Row().Align(ui.Center).Gap(14).PaddingX(12).Height(ui.Px(72)).Radius(8).
-		Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.Surface}).
+	return card(ctx).Gap(space3).Height(ui.Px(cardHeight)).Cursor(ui.CursorPointer).
+		Hover(ui.Style{Background: t.SurfaceHover, BorderColor: t.Accent.Alpha(0.45)}).
+		Transition(120 * time.Millisecond).
+		Role(access.RoleButton).Label(r.Name).TabIndex(0).
+		OnClick(func() { a.selected.Set(r.ID) }).
+		Child(ui.Div().Row().Align(ui.Start).Gap(space3).
+			Child(a.iconTile(ctx, r.IconURL, 56, r.Name)).
+			Child(ui.Spacer()).
+			Child(ui.If(r.Verified, verifiedPill(ctx)))).
+		Child(ui.Div().Column().Gap(space1).
+			Child(ui.Text(r.Name).FontSize(16).Semibold().Truncate()).
+			Child(ui.Text(r.Summary).FontSize(13).TextColor(t.TextMuted).MaxLines(2))).
+		Child(ui.Spacer()).
+		Child(ui.Div().Row().Align(ui.Center).Gap(space2).
+			Child(reach(ctx, r)).
+			Child(ui.Spacer()).
+			Child(compactSourcePills(ctx, r.Sources))).
+		Key("row:" + r.ID)
+}
+
+// compactSourcePills shows the first source and a count of the others, to fit a card.
+func compactSourcePills(ctx *ui.Context, sources []catalog.SourceID) ui.Element {
+	row := ui.Div().Row().Gap(space1 + 2).Shrink(0)
+	if len(sources) == 0 {
+		return row
+	}
+	row = row.Child(sourcePill(ctx, sources[0]))
+	if more := sources[1:]; len(more) > 0 {
+		names := make([]string, len(more))
+		for i, s := range more {
+			names[i] = s.Name()
+		}
+		row = row.Child(pill(ctx, fmt.Sprintf("+%d", len(more)), ctx.Theme().TextMuted,
+			"Also on "+strings.Join(names, " and ")))
+	}
+	return row
+}
+
+// appRow is one app in a list.
+func (a *App) appRow(ctx *ui.Context, r catalog.SearchResult) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space3).PaddingY(space2 + 2).Radius(radiusM).
+		Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
 		Role(access.RoleButton).Label(r.Name).TabIndex(0).
 		OnClick(func() { a.selected.Set(r.ID) }). // Enter and Space run it too when the row has focus
-
-		Child(a.appIcon(ctx, r.IconURL, 48, r.Name)).
+		Child(a.iconTile(ctx, r.IconURL, 48, r.Name)).
 		Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(r.Name).FontSize(15).Semibold().Truncate()).
 			Child(ui.Text(r.Summary).FontSize(13).TextColor(t.TextMuted).Truncate())).
-		Child(sourceBadges(r.Sources, r.Verified)).
+		Child(sourcePills(ctx, r.Sources, r.Verified)).
 		Child(stats(ctx, r)).
 		Key("row:" + r.ID)
 }
 
-// stats shows what the list's order is based on: installs (or GitHub stars) and the latest release.
-func stats(ctx *ui.Context, r catalog.SearchResult) ui.Element {
+// reach is the popularity figure the lists sort by: installs a year, or GitHub stars.
+func reach(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 	t := ctx.Theme()
-	var reach, tip string
+	var icon *icons.Icon
+	var text, tip string
 	switch {
 	case r.Popularity > 0:
-		reach = compact(r.Popularity) + " installs/yr"
+		icon, text = icons.TrendingUp, compact(r.Popularity)+" / yr"
 		tip = "Installs in a year: Flathub's installs last month times 12, or Homebrew's installs on request " +
 			"in the past year, whichever is higher"
 	case r.Stars > 0:
-		reach = "★ " + compact(r.Stars)
+		icon, text = icons.Star, compact(r.Stars)
 		tip = "Stars on GitHub. GitHub doesn't publish install counts, so stars stand in for popularity"
 	default:
-		reach = "No install data"
+		icon, text = icons.TrendingUp, "—"
 		tip = "This app's sources don't publish install counts"
 	}
+	return ui.Div().Row().Align(ui.Center).Gap(5).Shrink(0).Tooltip(tip).
+		Child(ui.Icon(icon).Size(14).Color(t.TextMuted)).
+		Child(ui.Text(text).FontSize(13).Semibold())
+}
+
+// stats shows what the list's order is based on: installs (or GitHub stars) and the latest release.
+func stats(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 	updated := "Release date unknown"
 	if !r.Updated.IsZero() {
 		updated = "Updated " + r.Updated.Local().Format("Jan 2, 2006")
 	}
-	return ui.Div().Column().Gap(2).Align(ui.End).Width(ui.Px(140)).Shrink(0).Tooltip(tip).
-		Child(ui.Text(reach).FontSize(12).Semibold()).
-		Child(ui.Text(updated).FontSize(12).TextColor(t.TextMuted))
+	return ui.Div().Column().Gap(3).Align(ui.End).Width(ui.Px(140)).Shrink(0).
+		Child(reach(ctx, r)).
+		Child(caption(ctx, updated))
 }
 
 // compact formats a count like 1.2M or 34k.
@@ -197,22 +329,16 @@ func compact(n int) string {
 	return fmt.Sprint(n)
 }
 
-func trimZero(s string) string { return strings.TrimSuffix(s, ".0") }
-
-// sourceBadges shows where an app is available. Each badge explains its source on hover.
-func sourceBadges(sources []catalog.SourceID, verified bool) ui.Element {
-	row := ui.Div().Row().Gap(4).Shrink(0)
-	for _, s := range sources {
-		row = row.Child(ui.Div().Tooltip(sourceTips[s]).
-			Child(ui.BadgeText(sourceLabel(s)).Variant(ui.BadgeNeutral)))
+// compactThousands formats a count like 7,732.
+func compactThousands(n int) string {
+	s := fmt.Sprint(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
 	}
-	if verified {
-		row = row.Child(ui.Div().Tooltip("Flathub has confirmed that the publisher is the app's own developer, " +
-			"through the developer's website or code-hosting account").
-			Child(ui.BadgeText("Verified").Variant(ui.BadgeSuccess).StatusDot()))
-	}
-	return row
+	return s
 }
+
+func trimZero(s string) string { return strings.TrimSuffix(s, ".0") }
 
 // sourceTips explain each source in a sentence or two.
 var sourceTips = map[catalog.SourceID]string{

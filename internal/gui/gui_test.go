@@ -188,7 +188,9 @@ func TestMinimumWindowSize(t *testing.T) {
 	if w := u.Runtime().ContentWidth(); w > 760 {
 		t.Errorf("Discover is %v px wide at the minimum window width of 760", w)
 	}
-	u.Click("row:org.example.Notes")
+	// At this size the card is below the fold; open it from the keyboard, as a user tabbing there would.
+	u.Get("row:org.example.Notes").Focus()
+	u.Press("enter")
 	u.WaitFor("the app page", func() bool { return u.Has("detail:org.example.Notes") })
 	u.Settle()
 	if w := u.Runtime().ContentWidth(); w > 760 {
