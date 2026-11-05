@@ -131,9 +131,9 @@ func TestBrowseAndInstall(t *testing.T) {
 		apps, _ := fp.Installed(context.Background())
 		return len(apps) == 1
 	})
-	waitText(t, u, "detail:org.example.Notes", "Installed 1.0")
-	// No update yet, so no Update button.
-	waitText(t, u, "detail:org.example.Notes", "Up to date")
+	waitText(t, u, "detail:org.example.Notes", "Installed")
+	// No update yet, so no Update button, and the version as text.
+	waitText(t, u, "detail:org.example.Notes", "Version 1.0 · up to date")
 	if u.HasRole(access.RoleButton, "Update") {
 		t.Error("an Update button with no update available")
 	}

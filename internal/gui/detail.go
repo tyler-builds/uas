@@ -167,18 +167,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 		// Disabled as well as Loading: a loading button exposes no busy state to assistive technology.
 		action = ui.Button("Install").Primary().Large().Width(ui.Full).Styles(big).Loading(true)
 	case copy != nil:
-		in := *copy
-		action = ui.Div().Column().Gap(space2).
-			Child(ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space2).Height(ui.Px(48)).Radius(10).
-				Background(ctx.Theme().AccentSoft).
-				Child(ui.Icon(icons.CircleCheck).Size(18).Color(ctx.Theme().Accent)).
-				Child(ui.Text(installedLabel(in)).FontSize(15).Semibold())).
-			Child(ui.Div().Row().Align(ui.Center).Gap(space2).
-				Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-					Child(a.updateControl(ctx, in, app.ID, app.Name, busy))).
-				// An icon, so an Update button with a long version beside it still fits.
-				Child(ui.IconButton(icons.Trash).Label("Remove").Tooltip("Remove " + app.Name).Disabled(busy).
-					OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) })))
+		action = a.installedAction(ctx, *copy, app, busy, big)
 	default:
 		action = ui.Button("Install").Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
 			Loading(busy).OnClick(func() { a.requestInstall(ctx, app, listing) })
@@ -387,29 +376,55 @@ func statusChip(ctx *ui.Context, label string, c ui.Color) ui.Element {
 		Child(ui.Text(label).FontSize(12).Semibold().TextColor(c))
 }
 
-func (a *App) updateControl(ctx *ui.Context, in backend.InstalledApp, jobID, name string, busy bool) ui.Element {
-	if !a.canCheck(in) {
-		return ui.Div()
-	}
+// installedAction is the big button of an installed app, Update when there is one and the installed state
+// otherwise, over a line with the installed version and Remove.
+func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *catalog.App, busy bool,
+	big ui.ButtonStyle) ui.Element {
+	t := ctx.Theme()
 	ups := a.updates(ctx)
-	version, ok := ups.Data[in.Key()]
-	switch {
-	case ok:
+	version, hasUpdate := ups.Data[in.Key()]
+	checks := a.canCheck(in)
+	hasUpdate = hasUpdate && checks
+
+	var main ui.Element
+	if hasUpdate {
 		label := "Update"
-		if version != "" && len(version) <= 10 {
+		if version != "" && len(version) <= 12 {
 			label = "Update to " + version
 		}
-		return ui.Button(label).Primary().Icon(icons.Download).Width(ui.Full).Loading(busy).
-			Tooltip("Update to " + version).OnClick(func() {
-			a.startJob(ctx, jobID, "Updating "+name, a.s.NeedsRestart(in.Source), name+" is up to date",
+		main = ui.Button(label).Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
+			Tooltip("Update to " + version).Loading(busy).OnClick(func() {
+			a.startJob(ctx, app.ID, "Updating "+app.Name, a.s.NeedsRestart(in.Source), app.Name+" is up to date",
 				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 		})
-	case ups.Loading:
-		return ui.ProgressRing().Size(ui.RingSmall).Label("Checking for updates")
-	case ups.Err != nil:
-		return ui.Div()
+	} else {
+		label := "Installed"
+		if in.Pending {
+			label += " (after restart)"
+		}
+		main = ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space2).Height(ui.Px(48)).Radius(10).
+			Background(t.AccentSoft).
+			Child(ui.Icon(icons.CircleCheck).Size(18).Color(t.Accent)).
+			Child(ui.Text(label).FontSize(15).Semibold())
 	}
-	return ui.BadgeText("Up to date").Variant(ui.BadgeNeutral)
+
+	var status []string
+	if in.Version != "" {
+		status = append(status, "Version "+in.Version)
+	}
+	switch {
+	case !checks || hasUpdate:
+	case ups.Loading:
+		status = append(status, "checking…")
+	case ups.Err == nil:
+		status = append(status, "up to date")
+	}
+	line := ui.Div().Row().Align(ui.Center).Gap(space2).
+		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(caption(ctx, strings.Join(status, " · ")).Truncate())).
+		Child(ui.Button("Remove").Ghost().Small().Disabled(busy).
+			OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) }))
+	return ui.Div().Column().Gap(space1).Child(main).Child(line)
 }
 
 // whyPanel explains what installing from the picked source means and how the app's other sources compare.
@@ -442,17 +457,6 @@ func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listin
 		}
 		return panel
 	}).Key("why:" + listingKey(listing))
-}
-
-func installedLabel(in backend.InstalledApp) string {
-	s := "Installed"
-	if in.Version != "" {
-		s += " " + in.Version
-	}
-	if in.Pending {
-		s += " (after restart)"
-	}
-	return s
 }
 
 // listingLabel names a listing in the source picker.
