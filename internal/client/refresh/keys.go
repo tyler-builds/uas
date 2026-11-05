@@ -7,7 +7,7 @@ import (
 )
 
 // DefaultBaseURL is where the published catalog lives.
-const DefaultBaseURL = "https://uas-catalog.tylerccarr.workers.dev"
+const DefaultBaseURL = "https://uas-catalog.tyler-builds.workers.dev"
 
 // trustedKeys are the public keys whose signatures uas accepts on a manifest. To rotate, add the new key here,
 // ship a release, then switch the indexer to the new key and later drop the old one.

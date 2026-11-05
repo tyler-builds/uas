@@ -31,7 +31,7 @@ jobs:
       - name: Build and publish
         run: go run ./cmd/uas-indexer -out "$RUNNER_TEMP/catalog.db" -publish "$CATALOG_URL"
         env:
-          CATALOG_URL: https://uas-catalog.tylerccarr.workers.dev
+          CATALOG_URL: https://uas-catalog.tyler-builds.workers.dev
           UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
           UAS_UPLOAD_TOKEN: ${{ secrets.UAS_UPLOAD_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
