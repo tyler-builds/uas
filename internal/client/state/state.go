@@ -16,15 +16,17 @@ type GitHubInstall struct {
 	Repo string `json:"repo"` // "owner/repo", the listing ref
 	// Kind is the release file installed: an AppImage ("" or "appimage") or a Flatpak bundle ("flatpak"),
 	// which flatpak keeps as FlatpakRef.
-	Kind        string    `json:"kind,omitempty"`
-	FlatpakRef  string    `json:"flatpak_ref,omitempty"`
-	Name        string    `json:"name"`
-	Version     string    `json:"version"`
-	Asset       string    `json:"asset"`
-	SHA256      string    `json:"sha256"`
-	Path        string    `json:"path"`
-	DesktopFile string    `json:"desktop_file,omitempty"`
-	IconFile    string    `json:"icon_file,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	FlatpakRef  string `json:"flatpak_ref,omitempty"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Asset       string `json:"asset"`
+	SHA256      string `json:"sha256"`
+	Path        string `json:"path"`
+	DesktopFile string `json:"desktop_file,omitempty"`
+	IconFile    string `json:"icon_file,omitempty"`
+	// WMClass is the launcher's StartupWMClass when it came from a launcher uas took over, not the AppImage.
+	WMClass     string    `json:"wm_class,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 
@@ -52,6 +54,7 @@ type FileAppImage struct {
 	Path        string    `json:"path"`
 	DesktopFile string    `json:"desktop_file,omitempty"`
 	IconFile    string    `json:"icon_file,omitempty"`
+	WMClass     string    `json:"wm_class,omitempty"` // as GitHubInstall.WMClass
 	InstalledAt time.Time `json:"installed_at"`
 }
 

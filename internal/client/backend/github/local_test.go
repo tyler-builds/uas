@@ -419,3 +419,150 @@ func TestAddDwarFS(t *testing.T) {
 		t.Errorf("added %+v", app)
 	}
 }
+
+// TestLauncherWMClass names the window class after the app's own launcher, and rewrites launchers from an
+// older uas.
+func TestLauncherWMClass(t *testing.T) {
+	img := buildAppImage(t, "Example App", "1.0", "")
+	b := newBackend(t, files{}, catalog.Listing{})
+	l := &Local{GH: b}
+	ctx := context.Background()
+	f, err := ReadFile(writeDownload(t, img))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Add(ctx, f, nil); err != nil {
+		t.Fatal(err)
+	}
+	desktop := filepath.Join(b.Dirs.Applications, "uas-file__org.example.App.desktop")
+	got, _ := os.ReadFile(desktop)
+	if !strings.Contains(string(got), "StartupWMClass=org.example.App\n") ||
+		!strings.Contains(string(got), "X-UAS-Launcher=2\n") {
+		t.Fatalf("launcher:\n%s", got)
+	}
+
+	old := "[Desktop Entry]\nType=Application\nName=Example App\nComment=Old comment\nExec=x\n"
+	os.WriteFile(desktop, []byte(old), 0o644)
+	if err := b.RepairLaunchers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(desktop)
+	if !strings.Contains(string(got), "StartupWMClass=org.example.App\n") ||
+		!strings.Contains(string(got), "Comment=Old comment\n") {
+		t.Errorf("repaired launcher:\n%s", got)
+	}
+	before, _ := os.Stat(desktop)
+	b.RepairLaunchers(ctx) // nothing to do now
+	if after, _ := os.Stat(desktop); !after.ModTime().Equal(before.ModTime()) {
+		t.Error("rewrote a current launcher")
+	}
+}
+
+// gnome answers gsettings like GNOME, with a dock holding favs.
+type gnome struct {
+	favs string
+	ran  []string
+}
+
+func (g *gnome) Run(_ context.Context, name string, args []string, _ func(string)) (string, error) {
+	g.ran = append(g.ran, name+" "+strings.Join(args, " "))
+	if name == "gsettings" && args[0] == "get" {
+		return g.favs, nil
+	}
+	if name == "gsettings" && args[0] == "set" {
+		g.favs = args[3]
+	}
+	return "", nil
+}
+
+// TestTakeOverLaunchers replaces a launcher another tool wrote for the added AppImage, keeping its window
+// class and icon, and swaps it in the dock.
+func TestTakeOverLaunchers(t *testing.T) {
+	img := buildAppImage(t, "Example App", "1.0", "")
+	off := bytes.Index(img, []byte("hsqs")) // a DwarFS image: no icon or launcher uas can read
+	img = append(img[:off:off], []byte("DWARFS\x02\x05")...)
+	copy(img[8:], "AI\x02")
+	b := newBackend(t, files{}, catalog.Listing{})
+	g := &gnome{favs: "['other.desktop', 'example.desktop', 'org.gnome.Nautilus.desktop']"}
+	b.Runner = g
+	l := &Local{GH: b}
+	ctx := context.Background()
+
+	src := filepath.Join(t.TempDir(), "AppImages", "example.appimage")
+	os.MkdirAll(filepath.Dir(src), 0o755)
+	os.WriteFile(src, img, 0o755)
+	png := []byte("\x89PNG\r\n\x1a\nnot really")
+	iconPath := filepath.Join(filepath.Dir(src), ".icons", "example")
+	os.MkdirAll(filepath.Dir(iconPath), 0o755)
+	os.WriteFile(iconPath, png, 0o644)
+	os.MkdirAll(b.Dirs.Applications, 0o755)
+	theirs := filepath.Join(b.Dirs.Applications, "example.desktop")
+	os.WriteFile(theirs, []byte("[Desktop Entry]\nType=Application\nName=Example\nIcon="+iconPath+
+		"\nTryExec="+src+"\nExec=env DESKTOPINTEGRATION=1 "+src+" %U\nStartupWMClass=org.example.Real\n"), 0o644)
+	unrelated := filepath.Join(b.Dirs.Applications, "other.desktop")
+	os.WriteFile(unrelated, []byte("[Desktop Entry]\nType=Application\nName=Other\nExec=/usr/bin/other\n"), 0o644)
+
+	f, err := ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Add(ctx, f, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(theirs); !os.IsNotExist(err) {
+		t.Error("the other tool's launcher is still there")
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Error("removed an unrelated launcher")
+	}
+	ours, _ := os.ReadFile(filepath.Join(b.Dirs.Applications, "uas-file__example.desktop"))
+	icon := filepath.Join(b.Dirs.Icons, "file__example.png")
+	if !strings.Contains(string(ours), "StartupWMClass=org.example.Real\n") ||
+		!strings.Contains(string(ours), "Icon="+icon+"\n") {
+		t.Errorf("launcher:\n%s", ours)
+	}
+	if got, _ := os.ReadFile(icon); string(got) != string(png) {
+		t.Error("the other tool's icon was not kept")
+	}
+	if g.favs != "['other.desktop', 'uas-file__example.desktop', 'org.gnome.Nautilus.desktop']" {
+		t.Errorf("favorites = %s", g.favs)
+	}
+}
+
+// TestRepairTakesOverBrokenLaunchers takes over a launcher left pointing at an AppImage uas moved before it
+// took over launchers.
+func TestRepairTakesOverBrokenLaunchers(t *testing.T) {
+	img := buildAppImage(t, "Example App", "1.0", "")
+	b := newBackend(t, files{}, catalog.Listing{})
+	g := &gnome{favs: "['example.desktop']"}
+	b.Runner = g
+	l := &Local{GH: b}
+	ctx := context.Background()
+	f, err := ReadFile(writeDownload(t, img))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Add(ctx, f, nil); err != nil {
+		t.Fatal(err)
+	}
+	theirs := filepath.Join(b.Dirs.Applications, "example.desktop")
+	os.WriteFile(theirs, []byte("[Desktop Entry]\nType=Application\nName=Example App\n"+
+		"Exec=/home/u/AppImages/gone.appimage %U\nStartupWMClass=org.example.Real\n"), 0o644)
+	if err := b.RepairLaunchers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(theirs); !os.IsNotExist(err) {
+		t.Error("the broken launcher is still there")
+	}
+	ours, _ := os.ReadFile(filepath.Join(b.Dirs.Applications, "uas-file__org.example.App.desktop"))
+	if !strings.Contains(string(ours), "StartupWMClass=org.example.Real\n") {
+		t.Errorf("launcher:\n%s", ours)
+	}
+	if g.favs != "['uas-file__org.example.App.desktop']" {
+		t.Errorf("favorites = %s", g.favs)
+	}
+	st, _ := b.State.Load()
+	if st.AppImages[0].WMClass != "org.example.Real" {
+		t.Errorf("state = %+v", st.AppImages[0])
+	}
+}

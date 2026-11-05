@@ -71,6 +71,8 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 	if ghErr == nil {
 		s.Backends[catalog.SourceGitHub] = gh
 		s.Backends[catalog.SourceAppImage] = &github.Local{GH: gh}
+		// Launchers written by an older uas get what it has learned since; quick when there's nothing to do.
+		_ = gh.RepairLaunchers(ctx)
 	}
 	if p.Flatpak != "" {
 		fp := &flatpak.Backend{Runner: run.Exec{}, Path: p.Flatpak, Scope: st.FlatpakScope}

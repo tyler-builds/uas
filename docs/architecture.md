@@ -275,7 +275,11 @@ type Backend interface {
   downloaded whole; zsync's partial downloads aren't used. Release lookups are unauthenticated, which
   GitHub limits to 60 an hour, so results are kept for an hour. The user's file is copied first and deleted
   only once the add succeeds. On btrfs the copy shares the file's data. An AppImage with no update information
-  is listed with "doesn't update itself".
+  is listed with "doesn't update itself". Launchers another tool (such as Gear Lever) wrote for the added
+  file are taken over: their window class and icon fill in what uas can't read, they are removed, and GNOME's
+  dock favorites point at uas's launcher instead. Every launcher has a `StartupWMClass` (the app's own, else
+  its desktop entry's name), since uas renames launchers and the dock matches windows to them by it.
+  Launchers carry `X-UAS-Launcher`, and older ones are rewritten when uas starts.
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
   New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers

@@ -159,7 +159,13 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 	if a, ok := b.Pick(l); ok && a.SHA256 == sum.SHA256 {
 		version, asset = l.Version, a.Name
 	}
-	p, err := b.place(ctx, tmp, k, l.Name, l.Summary, "github:"+l.Ref, old.IconFile, f.Info)
+	others := b.launchersOf(f.Path)
+	wmclass := adoptLauncherDetails(f.Info, others)
+	if wmclass == "" {
+		wmclass = old.WMClass
+	}
+	p, err := b.place(ctx, tmp, k, launcher{name: l.Name, summary: l.Summary, source: "github:" + l.Ref,
+		oldIcon: old.IconFile, wmclass: wmclass, info: f.Info})
 	if err != nil {
 		return err
 	}
@@ -167,10 +173,11 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 		b.uninstallBundle(ctx, old.FlatpakRef, progress)
 	}
 	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: version, Asset: asset, SHA256: sum.SHA256,
-		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, InstalledAt: b.now()})
+		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, WMClass: wmclass, InstalledAt: b.now()})
 	if err := b.State.Save(st); err != nil {
 		return err
 	}
+	b.takeOver(ctx, others, p.desktopFile, progress)
 	report(progress, "Added "+p.name+"; it updates from github.com/"+l.Ref)
 	os.Remove(f.Path)
 	return nil
@@ -283,7 +290,13 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(f.Path), filepath.Ext(f.Path))
 	}
-	p, err := l.GH.place(ctx, tmp, k, name, "", "file:"+id, old.IconFile, f.Info)
+	others := l.GH.launchersOf(f.Path)
+	wmclass := adoptLauncherDetails(f.Info, others)
+	if wmclass == "" {
+		wmclass = old.WMClass
+	}
+	p, err := l.GH.place(ctx, tmp, k, launcher{name: name, source: "file:" + id, oldIcon: old.IconFile,
+		wmclass: wmclass, info: f.Info})
 	if err != nil {
 		return backend.InstalledApp{}, err
 	}
@@ -292,12 +305,13 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 		update = f.Update.String()
 	}
 	a := state.FileAppImage{ID: id, Name: p.name, Version: fileVersion(f.Info), Update: update,
-		SHA256: sum.SHA256, SHA512: sum.SHA512, SHA1: sum.SHA1, Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile,
-		InstalledAt: l.GH.now()}
+		SHA256: sum.SHA256, SHA512: sum.SHA512, SHA1: sum.SHA1, Path: p.path, DesktopFile: p.desktopFile,
+		IconFile: p.iconFile, WMClass: wmclass, InstalledAt: l.GH.now()}
 	st.PutAppImage(a)
 	if err := l.GH.State.Save(st); err != nil {
 		return backend.InstalledApp{}, err
 	}
+	l.GH.takeOver(ctx, others, p.desktopFile, progress)
 	os.Remove(f.Path)
 	if f.Unreadable != nil {
 		report(progress, "uas couldn't read the app's own launcher and icon ("+f.Unreadable.Error()+
@@ -422,7 +436,8 @@ func (l *Local) Update(ctx context.Context, app backend.InstalledApp, progress f
 	} else if err != nil {
 		return fmt.Errorf("the new %s is not an AppImage uas can read: %w", f.Name, err)
 	}
-	p, err := l.GH.place(ctx, tmp, k, a.Name, "", "file:"+a.ID, a.IconFile, info)
+	p, err := l.GH.place(ctx, tmp, k, launcher{name: a.Name, source: "file:" + a.ID, oldIcon: a.IconFile,
+		wmclass: a.WMClass, info: info})
 	if err != nil {
 		return err
 	}

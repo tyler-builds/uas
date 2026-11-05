@@ -13,7 +13,16 @@ type Entry struct {
 	AppImage string // absolute path of the AppImage
 	Icon     string // absolute path of the icon, or a theme icon name
 	Source   string // for example "github:owner/repo", recorded as X-UAS-Source
+	// WMClass is the StartupWMClass to write when the AppImage's own entry has none: the name of that entry
+	// without ".desktop", which is what most apps use as their window's app ID. The launcher has a name of
+	// uas's own, so without it the desktop can't tell which launcher a window belongs to and shows a
+	// generic icon in the dock.
+	WMClass string
 }
+
+// LauncherVersion is written into each launcher as X-UAS-Launcher. Launchers from older versions are
+// rewritten (see the github backend's RepairLaunchers).
+const LauncherVersion = 2
 
 // DesktopFile returns a desktop entry for an installed AppImage.
 //
@@ -62,10 +71,16 @@ func DesktopFile(e Entry, from map[string]string) (string, error) {
 	} else {
 		line("Terminal", "false")
 	}
-	for _, k := range []string{"GenericName", "Categories", "Keywords", "MimeType", "StartupWMClass"} {
+	for _, k := range []string{"GenericName", "Categories", "Keywords", "MimeType"} {
 		line(k, clean(from[k]))
 	}
+	wmclass := clean(from["StartupWMClass"])
+	if wmclass == "" {
+		wmclass = clean(e.WMClass)
+	}
+	line("StartupWMClass", wmclass)
 	line("X-UAS-Source", clean(e.Source))
+	line("X-UAS-Launcher", fmt.Sprint(LauncherVersion))
 	return b.String(), nil
 }
 
@@ -73,3 +88,9 @@ func DesktopFile(e Entry, from map[string]string) (string, error) {
 func clean(s string) string {
 	return strings.TrimSpace(strings.NewReplacer("\n", " ", "\r", " ").Replace(s))
 }
+
+// ParseDesktop reads the unlocalized keys of a desktop entry's [Desktop Entry] group.
+func ParseDesktop(s string) map[string]string { return parseDesktop(s) }
+
+// IconExt returns ".png" or ".svg" for icon data, or "" when it is neither.
+func IconExt(b []byte) string { return iconExt(b) }

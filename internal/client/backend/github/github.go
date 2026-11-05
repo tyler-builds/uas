@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -152,7 +153,8 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		return err
 	}
 	old, _ := st.Find(l.Ref)
-	p, err := b.place(ctx, tmp, k, l.Name, l.Summary, "github:"+l.Ref, old.IconFile, info)
+	p, err := b.place(ctx, tmp, k, launcher{name: l.Name, summary: l.Summary, source: "github:" + l.Ref,
+		oldIcon: old.IconFile, wmclass: old.WMClass, info: info})
 	if err != nil {
 		return err
 	}
@@ -160,7 +162,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		b.uninstallBundle(ctx, old.FlatpakRef, progress)
 	}
 	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: l.Version, Asset: a.Name, SHA256: a.SHA256,
-		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, InstalledAt: b.now()})
+		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, WMClass: old.WMClass, InstalledAt: b.now()})
 	return b.State.Save(st)
 }
 
@@ -170,11 +172,18 @@ type placed struct {
 	name                        string // the launcher's name
 }
 
+// launcher is what uas writes a launcher from.
+type launcher struct {
+	name, summary string // fill in what the AppImage's own entry lacks
+	source        string // recorded in the launcher, such as "github:owner/repo"
+	oldIcon       string // the icon of the copy it replaces: kept if the AppImage gives none, else removed
+	wmclass       string // the StartupWMClass to write over the AppImage's own, from a launcher uas took over
+	info          *appimage.Info
+}
+
 // place makes the AppImage at tmp, in Dirs.AppImages, executable and moves it to <k>.AppImage, then writes its
-// icon and launcher from info. name and summary fill in what the AppImage's own entry lacks; source is
-// recorded in the launcher; oldIcon is the icon of the copy it replaces, removed if the new one differs.
-func (b *Backend) place(ctx context.Context, tmp, k, name, summary, source, oldIcon string,
-	info *appimage.Info) (placed, error) {
+// icon and launcher.
+func (b *Backend) place(ctx context.Context, tmp, k string, l launcher) (placed, error) {
 	final := filepath.Join(b.Dirs.AppImages, k+".AppImage")
 	if err := os.Chmod(tmp, 0o755); err != nil {
 		return placed{}, err
@@ -182,20 +191,37 @@ func (b *Backend) place(ctx context.Context, tmp, k, name, summary, source, oldI
 	if err := os.Rename(tmp, final); err != nil {
 		return placed{}, err
 	}
+	return b.writeLauncher(ctx, final, k, l)
+}
+
+// writeLauncher writes the icon and launcher of the AppImage at final.
+func (b *Backend) writeLauncher(ctx context.Context, final, k string, l launcher) (placed, error) {
 	icon := "application-x-executable"
 	iconFile := ""
-	if len(info.Icon) > 0 {
-		iconFile = filepath.Join(b.Dirs.Icons, k+info.IconExt)
-		if err := writeFile(iconFile, info.Icon, 0o644); err != nil {
+	switch {
+	case len(l.info.Icon) > 0:
+		iconFile = filepath.Join(b.Dirs.Icons, k+l.info.IconExt)
+		if err := writeFile(iconFile, l.info.Icon, 0o644); err != nil {
 			return placed{}, err
 		}
 		icon = iconFile
+	case l.oldIcon != "" && b.owns(l.oldIcon):
+		if _, err := os.Stat(l.oldIcon); err == nil {
+			iconFile, icon = l.oldIcon, l.oldIcon
+		}
 	}
-	if oldIcon != "" && oldIcon != iconFile && b.owns(oldIcon) {
-		os.Remove(oldIcon)
+	if l.oldIcon != "" && l.oldIcon != iconFile && b.owns(l.oldIcon) {
+		os.Remove(l.oldIcon)
 	}
-	desktop, err := appimage.DesktopFile(appimage.Entry{Name: name, Comment: summary, AppImage: final,
-		Icon: icon, Source: source}, info.Desktop)
+	from := maps.Clone(l.info.Desktop)
+	if from == nil {
+		from = map[string]string{}
+	}
+	if l.wmclass != "" {
+		from["StartupWMClass"] = l.wmclass
+	}
+	desktop, err := appimage.DesktopFile(appimage.Entry{Name: l.name, Comment: l.summary, AppImage: final,
+		Icon: icon, Source: l.source, WMClass: strings.TrimSuffix(l.info.DesktopName, ".desktop")}, from)
 	if err != nil {
 		return placed{}, err
 	}
@@ -204,10 +230,88 @@ func (b *Backend) place(ctx context.Context, tmp, k, name, summary, source, oldI
 		return placed{}, err
 	}
 	b.refreshLaunchers(ctx)
-	if n := info.Desktop["Name"]; n != "" {
+	name := l.name
+	if n := l.info.Desktop["Name"]; n != "" {
 		name = n
 	}
 	return placed{path: final, desktopFile: desktopFile, iconFile: iconFile, name: name}, nil
+}
+
+// RepairLaunchers rewrites the launchers that an older version of uas wrote (see appimage.LauncherVersion),
+// for the AppImages installed from GitHub and added from files, reading each AppImage again without running
+// it. It also takes over launchers another tool left pointing at an AppImage uas has since moved, matched by
+// the app's name.
+func (b *Backend) RepairLaunchers(ctx context.Context) error {
+	st, err := b.State.Load()
+	if err != nil {
+		return err
+	}
+	changed := false
+	repair := func(path, desktopFile, iconFile, k, name, source string, wmclass *string) (placed, bool) {
+		if path == "" || desktopFile == "" || !b.owns(path) {
+			return placed{}, false
+		}
+		broken := b.brokenLaunchersNamed(name)
+		if launcherCurrent(desktopFile) && len(broken) == 0 {
+			return placed{}, false
+		}
+		if _, err := os.Stat(path); err != nil {
+			return placed{}, false
+		}
+		info, err := appimage.Inspect(path)
+		if err != nil {
+			info = &appimage.Info{}
+		}
+		if wm := adoptLauncherDetails(info, broken); wm != "" {
+			*wmclass = wm
+		}
+		p, err := b.writeLauncher(ctx, path, k, launcher{name: name, summary: launcherKey(desktopFile, "Comment"),
+			source: source, oldIcon: iconFile, wmclass: *wmclass, info: info})
+		if err != nil {
+			return placed{}, false
+		}
+		b.takeOver(ctx, broken, p.desktopFile, nil)
+		changed = true
+		return p, true
+	}
+	for i, g := range st.GitHub {
+		if g.Kind == catalog.AssetFlatpak {
+			continue
+		}
+		if p, ok := repair(g.Path, g.DesktopFile, g.IconFile, key(g.Repo), g.Name, "github:"+g.Repo,
+			&st.GitHub[i].WMClass); ok {
+			st.GitHub[i].DesktopFile, st.GitHub[i].IconFile = p.desktopFile, p.iconFile
+		}
+	}
+	for i, a := range st.AppImages {
+		if p, ok := repair(a.Path, a.DesktopFile, a.IconFile, fileKey(a.ID), a.Name, "file:"+a.ID,
+			&st.AppImages[i].WMClass); ok {
+			st.AppImages[i].DesktopFile, st.AppImages[i].IconFile = p.desktopFile, p.iconFile
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return b.State.Save(st)
+}
+
+// launcherCurrent reports whether a launcher was written by this version of uas.
+func launcherCurrent(desktopFile string) bool {
+	return launcherKey(desktopFile, "X-UAS-Launcher") == fmt.Sprint(appimage.LauncherVersion)
+}
+
+// launcherKey reads one key of a launcher uas wrote.
+func launcherKey(desktopFile, k string) string {
+	b, err := os.ReadFile(desktopFile)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, k+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // download fetches an asset to dst, checking its size and SHA-256.
