@@ -51,8 +51,8 @@ func listing(distro, pkg string) catalog.Listing {
 
 func TestTargetsStagedRelease(t *testing.T) {
 	b := newBackend(&fakeRunner{})
-	if b.Release != 45 {
-		t.Fatalf("Release = %d, want 45 (the staged deployment)", b.Release)
+	if b.Release() != 45 {
+		t.Fatalf("Release = %d, want 45 (the staged deployment)", b.Release())
 	}
 	if !b.Supports(listing("fedora-45", "htop")) || b.Supports(listing("fedora-44", "htop")) {
 		t.Error("Supports should accept only fedora-45 listings")
@@ -65,8 +65,8 @@ func TestTargetsStagedRelease(t *testing.T) {
 func TestFallbackRelease(t *testing.T) {
 	r := &fakeRunner{fail: map[string]error{"rpm-ostree status --json": errors.New("no daemon")}}
 	b := New(context.Background(), r, "rpm-ostree", "rpm", 44)
-	if b.Release != 44 {
-		t.Errorf("Release = %d, want the fallback 44", b.Release)
+	if b.Release() != 44 {
+		t.Errorf("Release = %d, want the fallback 44", b.Release())
 	}
 }
 

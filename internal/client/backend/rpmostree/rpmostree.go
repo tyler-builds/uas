@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
@@ -34,23 +35,31 @@ type Backend struct {
 	Runner run.Runner
 	Path   string // the rpm-ostree binary
 	RPM    string // the rpm binary, used to check what the running image contains
-	// Release is the Fedora release new layers are built against.
-	Release int
+	// release returns the Fedora release new layers are built against, asking rpm-ostree once.
+	release func() int
 	// Exclude, if set, hides layered packages that another backend (COPR) accounts for.
 	Exclude func(pkg string) bool
 }
 
-// New creates a backend and works out which Fedora release new layers will target. fallbackRelease (the
-// running system's release) is used if rpm-ostree cannot say.
+// New creates a backend. Which Fedora release new layers will target is worked out on the first call to
+// Release, since asking rpm-ostree takes tens of milliseconds; fallbackRelease (the running system's release)
+// is used if rpm-ostree cannot say. ctx bounds that first call.
 func New(ctx context.Context, runner run.Runner, path, rpm string, fallbackRelease int) *Backend {
-	b := &Backend{Runner: runner, Path: path, RPM: rpm, Release: fallbackRelease}
-	if st, err := b.status(ctx); err == nil && len(st.Deployments) > 0 {
-		if r := st.Deployments[0].fedoraRelease(); r > 0 {
-			b.Release = r
+	b := &Backend{Runner: runner, Path: path, RPM: rpm}
+	b.release = sync.OnceValue(func() int {
+		if st, err := b.status(ctx); err == nil && len(st.Deployments) > 0 {
+			if r := st.Deployments[0].fedoraRelease(); r > 0 {
+				return r
+			}
 		}
-	}
+		return fallbackRelease
+	})
 	return b
 }
+
+// Release returns the Fedora release new layers are built against: the release of the newest deployment.
+// The first call asks rpm-ostree; later calls return the same answer.
+func (b *Backend) Release() int { return b.release() }
 
 // Source implements backend.Backend.
 func (b *Backend) Source() catalog.SourceID { return catalog.SourceFedora }
@@ -60,7 +69,7 @@ func (b *Backend) NeedsRestart() bool { return true }
 
 // Supports implements backend.Backend: only listings for the targeted Fedora release can be layered.
 func (b *Backend) Supports(l catalog.Listing) bool {
-	return l.Source == catalog.SourceFedora && b.Release > 0 && l.Distro == catalog.FedoraDistro(b.Release) &&
+	return l.Source == catalog.SourceFedora && b.Release() > 0 && l.Distro == catalog.FedoraDistro(b.Release()) &&
 		packageName.MatchString(l.Package)
 }
 
@@ -107,7 +116,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	}
 	if !b.Supports(l) {
 		return fmt.Errorf("rpm-ostree: %s is for %s, but new packages go onto Fedora %d", l.Package, l.Distro,
-			b.Release)
+			b.Release())
 	}
 	return b.Layer(ctx, l.Package, progress)
 }

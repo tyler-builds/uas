@@ -73,7 +73,7 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 			case nil:
 				note = "not installed on this system"
 			case *rpmostree.Backend:
-				note = fmt.Sprintf("layers onto Fedora %d; needs a restart", bb.Release)
+				note = fmt.Sprintf("layers onto Fedora %d; needs a restart", bb.Release())
 			default:
 				if rs, ok := b.(backend.Restarter); ok && rs.NeedsRestart() {
 					note = "needs a restart"

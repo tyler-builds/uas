@@ -89,6 +89,8 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 	if p.Atomic && p.RPMOSTree != "" && p.FedoraRelease() > 0 {
 		ostree := rpmostree.New(ctx, run.Exec{}, p.RPMOSTree, "rpm", p.FedoraRelease())
 		s.Backends[catalog.SourceFedora] = ostree
+		// Ask rpm-ostree for the target release now, off the startup path, so it's known by first use.
+		go ostree.Release()
 		statePath, err := state.DefaultPath()
 		if err == nil && p.Pkexec != "" {
 			store := state.Store{Path: statePath}

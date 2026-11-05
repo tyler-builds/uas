@@ -54,7 +54,7 @@ func (b *Backend) NeedsRestart() bool { return true }
 func (b *Backend) Supports(l catalog.Listing) bool {
 	_, _, err := splitProject(l.Project)
 	return l.Source == catalog.SourceCOPR && err == nil && packageName.MatchString(l.Package) &&
-		b.Ostree.Release > 0 && l.Distro == catalog.FedoraDistro(b.Ostree.Release) && b.Pkexec != ""
+		b.Ostree.Release() > 0 && l.Distro == catalog.FedoraDistro(b.Ostree.Release()) && b.Pkexec != ""
 }
 
 func splitProject(full string) (owner, name string, err error) {
@@ -137,7 +137,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	}
 	if !b.Supports(l) {
 		return fmt.Errorf("copr: %s is for %s, but new packages go onto Fedora %d", l.Package, l.Distro,
-			b.Ostree.Release)
+			b.Ostree.Release())
 	}
 	name, err := RepoFileName(l.Project)
 	if err != nil {

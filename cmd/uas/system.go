@@ -76,10 +76,10 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 		switch b := e.Backends[s].(type) {
 		case nil:
 		case *rpmostree.Backend:
-			state = fmt.Sprintf("ready (layering onto Fedora %d)", b.Release)
+			state = fmt.Sprintf("ready (layering onto Fedora %d)", b.Release())
 		case *copr.Backend:
 			state = fmt.Sprintf("ready (layering onto Fedora %d; enabling a repo asks for your password)",
-				b.Ostree.Release)
+				b.Ostree.Release())
 		default:
 			state = "ready"
 		}
