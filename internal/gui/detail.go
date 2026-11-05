@@ -177,7 +177,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 				Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 					Child(a.updateControl(ctx, in, app.ID, app.Name, busy))).
 				// An icon, so an Update button with a long version beside it still fits.
-				Child(ui.IconButton(icons.Trash).Label("Remove").Tooltip("Remove "+app.Name).Disabled(busy).
+				Child(ui.IconButton(icons.Trash).Label("Remove").Tooltip("Remove " + app.Name).Disabled(busy).
 					OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) })))
 	default:
 		action = ui.Button("Install").Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
@@ -400,7 +400,7 @@ func (a *App) updateControl(ctx *ui.Context, in backend.InstalledApp, jobID, nam
 			label = "Update to " + version
 		}
 		return ui.Button(label).Primary().Icon(icons.Download).Width(ui.Full).Loading(busy).
-			Tooltip("Update to "+version).OnClick(func() {
+			Tooltip("Update to " + version).OnClick(func() {
 			a.startJob(ctx, jobID, "Updating "+name, a.s.NeedsRestart(in.Source), name+" is up to date",
 				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 		})
