@@ -22,8 +22,10 @@ import (
 type Info struct {
 	// Desktop holds the unlocalized keys of the [Desktop Entry] group, such as "Name" and "Exec".
 	Desktop map[string]string
-	Icon    []byte
-	IconExt string // ".png" or ".svg"
+	// DesktopName is the desktop entry's file name, such as "org.example.App.desktop".
+	DesktopName string
+	Icon        []byte
+	IconExt     string // ".png" or ".svg"
 	// Metainfo is the app's AppStream metainfo file (usr/share/metainfo), if it ships one.
 	Metainfo []byte
 }
@@ -131,7 +133,7 @@ func fromFS(fsys fs.FS) (*Info, error) {
 		return nil, errors.New("appimage: no .desktop file at the image root")
 	}
 	pick := pickDesktop(fsys, names, desktops)
-	info := &Info{Desktop: desktops[pick]}
+	info := &Info{Desktop: desktops[pick], DesktopName: names[pick]}
 
 	var candidates []string
 	if icon := info.Desktop["Icon"]; icon != "" && !strings.ContainsAny(icon, "/\\") {

@@ -70,6 +70,7 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 	gh, ghErr := s.githubBackend()
 	if ghErr == nil {
 		s.Backends[catalog.SourceGitHub] = gh
+		s.Backends[catalog.SourceAppImage] = &github.Local{GH: gh}
 	}
 	if p.Flatpak != "" {
 		fp := &flatpak.Backend{Runner: run.Exec{}, Path: p.Flatpak, Scope: st.FlatpakScope}
@@ -135,10 +136,13 @@ func (s *Session) Choose(app *catalog.App, want catalog.SourceID) (recommend.Cho
 	return recommend.Choose(app, s.Available, want)
 }
 
+// sources are the catalog's sources, then AppImages added from files.
+var sources = append(append([]catalog.SourceID{}, catalog.SourcePrecedence...), catalog.SourceAppImage)
+
 // Installed lists installed apps from every backend, sorted by name.
 func (s *Session) Installed(ctx context.Context) ([]backend.InstalledApp, error) {
 	var all []backend.InstalledApp
-	for _, src := range catalog.SourcePrecedence {
+	for _, src := range sources {
 		b := s.Backends[src]
 		if b == nil {
 			continue
@@ -217,7 +221,7 @@ func (s *Session) Updates(ctx context.Context) (map[string]string, error) {
 		err error
 	}
 	var checks []catalog.SourceID
-	for _, src := range catalog.SourcePrecedence {
+	for _, src := range sources {
 		if _, ok := s.Backends[src].(backend.UpdateChecker); ok {
 			checks = append(checks, src)
 		}
@@ -283,6 +287,66 @@ func (s *Session) emit(name string, src catalog.SourceID, err error) {
 		result = "error"
 	}
 	s.Telemetry.Emit(telemetry.Event{Name: name, Fields: map[string]string{"source": string(src), "result": result}})
+}
+
+// AddAppImage adds an AppImage file, moving it into uas's AppImage folder with a launcher. When the catalog
+// has the app from GitHub (found from where the AppImage says its updates come from, or from its ID), it is
+// recorded as that GitHub install and updates from the catalog; otherwise it updates from where the AppImage
+// says, or not at all.
+func (s *Session) AddAppImage(ctx context.Context, path string, progress func(backend.Progress)) (
+	backend.InstalledApp, error) {
+	gh, ok := s.Backends[catalog.SourceGitHub].(*github.Backend)
+	local, lok := s.Backends[catalog.SourceAppImage].(*github.Local)
+	if !ok || !lok {
+		return backend.InstalledApp{}, errors.New("AppImages are not supported on this system")
+	}
+	f, err := github.ReadFile(path)
+	if err != nil {
+		return backend.InstalledApp{}, err
+	}
+	var app backend.InstalledApp
+	if l, ok := s.githubListing(ctx, gh, f); ok {
+		err = gh.Adopt(ctx, f, l, progress)
+		app = backend.InstalledApp{Source: catalog.SourceGitHub, Ref: l.Ref, AppID: l.Ref, Name: l.Name,
+			Scope: "user", Origin: "github"}
+	} else {
+		app, err = local.Add(ctx, f, progress)
+	}
+	s.emit("add-appimage", app.Source, err)
+	return app, err
+}
+
+// githubListing finds the catalog's GitHub AppImage listing of an AppImage file: of the repo its update
+// information names, or of the app its ID names when it names no place.
+func (s *Session) githubListing(ctx context.Context, gh *github.Backend, f *github.File) (catalog.Listing, bool) {
+	db, err := catalog.Open(s.CatalogPath)
+	if err != nil {
+		return catalog.Listing{}, false
+	}
+	defer db.Close()
+	// An AppImage that updates from somewhere other than GitHub keeps doing so; one that names no place is
+	// looked up by its ID.
+	repo := f.Update.GitHubRepo()
+	id := repo
+	if f.UpdateErr != nil {
+		id = f.Info.AppID()
+	}
+	if id == "" {
+		return catalog.Listing{}, false
+	}
+	app, err := db.Resolve(ctx, id)
+	if err != nil {
+		return catalog.Listing{}, false
+	}
+	for _, l := range app.Listings {
+		if l.Source != catalog.SourceGitHub || (repo != "" && !strings.EqualFold(l.Ref, repo)) {
+			continue
+		}
+		if a, ok := gh.Pick(l); ok && a.Kind == catalog.AssetAppImage {
+			return l, true
+		}
+	}
+	return catalog.Listing{}, false
 }
 
 // InstallNotes are short notes to show before installing l: where it goes, whether it needs a password or

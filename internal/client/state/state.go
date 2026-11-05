@@ -1,5 +1,5 @@
 // Package state records what uas installed itself, for sources that have no package manager to ask
-// (GitHub AppImages).
+// (GitHub releases, COPR repos, and AppImages added from files).
 package state
 
 import (
@@ -38,10 +38,59 @@ type COPRInstall struct {
 	InstalledAt time.Time `json:"installed_at"`
 }
 
+// FileAppImage is an AppImage the user added from a file, which updates from where the AppImage itself says.
+type FileAppImage struct {
+	ID      string `json:"id"` // the app's ID, from its metainfo or desktop entry
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	// Update is the AppImage's update information, such as "gh-releases-zsync|owner|repo|latest|*.zsync",
+	// or "" when it has none and can't update itself.
+	Update      string    `json:"update,omitempty"`
+	SHA256      string    `json:"sha256"`
+	SHA1        string    `json:"sha1"` // zsync files give only SHA-1
+	Path        string    `json:"path"`
+	DesktopFile string    `json:"desktop_file,omitempty"`
+	IconFile    string    `json:"icon_file,omitempty"`
+	InstalledAt time.Time `json:"installed_at"`
+}
+
 // State is everything recorded.
 type State struct {
-	GitHub []GitHubInstall `json:"github"`
-	COPR   []COPRInstall   `json:"copr,omitempty"`
+	GitHub    []GitHubInstall `json:"github"`
+	COPR      []COPRInstall   `json:"copr,omitempty"`
+	AppImages []FileAppImage  `json:"appimages,omitempty"`
+}
+
+// FindAppImage returns the added AppImage with id.
+func (s *State) FindAppImage(id string) (FileAppImage, bool) {
+	for _, a := range s.AppImages {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return FileAppImage{}, false
+}
+
+// PutAppImage adds or replaces the AppImage with a.ID.
+func (s *State) PutAppImage(a FileAppImage) {
+	for i := range s.AppImages {
+		if s.AppImages[i].ID == a.ID {
+			s.AppImages[i] = a
+			return
+		}
+	}
+	s.AppImages = append(s.AppImages, a)
+}
+
+// DeleteAppImage removes the AppImage with id.
+func (s *State) DeleteAppImage(id string) {
+	out := s.AppImages[:0]
+	for _, a := range s.AppImages {
+		if a.ID != id {
+			out = append(out, a)
+		}
+	}
+	s.AppImages = out
 }
 
 // FindCOPR returns the COPR install of pkg.

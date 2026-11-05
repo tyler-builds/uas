@@ -27,6 +27,7 @@ commands:
   search <words>       find apps
   info <app-id>        show one app and where it is available
   install <app-id>     install an app
+  add <file.AppImage>  add a downloaded AppImage: uas moves it into its folder and keeps it updated
   remove <app-id>      remove an installed app
   update <app-id>      update an installed app
   updates              list installed apps that have updates
@@ -54,6 +55,8 @@ func main() {
 		err = runInfo(ctx, os.Stdout, args)
 	case "install":
 		err = runInstall(ctx, args)
+	case "add":
+		err = runAdd(ctx, args)
 	case "remove", "uninstall":
 		err = runRemove(ctx, args)
 	case "update":

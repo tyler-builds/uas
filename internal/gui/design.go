@@ -173,6 +173,7 @@ var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceHomebrew: {"#fbbf4a", "#a15c00"},
 	catalog.SourceCOPR:     {"#fb7185", "#be123c"},
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
+	catalog.SourceAppImage: {"#5eead4", "#0f766e"},
 }
 
 // sourceTips explain each source in a sentence or two.
@@ -187,6 +188,8 @@ var sourceTips = map[catalog.SourceID]string{
 		"its page shows a trust score",
 	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
 		"and installing layers it into the system image",
+	catalog.SourceAppImage: "An AppImage you added from a file. uas updates it from where the AppImage says, " +
+		"if it says, and checks each download's checksum",
 }
 
 func tintColor(ctx *ui.Context, t tint) ui.Color {

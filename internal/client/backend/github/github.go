@@ -9,6 +9,7 @@ package github
 
 import (
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -107,7 +108,7 @@ func (b *Backend) Installed(context.Context) ([]backend.InstalledApp, error) {
 	var apps []backend.InstalledApp
 	for _, g := range st.GitHub {
 		apps = append(apps, backend.InstalledApp{Source: catalog.SourceGitHub, Ref: g.Repo, AppID: g.Repo,
-			Name: g.Name, Version: g.Version, Scope: "user", Origin: "github"})
+			Name: g.Name, Version: g.Version, Scope: "user", Origin: "github", Icon: iconURL(g.IconFile)})
 	}
 	return apps, nil
 }
@@ -131,7 +132,6 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	}
 
 	k := key(l.Ref)
-	final := filepath.Join(b.Dirs.AppImages, k+".AppImage")
 	tmp := filepath.Join(b.Dirs.AppImages, "."+k+".download")
 	defer os.Remove(tmp)
 	if err := b.download(ctx, a, tmp, progress); err != nil {
@@ -145,93 +145,113 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		report(progress, "Could not read the launcher from the AppImage: "+err.Error())
 		info = &appimage.Info{}
 	}
-	if err := os.Chmod(tmp, 0o755); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, final); err != nil {
-		return err
-	}
-
 	st, err := b.State.Load()
 	if err != nil {
 		return err
 	}
 	old, _ := st.Find(l.Ref)
+	p, err := b.place(ctx, tmp, k, l.Name, l.Summary, "github:"+l.Ref, old.IconFile, info)
+	if err != nil {
+		return err
+	}
+	if old.Kind == catalog.AssetFlatpak { // it was installed as a bundle before
+		b.uninstallBundle(ctx, old.FlatpakRef, progress)
+	}
+	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: l.Version, Asset: a.Name, SHA256: a.SHA256,
+		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, InstalledAt: b.now()})
+	return b.State.Save(st)
+}
+
+// placed is an AppImage in place with its launcher.
+type placed struct {
+	path, desktopFile, iconFile string
+	name                        string // the launcher's name
+}
+
+// place makes the AppImage at tmp, in Dirs.AppImages, executable and moves it to <k>.AppImage, then writes its
+// icon and launcher from info. name and summary fill in what the AppImage's own entry lacks; source is
+// recorded in the launcher; oldIcon is the icon of the copy it replaces, removed if the new one differs.
+func (b *Backend) place(ctx context.Context, tmp, k, name, summary, source, oldIcon string,
+	info *appimage.Info) (placed, error) {
+	final := filepath.Join(b.Dirs.AppImages, k+".AppImage")
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		return placed{}, err
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		return placed{}, err
+	}
 	icon := "application-x-executable"
 	iconFile := ""
 	if len(info.Icon) > 0 {
 		iconFile = filepath.Join(b.Dirs.Icons, k+info.IconExt)
 		if err := writeFile(iconFile, info.Icon, 0o644); err != nil {
-			return err
+			return placed{}, err
 		}
 		icon = iconFile
 	}
-	if old.IconFile != "" && old.IconFile != iconFile {
-		os.Remove(old.IconFile)
+	if oldIcon != "" && oldIcon != iconFile && b.owns(oldIcon) {
+		os.Remove(oldIcon)
 	}
-	if old.Kind == catalog.AssetFlatpak { // it was installed as a bundle before
-		b.uninstallBundle(ctx, old.FlatpakRef, progress)
-	}
-	desktop, err := appimage.DesktopFile(appimage.Entry{Name: l.Name, Comment: l.Summary, AppImage: final,
-		Icon: icon, Source: "github:" + l.Ref}, info.Desktop)
+	desktop, err := appimage.DesktopFile(appimage.Entry{Name: name, Comment: summary, AppImage: final,
+		Icon: icon, Source: source}, info.Desktop)
 	if err != nil {
-		return err
+		return placed{}, err
 	}
 	desktopFile := filepath.Join(b.Dirs.Applications, "uas-"+k+".desktop")
 	if err := writeFile(desktopFile, []byte(desktop), 0o644); err != nil {
-		return err
+		return placed{}, err
 	}
 	b.refreshLaunchers(ctx)
-
-	name := info.Desktop["Name"]
-	if name == "" {
-		name = l.Name
+	if n := info.Desktop["Name"]; n != "" {
+		name = n
 	}
-	st.Put(state.GitHubInstall{Repo: l.Ref, Name: name, Version: l.Version, Asset: a.Name, SHA256: a.SHA256,
-		Path: final, DesktopFile: desktopFile, IconFile: iconFile, InstalledAt: b.now()})
-	return b.State.Save(st)
+	return placed{path: final, desktopFile: desktopFile, iconFile: iconFile, name: name}, nil
 }
 
 // download fetches an asset to dst, checking its size and SHA-256.
 func (b *Backend) download(ctx context.Context, a catalog.Asset, dst string, progress func(backend.Progress)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
-	if err != nil {
-		return err
+	_, _, err := b.fetch(ctx, remoteFile{URL: a.URL, Name: a.Name, Size: a.Size, SHA256: a.SHA256}, dst, progress)
+	return err
+}
+
+// fetch downloads f to dst, checking its size and every checksum it has (it must have one), and returns the
+// file's SHA-256 and SHA-1.
+func (b *Backend) fetch(ctx context.Context, f remoteFile, dst string,
+	progress func(backend.Progress)) (sum256, sum1 string, err error) {
+	if f.SHA256 == "" && f.SHA1 == "" {
+		return "", "", fmt.Errorf("download %s: no published checksum to check it against", f.Name)
 	}
-	req.Header.Set("User-Agent", "uas")
-	resp, err := b.Client.Do(req)
+	resp, err := b.get(ctx, f.URL)
 	if err != nil {
-		return err
+		return "", "", fmt.Errorf("download %s: %w", f.Name, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s: %s", a.Name, resp.Status)
-	}
 	limit := int64(maxAppImage)
-	if a.Size > 0 {
-		limit = a.Size
+	if f.Size > 0 {
+		limit = f.Size
 	}
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	h := sha256.New()
-	pw := &progressWriter{total: a.Size, name: a.Name, report: progress}
-	n, err := io.Copy(io.MultiWriter(f, h, pw), io.LimitReader(resp.Body, limit+1))
-	if cerr := f.Close(); err == nil {
+	h256, h1 := sha256.New(), sha1.New()
+	pw := &progressWriter{total: f.Size, name: f.Name, report: progress}
+	n, err := io.Copy(io.MultiWriter(out, h256, h1, pw), io.LimitReader(resp.Body, limit+1))
+	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return fmt.Errorf("download %s: %w", a.Name, err)
+		return "", "", fmt.Errorf("download %s: %w", f.Name, err)
 	}
-	if n > limit || (a.Size > 0 && n != a.Size) {
-		return fmt.Errorf("download %s: got %d bytes, expected %d", a.Name, n, a.Size)
+	if n > limit || (f.Size > 0 && n != f.Size) {
+		return "", "", fmt.Errorf("download %s: got %d bytes, expected %d", f.Name, n, f.Size)
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); got != a.SHA256 {
-		return fmt.Errorf("download %s: checksum mismatch; the file is not the one GitHub published", a.Name)
+	sum256, sum1 = hex.EncodeToString(h256.Sum(nil)), hex.EncodeToString(h1.Sum(nil))
+	if (f.SHA256 != "" && sum256 != f.SHA256) || (f.SHA1 != "" && sum1 != f.SHA1) {
+		return "", "", fmt.Errorf("download %s: checksum mismatch; the file is not the one published", f.Name)
 	}
 	report(progress, "Checksum verified")
-	return nil
+	return sum256, sum1, nil
 }
 
 // Updates implements backend.UpdateChecker: an app has an update when the release file the catalog offers

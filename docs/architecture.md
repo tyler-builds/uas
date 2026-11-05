@@ -258,6 +258,19 @@ type Backend interface {
   and an update that changes the bundle's branch removes the old one. `.rpm` files from releases are in the
   catalog but not installable. Releases that ship only `.zip` or `.tar.gz` files are left out: of 482
   popular repos found that way, nearly all were command-line tools and servers, which Homebrew covers.
+- **appimage (added files):** `uas add <file>` and Installed's Add AppImage button take an AppImage the user
+  downloaded, like Gear Lever. uas reads it without running it, including the update information that
+  appimagetool embeds in the runtime's `.upd_info` section. If the catalog has the app as a GitHub AppImage,
+  found by the repo the update information names, or by the app's ID when it names none, the file becomes that
+  GitHub install and updates from the catalog. Otherwise it is kept as
+  `~/.local/share/uas/appimages/file__<id>.AppImage` with a launcher, recorded in the state file, and updated
+  from where the update information points. uas follows `gh-releases-zsync` and `gh-releases-direct` through
+  GitHub's releases API, and `zsync` URLs over https. A new file is used only if it matches a published
+  checksum: GitHub's SHA-256 digest of the release file, and the SHA-1 in the `.zsync` header. The file is
+  downloaded whole; zsync's partial downloads aren't used. Release lookups are unauthenticated, which
+  GitHub limits to 60 an hour, so results are kept for an hour. The user's file is copied first and deleted
+  only once the add succeeds. On btrfs the copy shares the file's data. An AppImage with no update information
+  is listed with "doesn't update itself".
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
   New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers
@@ -382,6 +395,7 @@ uas/
 6. **GitHub:** fetcher, trust scoring, AppImage and Flatpak bundle installer, update tracking. Done.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling. Done (live install untested; see above).
 8. **Jamb UI:** Discover, app pages, Installed, Updates, Settings. Done.
+9. **Added AppImages:** `uas add` and Add AppImage, updates from the AppImage's own update information. Done.
 
 ## Decisions
 

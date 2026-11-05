@@ -43,6 +43,15 @@ type picture struct {
 
 // load returns the bytes of an image URL, from the disk cache when it has them.
 func (l *iconLoader) load(ctx context.Context, url string) ([]byte, error) {
+	if path, ok := strings.CutPrefix(url, "file://"); ok {
+		// An icon uas saved from an AppImage it installed.
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return io.ReadAll(io.LimitReader(f, 4<<20))
+	}
 	if !strings.HasPrefix(url, "https://") {
 		return nil, fmt.Errorf("not an https URL: %q", url)
 	}

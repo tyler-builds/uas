@@ -30,4 +30,5 @@ var sourceIcons = map[catalog.SourceID]*icons.Icon{
 	catalog.SourceHomebrew: logoIcon("homebrew"),
 	catalog.SourceCOPR:     icons.Hammer,
 	catalog.SourceGitHub:   logoIcon("github"),
+	catalog.SourceAppImage: icons.FileBox,
 }

@@ -93,6 +93,31 @@ func runInstall(ctx context.Context, args []string) error {
 	return nil
 }
 
+// runAdd adds a downloaded AppImage.
+func runAdd(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("add", flag.ContinueOnError)
+	catalogPath := catalogFlag(fs)
+	files, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(files) != 1 {
+		return errors.New("add: give exactly one AppImage file")
+	}
+	e, err := session.Load(ctx, "", *catalogPath)
+	if err != nil {
+		return err
+	}
+	p := newProgressPrinter()
+	app, err := e.AddAppImage(ctx, files[0], p.report)
+	p.done()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Added %s. Remove it with \"uas remove %s\".\n", app.Name, app.AppID)
+	return nil
+}
+
 func runRemove(ctx context.Context, args []string) error {
 	return runOnInstalled(ctx, "remove", "Remove", args, (*session.Session).Remove)
 }

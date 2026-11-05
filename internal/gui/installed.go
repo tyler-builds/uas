@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/tyler-builds/jamb/dialog"
 	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
 
@@ -20,8 +22,10 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 	ups := a.updates(ctx)
 	page := pageBody(listMaxWidth).
 		Child(a.listHeader(ctx, icons.Download, ui.Color{}, "Installed",
-			"Everything installed from every source. Packages layered onto the system image update with the system.",
-			a.refreshButton(ctx, res, ups)))
+			"Everything installed on this system, from every source.",
+			ui.Div().Row().Gap(space2).
+				Child(a.addAppImageButton(ctx)).
+				Child(a.refreshButton(ctx, res, ups))))
 	switch {
 	case res.Loading:
 		return scroll(page.Child(ui.Skeleton().Height(ui.Px(80))).Child(ui.Skeleton().Height(ui.Px(80))))
@@ -71,6 +75,38 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 	return scroll(page.Child(list))
 }
 
+// addAppImageButton asks for a downloaded AppImage and adds it, so uas keeps it up to date.
+func (a *App) addAppImageButton(ctx *ui.Context) ui.Element {
+	_, busy := a.running("add-appimage")
+	return ui.Button("Add AppImage").Icon(icons.FilePlus).Secondary().Loading(busy).
+		Tooltip("Add an AppImage you downloaded. uas moves it into its own folder, adds it to your app menu " +
+			"and keeps it up to date when the AppImage says where its updates come from.").
+		OnClick(func() {
+			ctx.Window().OpenFiles(dialog.FileOptions{Title: "Add an AppImage",
+				Filters: []dialog.Filter{{Name: "AppImages", Patterns: []string{"*.AppImage", "*.appimage"}},
+					{Name: "All files", Patterns: []string{"*"}}}},
+				func(r dialog.FileResult) {
+					if r.Err != nil {
+						ctx.Toast(ui.ToastError, errText(r.Err)).Title("Could not open the file picker")
+						return
+					}
+					if r.Canceled || len(r.Paths) == 0 {
+						return
+					}
+					a.addAppImage(ctx, r.Paths[0])
+				})
+		})
+}
+
+// addAppImage adds an AppImage file in the background.
+func (a *App) addAppImage(ctx *ui.Context, path string) {
+	a.startJob(ctx, "add-appimage", "Adding "+filepath.Base(path), false, "AppImage added",
+		func(c context.Context, p func(backend.Progress)) error {
+			_, err := a.s.AddAppImage(c, path, p)
+			return err
+		})
+}
+
 // refreshButton checks again for installed apps and updates.
 func (a *App) refreshButton(ctx *ui.Context, res ui.QueryResult[[]backend.InstalledApp],
 	ups ui.QueryResult[map[string]string]) ui.Element {
@@ -118,9 +154,12 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 			}
 			return app, nil
 		}, ui.QueryStaleTime(time.Hour))
-		name, icon, appID, summary := in.Name, "", in.AppID, ""
+		name, icon, appID, summary := in.Name, in.Icon, in.AppID, ""
 		if app := match.Data; app != nil {
-			name, icon, appID, summary = app.Name, app.IconURL, app.ID, app.Summary
+			name, appID, summary = app.Name, app.ID, app.Summary
+			if app.IconURL != "" {
+				icon = app.IconURL
+			}
 		}
 		_, busy := a.running(appID)
 
@@ -134,7 +173,12 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 		case "user":
 			meta = append(meta, "for you")
 		}
-		if in.Origin == "local file" {
+		switch {
+		case in.Source == catalog.SourceAppImage && in.Origin != "":
+			meta = append(meta, "updates from "+in.Origin)
+		case in.Source == catalog.SourceAppImage:
+			meta = append(meta, "doesn't update itself")
+		case in.Origin == "local file":
 			meta = append(meta, "installed from a file")
 		}
 

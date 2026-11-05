@@ -22,6 +22,8 @@ const (
 	SourceCOPR     SourceID = "copr"
 	SourceHomebrew SourceID = "homebrew"
 	SourceGitHub   SourceID = "github"
+	// SourceAppImage is AppImages the user added from files. The catalog has no listings from it.
+	SourceAppImage SourceID = "appimage"
 )
 
 // Name is the source's name for people, such as "Flathub".
@@ -37,6 +39,8 @@ func (s SourceID) Name() string {
 		return "COPR"
 	case SourceGitHub:
 		return "GitHub"
+	case SourceAppImage:
+		return "AppImage"
 	}
 	return string(s)
 }
