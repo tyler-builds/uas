@@ -58,8 +58,10 @@ All endpoints below need confirming during the first spike.
   fetcher reads the release and updates repos' `primary.xml` for package versions, then extracts the AppStream
   XML from that RPM (a small built-in RPM/cpio reader). It indexes the two newest releases on the mirror,
   because Bazzite can have the next release staged before it boots it. Each listing carries a `distro`
-  (such as `fedora-45`) and a `package` name. Only components whose package is in the repos are kept. Icons
-  are only in AppStream's icon tarballs, so Fedora-only apps have no icon until icons are mirrored to R2.
+  (such as `fedora-45`) and a `package` name. Only components whose package is in the repos are kept. Most icons
+  ship only as files inside appstream-data (`swcatalog/icons/fedora/128x128/`), so the fetcher extracts the
+  largest one each app names and publishes it to R2 with the GitHub icons, named by its SHA-256. Apps that
+  name only a theme icon (a "stock" icon) have none.
 - **COPR:** COPR API v3 lists all ~43,000 projects (43 pages, about 4 minutes). Kept: projects listed on
   COPR's front page, with AppStream metadata turned on, building for one of the two newest Fedora releases
   (~430). Each one's chroot repo is read for AppStream data and package versions, eight projects at a time,
@@ -98,7 +100,10 @@ All endpoints below need confirming during the first spike.
   to four screenshots come from the README: images named like screenshots first, never badges or logos.
   Failing that, they come from picture files in the repo named like screenshots (`screenshots/main.png`,
   `docs/screenshot-dark.png`, a `screens/` folder, `demo.gif`), shallowest first, leaving out vendored code,
-  tests and icons. Every screenshot is checked by reading the start of the file: a picture of at least
+  tests and icons. An app whose AppImage has no icon (or that ships no AppImage) gets one from the repo's
+  files: the Linux icon theme folders (`hicolor/256x256/apps/`, `hicolor/scalable/apps/`), Tauri's and
+  electron-builder's standard places, then `icon.png` or `logo.png` near the top, if roughly square. Every
+  screenshot is checked by reading the start of the file: a picture of at least
   480×270, no narrower than 1:3, and not a social card (1280×640 or 1200×630). What was found is kept per release file
   (`github/media` in the indexer cache), so only new versions are read again.
 
@@ -376,8 +381,7 @@ uas/
    AppStream IDs and refs, and lists the choices when a name is ambiguous.
 6. **GitHub:** fetcher, trust scoring, AppImage and Flatpak bundle installer, update tracking. Done.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling. Done (live install untested; see above).
-8. **Jamb UI:** Discover, app pages, Installed, Updates, Settings. Done. Follow-up: icons for apps whose
-   catalog entry has only cached icons (some Fedora and KDE apps).
+8. **Jamb UI:** Discover, app pages, Installed, Updates, Settings. Done.
 
 ## Decisions
 

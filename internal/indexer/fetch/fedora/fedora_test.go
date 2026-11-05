@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -88,11 +91,14 @@ const appstreamXML = `<?xml version="1.0"?>
     <name>Example Editor</name>
     <summary>Edit text</summary>
     <url type="homepage">https://example.org/editor</url>
+    <icon type="cached" width="64" height="64">example-editor.png</icon>
+    <icon type="cached" width="128" height="128">example-editor.png</icon>
   </component>
   <component type="desktop">
     <id>oldtool.desktop</id>
     <pkgname>oldtool</pkgname>
     <name>Old Tool</name>
+    <icon type="cached" width="64" height="64">oldtool.png</icon>
   </component>
   <component type="desktop-application">
     <id>org.example.Gone</id>
@@ -152,7 +158,11 @@ func repomd(primary string) []byte {
 }
 
 func TestFetch(t *testing.T) {
-	rpm := buildRPM(t, map[string][]byte{"./usr/share/swcatalog/xml/fedora.xml.gz": gz(appstreamXML)})
+	icon64, icon128 := []byte("png 64"), []byte("png 128")
+	rpm := buildRPM(t, map[string][]byte{"./usr/share/swcatalog/xml/fedora.xml.gz": gz(appstreamXML),
+		"./usr/share/swcatalog/icons/fedora/64x64/example-editor.png":   icon64,
+		"./usr/share/swcatalog/icons/fedora/128x128/example-editor.png": icon128,
+		"./usr/share/swcatalog/icons/fedora/64x64/unrelated.png":        []byte("png")})
 	files := map[string][]byte{
 		"/releases/45/Everything/x86_64/os/repodata/repomd.xml": repomd("repodata/abc-primary.xml.gz"),
 		"/releases/45/Everything/x86_64/os/repodata/abc-primary.xml.gz": primaryXML(
@@ -178,7 +188,9 @@ func TestFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := &Fetcher{Client: srv.Client(), CacheDir: t.TempDir(), Arch: "x86_64", Mirror: srv.URL}
+	icons := t.TempDir()
+	f := &Fetcher{Client: srv.Client(), CacheDir: t.TempDir(), Arch: "x86_64", Mirror: srv.URL,
+		IconDir: icons, IconBase: "https://catalog.example/"}
 	ls, err := f.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -193,6 +205,16 @@ func TestFetch(t *testing.T) {
 	}
 	if ls[1].AppStreamID != "oldtool.desktop" || ls[1].Kind != catalog.KindDesktopApp {
 		t.Errorf("old tool = %+v", ls[1])
+	}
+	// The editor's largest cached icon is saved and published; the old tool's icon file is missing.
+	sum := sha256.Sum256(icon128)
+	name := hex.EncodeToString(sum[:]) + ".png"
+	if ed.IconURL != "https://catalog.example/icons/"+name || ls[1].IconURL != "" {
+		t.Errorf("icons = %q, %q", ed.IconURL, ls[1].IconURL)
+	}
+	saved, _ := os.ReadDir(icons)
+	if len(saved) != 1 || saved[0].Name() != name {
+		t.Errorf("saved icons = %v", saved)
 	}
 }
 

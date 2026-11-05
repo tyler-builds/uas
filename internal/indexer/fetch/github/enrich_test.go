@@ -132,7 +132,7 @@ func TestRepoScreenshots(t *testing.T) {
 	srv := readmeServer(t, "", files, pics)
 	f := &Fetcher{Client: srv.Client(), Token: "t", RESTEndpoint: srv.URL, RawEndpoint: srv.URL + "/raw"}
 	var urls []string
-	for _, s := range f.repoScreenshots(context.Background(), "o/r") {
+	for _, s := range f.repoScreenshots(context.Background(), "o/r", files) {
 		urls = append(urls, strings.TrimPrefix(s.URL, srv.URL+"/raw/o/r/HEAD/"))
 	}
 	want := []string{"screenshots/main%20window.png", ".github/screenshots/dark.png",
@@ -232,5 +232,61 @@ func TestEnrichAppImage(t *testing.T) {
 	f.enrich(context.Background(), again)
 	if reads != before || again[0].IconURL != l.IconURL || again[0].Name != "T3 Code" {
 		t.Errorf("second run read the AppImage again (%d reads) or differs: %+v", reads-before, again[0])
+	}
+}
+
+func TestRepoIcon(t *testing.T) {
+	files := []string{
+		"README.md",
+		"docs/logo.png",           // a wordmark: not square
+		"node_modules/x/icon.png", // someone else's
+		"data/icons/hicolor/48x48/apps/org.example.App.png", // too small a theme size, but square
+		"data/icons/hicolor/256x256/apps/org.example.App.png",
+		"data/icons/hicolor/symbolic/apps/org.example.App-symbolic.svg",
+		"icon.png",
+	}
+	pics := map[string][]byte{
+		"/raw/o/r/HEAD/docs/logo.png":                                     pngOf(600, 200),
+		"/raw/o/r/HEAD/node_modules/x/icon.png":                           pngOf(256, 256),
+		"/raw/o/r/HEAD/data/icons/hicolor/48x48/apps/org.example.App.png": pngOf(48, 48),
+		"/raw/o/r/HEAD/icon.png":                                          pngOf(128, 128),
+	}
+	// The 256 px theme icon is the best candidate but missing; the 48 px one is too small; icon.png is next.
+	srv := readmeServer(t, "", files, pics)
+	f := &Fetcher{Client: srv.Client(), Token: "t", RESTEndpoint: srv.URL, RawEndpoint: srv.URL + "/raw",
+		MediaDir: t.TempDir()}
+	name := f.repoIcon(context.Background(), "o/r", files)
+	want, _ := f.saveIcon(pngOf(128, 128), ".png")
+	if name == "" || name != want {
+		t.Errorf("icon = %q, want %q (icon.png)", name, want)
+	}
+
+	// A square SVG from the theme folder wins over everything.
+	files = append(files, "data/icons/hicolor/scalable/apps/org.example.App.svg")
+	pics["/raw/o/r/HEAD/data/icons/hicolor/scalable/apps/org.example.App.svg"] =
+		[]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128"/></svg>`)
+	if name := f.repoIcon(context.Background(), "o/r", files); !strings.HasSuffix(name, ".svg") {
+		t.Errorf("icon = %q, want the SVG", name)
+	}
+}
+
+func TestSquareIcon(t *testing.T) {
+	for _, c := range []struct {
+		b    []byte
+		ext  string
+		want bool
+	}{
+		{pngOf(256, 256), ".png", true},
+		{pngOf(256, 240), ".png", true},
+		{pngOf(400, 100), ".png", false},
+		{pngOf(32, 32), ".png", false},
+		{[]byte(`<svg width="64" height="64"></svg>`), ".svg", true},
+		{[]byte(`<svg viewBox="0 0 300 80"></svg>`), ".svg", false},
+		{[]byte(`<svg></svg>`), ".svg", true}, // shape unknown
+		{[]byte(`not an svg`), ".svg", false},
+	} {
+		if got := squareIcon(c.b, c.ext); got != c.want {
+			t.Errorf("squareIcon(%.30q) = %v, want %v", c.b, got, c.want)
+		}
 	}
 }

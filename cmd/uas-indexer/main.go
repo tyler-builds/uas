@@ -90,13 +90,14 @@ func main() {
 		os.Exit(2)
 	}
 	client := &http.Client{Timeout: 10 * time.Minute}
-	// What GitHub apps say about themselves inside their AppImages: names, icons, screenshots.
+	// What GitHub apps say about themselves inside their AppImages: names, icons, screenshots. Fedora's icons
+	// are kept here too, so one upload step publishes both.
 	mediaDir := filepath.Join(*cache, "github", "media")
 	available := map[string]fetch.Fetcher{
 		"flathub": &flathub.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "flathub"), Arch: *arch,
 			File: *flathubFile},
 		"fedora": &fedora.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "fedora"), Arch: *arch,
-			Releases: releases, Log: log},
+			Releases: releases, IconDir: github.IconDir(mediaDir), IconBase: *publishURL, Log: log},
 		"homebrew": &homebrew.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "homebrew"), Arch: *arch},
 		"copr": &fetch.Cached{
 			Fetcher: &copr.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "copr"), Arch: *arch,

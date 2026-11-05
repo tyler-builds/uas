@@ -8,6 +8,8 @@ package fedora
 import (
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -37,6 +40,10 @@ type Fetcher struct {
 	// Releases to index. If empty, the two newest releases on the mirror are used, which covers systems that
 	// have a newer release staged for the next boot.
 	Releases []int
+	// IconDir, when set, is where icons that appstream-data ships as files (for apps with no icon on the
+	// web) are saved, named by their SHA-256, to be published under IconBase/icons/.
+	IconDir  string
+	IconBase string
 	Log      *slog.Logger
 }
 
@@ -163,7 +170,7 @@ func (f *Fetcher) fetchRelease(ctx context.Context, n int) ([]catalog.Listing, e
 	if err != nil {
 		return nil, err
 	}
-	return listingsFromAppStreamRPM(rpmPath, n, pkgs)
+	return f.listingsFromAppStreamRPM(rpmPath, n, pkgs)
 }
 
 // isCatalogXML matches the AppStream catalog files inside appstream-data.
@@ -172,16 +179,18 @@ func isCatalogXML(name string) bool {
 		(strings.HasSuffix(name, ".xml") || strings.HasSuffix(name, ".xml.gz"))
 }
 
-func listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]rpmrepo.Package) ([]catalog.Listing, error) {
-	f, err := os.Open(rpmPath)
+func (f *Fetcher) listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]rpmrepo.Package) (
+	[]catalog.Listing, error) {
+	file, err := os.Open(rpmPath)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer file.Close()
 
 	var listings []catalog.Listing
+	cached := map[int][]string{} // listing index to the file names of its cached icons, best first
 	files := 0
-	err = extractFiles(f, isCatalogXML, func(name string, data io.Reader) error {
+	err = extractFiles(file, isCatalogXML, func(name string, data io.Reader) error {
 		files++
 		r := data
 		if strings.HasSuffix(name, ".gz") {
@@ -194,6 +203,11 @@ func listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]rpmre
 		}
 		return appstream.Parse(r, func(c *appstream.Component) error {
 			if l, ok := toListing(c, release, pkgs); ok {
+				if l.IconURL == "" {
+					if names := cachedIcons(c); len(names) > 0 {
+						cached[len(listings)] = names
+					}
+				}
 				listings = append(listings, l)
 			}
 			return nil
@@ -205,7 +219,87 @@ func listingsFromAppStreamRPM(rpmPath string, release int, pkgs map[string]rpmre
 	if files == 0 {
 		return nil, errors.New("no AppStream catalog found in appstream-data")
 	}
+	if f.IconDir != "" && f.IconBase != "" && len(cached) > 0 {
+		if err := f.addCachedIcons(rpmPath, listings, cached); err != nil && f.Log != nil {
+			f.Log.Warn("fedora icons from appstream-data skipped", "err", err)
+		}
+	}
 	return listings, nil
+}
+
+// cachedIcons returns the file names of a component's cached icons, the largest first.
+func cachedIcons(c *appstream.Component) []string {
+	var icons []appstream.Icon
+	for _, ic := range c.Icons {
+		if ic.Type == "cached" && ic.Value != "" && !strings.Contains(ic.Value, "/") && ic.Scale <= 1 {
+			icons = append(icons, ic)
+		}
+	}
+	sort.SliceStable(icons, func(i, j int) bool { return icons[i].Width > icons[j].Width })
+	var names []string
+	for _, ic := range icons {
+		names = append(names, fmt.Sprintf("%dx%d/%s", ic.Width, ic.Height, ic.Value))
+	}
+	return names
+}
+
+// iconFile matches the icon files in appstream-data: /usr/share/swcatalog/icons/fedora/128x128/app.png
+// (older releases: /usr/share/app-info/icons/fedora/...).
+var iconFile = regexp.MustCompile(`/(?:swcatalog|app-info)/icons/[^/]+/(\d+x\d+/[^/]+\.png)$`)
+
+// addCachedIcons reads the icon files that listings name out of appstream-data, saves them in IconDir under
+// their hash and points the listings at their published address.
+func (f *Fetcher) addCachedIcons(rpmPath string, listings []catalog.Listing, cached map[int][]string) error {
+	want := map[string]bool{}
+	for _, names := range cached {
+		for _, n := range names {
+			want[n] = true
+		}
+	}
+	found := map[string][]byte{} // "128x128/app.png" to its contents
+	file, err := os.Open(rpmPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	err = extractFiles(file, func(name string) bool {
+		m := iconFile.FindStringSubmatch(name)
+		return m != nil && want[m[1]]
+	}, func(name string, data io.Reader) error {
+		b, err := io.ReadAll(io.LimitReader(data, 1<<20))
+		if err == nil {
+			found[iconFile.FindStringSubmatch(name)[1]] = b
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(f.IconDir, 0o755); err != nil {
+		return err
+	}
+	base := strings.TrimSuffix(f.IconBase, "/") + "/icons/"
+	added := 0
+	for i, names := range cached {
+		for _, n := range names {
+			b, ok := found[n]
+			if !ok {
+				continue
+			}
+			sum := sha256.Sum256(b)
+			name := hex.EncodeToString(sum[:]) + ".png"
+			if err := os.WriteFile(filepath.Join(f.IconDir, name), b, 0o644); err != nil {
+				return err
+			}
+			listings[i].IconURL = base + name
+			added++
+			break
+		}
+	}
+	if f.Log != nil {
+		f.Log.Info("fedora icons from appstream-data", "apps", added)
+	}
+	return nil
 }
 
 var packageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)

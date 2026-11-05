@@ -39,7 +39,7 @@ import (
 // carries the app's name, a one-line description, categories and icon (its desktop entry), and sometimes
 // AppStream metainfo with screenshots. Reading those takes a few range requests (about 400 KB) per AppImage.
 // Screenshots otherwise come from the images in the README, and failing that from picture files in the repo
-// named like screenshots.
+// named like screenshots. An app with no AppImage icon gets one from the repo's files (see repoIcon).
 //
 // What was found is kept per release file, so an app is read again only when it ships a new version.
 
@@ -66,7 +66,8 @@ const (
 // MediaVersion changes whenever what enrich reads changes, so cached facts and cached GitHub results made
 // the old way are not reused. 2: the right desktop entry when an image has several. 3: only the app's own
 // metainfo, not a bundled library's. 4: screenshots from repo files, and a size check on every screenshot.
-const MediaVersion = 4
+// 5: icons from repo files.
+const MediaVersion = 5
 
 // IconDir is where enrich keeps icons, under MediaDir. The publisher uploads them from here.
 func IconDir(mediaDir string) string { return filepath.Join(mediaDir, "icons") }
@@ -167,8 +168,21 @@ func (f *Fetcher) read(ctx context.Context, l catalog.Listing) facts {
 	if len(fc.Screenshots) == 0 {
 		fc.Screenshots = f.readmeScreenshots(ctx, l.Ref)
 	}
+	// The repo's files are listed only when needed, and at most once.
+	var files []string
+	listed := false
+	list := func() []string {
+		if !listed {
+			files, _ = f.repoFiles(ctx, l.Ref)
+			listed = true
+		}
+		return files
+	}
 	if len(fc.Screenshots) == 0 {
-		fc.Screenshots = f.repoScreenshots(ctx, l.Ref)
+		fc.Screenshots = f.repoScreenshots(ctx, l.Ref, list())
+	}
+	if fc.Icon == "" {
+		fc.Icon = f.repoIcon(ctx, l.Ref, list())
 	}
 	return fc
 }
@@ -403,11 +417,7 @@ const maxRepoShotDepth = 4 // folders deep
 
 // repoScreenshots returns up to maxScreenshots picture files in a repo named like screenshots, such as
 // screenshots/main.png or docs/screenshot-dark.png: shallowest first, and "screenshot" before "demo".
-func (f *Fetcher) repoScreenshots(ctx context.Context, repo string) []catalog.Screenshot {
-	paths, err := f.repoFiles(ctx, repo)
-	if err != nil {
-		return nil
-	}
+func (f *Fetcher) repoScreenshots(ctx context.Context, repo string, paths []string) []catalog.Screenshot {
 	type cand struct {
 		path        string
 		rank, depth int
@@ -437,25 +447,30 @@ func (f *Fetcher) repoScreenshots(ctx context.Context, repo string) []catalog.Sc
 		}
 		return a.path < b.path
 	})
-	raw := f.RawEndpoint
-	if raw == "" {
-		raw = "https://raw.githubusercontent.com"
-	}
 	var shots []catalog.Screenshot
 	for i, c := range cands {
 		if i >= 3*maxScreenshots || len(shots) == maxScreenshots {
 			break
 		}
-		segs := strings.Split(c.path, "/")
-		for k := range segs {
-			segs[k] = url.PathEscape(segs[k])
-		}
-		u := raw + "/" + repo + "/HEAD/" + strings.Join(segs, "/")
+		u := f.rawURL(repo, c.path)
 		if f.isPicture(ctx, u) {
 			shots = append(shots, catalog.Screenshot{URL: u})
 		}
 	}
 	return shots
+}
+
+// rawURL is the address of a file in a repo's default branch.
+func (f *Fetcher) rawURL(repo, file string) string {
+	raw := f.RawEndpoint
+	if raw == "" {
+		raw = "https://raw.githubusercontent.com"
+	}
+	segs := strings.Split(file, "/")
+	for k := range segs {
+		segs[k] = url.PathEscape(segs[k])
+	}
+	return raw + "/" + repo + "/HEAD/" + strings.Join(segs, "/")
 }
 
 // repoFiles lists the files in a repo's default branch (GitHub stops at about 100,000).
