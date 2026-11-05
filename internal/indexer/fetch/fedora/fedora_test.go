@@ -237,3 +237,32 @@ func TestRepoRelative(t *testing.T) {
 		}
 	}
 }
+
+// TestReadCPIOHardLinks reads every name of a hard-linked file, though only the last entry has the data.
+func TestReadCPIOHardLinks(t *testing.T) {
+	var a bytes.Buffer
+	entry := func(name string, ino, nlink int, data []byte) {
+		nameSize := int64(len(name) + 1)
+		fmt.Fprintf(&a, "070701%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x",
+			ino, 0o100644, 0, 0, nlink, 0, len(data), 0, 0, 0, 0, nameSize, 0)
+		a.WriteString(name + "\x00")
+		a.Write(make([]byte, pad4(110+nameSize)))
+		a.Write(data)
+		a.Write(make([]byte, pad4(int64(len(data)))))
+	}
+	entry("./icons/a.png", 7, 3, nil)
+	entry("./icons/b.png", 7, 3, nil)
+	entry("./icons/plain.png", 8, 1, []byte("plain"))
+	entry("./icons/c.png", 7, 3, []byte("shared"))
+	entry("TRAILER!!!", 0, 1, nil)
+	got := map[string]string{}
+	err := readCPIO(&a, func(n string) bool { return n != "./icons/b.png" }, func(n string, r io.Reader) error {
+		b, err := io.ReadAll(r)
+		got[n] = string(b)
+		return err
+	})
+	want := map[string]string{"./icons/a.png": "shared", "./icons/plain.png": "plain", "./icons/c.png": "shared"}
+	if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("got %v, %v; want %v", got, err, want)
+	}
+}

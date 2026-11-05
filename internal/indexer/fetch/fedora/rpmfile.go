@@ -118,9 +118,12 @@ func readHeader(r io.Reader, pad bool) (map[int32]string, error) {
 	return tags, nil
 }
 
-// readCPIO walks a cpio archive in the "newc" format that RPM uses.
+// readCPIO walks a cpio archive in the "newc" format that RPM uses. Hard-linked files (appstream-data
+// links identical icons) carry their data only in the last of their entries; the others are empty, so
+// wanted names are held until the data comes.
 func readCPIO(r io.Reader, want func(string) bool, fn func(string, io.Reader) error) error {
 	var hdr [110]byte
+	linked := map[int64][]string{} // inode to wanted names still waiting for its data
 	for {
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
 			return fmt.Errorf("cpio: %w", err)
@@ -132,10 +135,12 @@ func readCPIO(r io.Reader, want func(string) bool, fn func(string, io.Reader) er
 		field := func(i int) (int64, error) {
 			return strconv.ParseInt(string(hdr[6+8*i:14+8*i]), 16, 64)
 		}
+		ino, err0 := field(0)
 		mode, err1 := field(1)
+		nlink, err4 := field(4)
 		size, err2 := field(6)
 		nameSize, err3 := field(11)
-		if err := errors.Join(err1, err2, err3); err != nil {
+		if err := errors.Join(err0, err1, err2, err3, err4); err != nil {
 			return fmt.Errorf("cpio: %w", err)
 		}
 		if nameSize <= 0 || nameSize > 4096 || size < 0 {
@@ -153,7 +158,31 @@ func readCPIO(r io.Reader, want func(string) bool, fn func(string, io.Reader) er
 
 		const typeMask, regular = 0o170000, 0o100000
 		body := io.LimitReader(r, size)
-		if mode&typeMask == regular && want(path) {
+		switch {
+		case mode&typeMask != regular:
+		case nlink > 1 && size == 0:
+			if want(path) {
+				linked[ino] = append(linked[ino], path)
+			}
+		case nlink > 1 && (len(linked[ino]) > 0 || want(path)):
+			names := linked[ino]
+			delete(linked, ino)
+			if want(path) {
+				names = append(names, path)
+			}
+			if size > maxExtractedFile {
+				return fmt.Errorf("cpio: %s is too large", path)
+			}
+			data, err := io.ReadAll(body)
+			if err != nil {
+				return fmt.Errorf("cpio: %w", err)
+			}
+			for _, n := range names {
+				if err := fn(n, bytes.NewReader(data)); err != nil {
+					return err
+				}
+			}
+		case want(path):
 			if size > maxExtractedFile {
 				return fmt.Errorf("cpio: %s is too large", path)
 			}
