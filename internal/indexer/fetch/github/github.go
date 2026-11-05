@@ -78,8 +78,9 @@ type Fetcher struct {
 	MediaDir string
 	// IconBase is the address icons are published under: an icon is at IconBase/icons/<file>.
 	IconBase string
-	// RESTEndpoint is GitHub's REST API, for tests.
+	// RESTEndpoint is GitHub's REST API, and RawEndpoint where it serves repo files, for tests.
 	RESTEndpoint string
+	RawEndpoint  string
 	Endpoint     string
 	Log          *slog.Logger
 	Now          func() time.Time

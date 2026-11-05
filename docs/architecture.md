@@ -95,8 +95,11 @@ All endpoints below need confirming during the first spike.
   file). It reads the same squashfs as the client (`internal/client/appimage.InspectAt`). The desktop entry
   gives the app's real name, a one-line summary (used when the repo has no description), categories and the
   icon. AppStream metainfo, when the AppImage ships one, gives a description and screenshots. Otherwise up
-  to four screenshots come from the README: images named like screenshots first, never badges or logos,
-  each checked with a HEAD request to be a picture. What was found is kept per release file
+  to four screenshots come from the README: images named like screenshots first, never badges or logos.
+  Failing that, they come from picture files in the repo named like screenshots (`screenshots/main.png`,
+  `docs/screenshot-dark.png`, a `screens/` folder, `demo.gif`), shallowest first, leaving out vendored code,
+  tests and icons. Every screenshot is checked by reading the start of the file: a picture of at least
+  480×270, no narrower than 1:3, and not a social card (1280×640 or 1200×630). What was found is kept per release file
   (`github/media` in the indexer cache), so only new versions are read again.
 
   Icons are scaled to at most 256 px, named by their SHA-256 and uploaded to R2 before the catalog

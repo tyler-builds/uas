@@ -38,17 +38,32 @@ func TestResolveImage(t *testing.T) {
 	}
 }
 
-// readmeServer serves a README through a fake REST API and answers HEAD requests for the pictures in it.
-func readmeServer(t *testing.T, readme string) *httptest.Server {
+// pngOf is a blank PNG picture of the given size.
+func pngOf(w, h int) []byte {
+	var b bytes.Buffer
+	png.Encode(&b, image.NewGray(image.Rect(0, 0, w, h)))
+	return b.Bytes()
+}
+
+// readmeServer serves a README and a repo's file list through a fake REST API, and the pictures in pics
+// (by path) with their files.
+func readmeServer(t *testing.T, readme string, files []string, pics map[string][]byte) *httptest.Server {
 	var srv *httptest.Server
 	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/readme"):
+		case strings.HasSuffix(r.URL.Path, "/readme") && readme != "":
 			json.NewEncoder(w).Encode(map[string]string{"encoding": "base64",
 				"content":      base64.StdEncoding.EncodeToString([]byte(readme)),
 				"download_url": srv.URL + "/raw/README.md"})
-		case r.URL.Path == "/raw/docs/main.png" || r.URL.Path == "/raw/docs/screenshot-dark.png":
+		case strings.HasSuffix(r.URL.Path, "/git/trees/HEAD"):
+			var tree []map[string]string
+			for _, p := range files {
+				tree = append(tree, map[string]string{"path": p, "type": "blob"})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"tree": tree})
+		case pics[r.URL.Path] != nil:
 			w.Header().Set("Content-Type", "image/png")
+			http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(pics[r.URL.Path]))
 		case strings.HasSuffix(r.URL.Path, ".gif"):
 			w.Header().Set("Content-Type", "text/html") // a page pretending to be a picture
 		default:
@@ -67,16 +82,61 @@ func TestReadmeScreenshots(t *testing.T) {
 ![](docs/fake.gif)
 <img alt="A screenshot" src="docs/screenshot-dark.png"/>
 ![missing](docs/missing.png)
+![Toolbar](docs/toolbar.png)
+![Social card](docs/card-screen.png)
 `
-	srv := readmeServer(t, readme)
+	srv := readmeServer(t, readme, nil, map[string][]byte{"/raw/docs/main.png": pngOf(1280, 800),
+		"/raw/docs/screenshot-dark.png": pngOf(1280, 800), "/raw/docs/toolbar.png": pngOf(1280, 40),
+		"/raw/docs/card-screen.png": pngOf(1280, 640)})
 	f := &Fetcher{Client: srv.Client(), Token: "t", RESTEndpoint: srv.URL}
 	shots := f.readmeScreenshots(context.Background(), "o/r")
 	var urls []string
 	for _, s := range shots {
 		urls = append(urls, strings.TrimPrefix(s.URL, srv.URL))
 	}
-	// The one named like a screenshot comes first; the badge, logo, fake picture and missing file are left out.
+	// The one named like a screenshot comes first. The badge, logo, fake picture, missing file and the strip
+	// too thin to be a screenshot and the social card are left out.
 	want := []string{"/raw/docs/screenshot-dark.png", "/raw/docs/main.png"}
+	if strings.Join(urls, " ") != strings.Join(want, " ") {
+		t.Errorf("screenshots = %q, want %q", urls, want)
+	}
+}
+
+func TestRepoScreenshots(t *testing.T) {
+	files := []string{
+		"README.md",
+		"docs/demo.gif",                        // a demo, after the screenshots
+		"screenshots/main window.png",          // shallow and named like one: first
+		"screenshots/settings.png",             // too small
+		"assets/screenshots/editor.webp",       // not served: left out
+		".github/screenshots/dark.png",         // a hidden folder is fine
+		"node_modules/x/screenshot.png",        // someone else's
+		"src/tests/__screenshots__/button.png", // a test's
+		"res/icons/screenshot.png",             // an icon
+		"a/b/c/d/e/screenshot.png",             // too deep
+		"docs/screenshot-guide.md",             // not a picture
+		"web/public/screens/dashboard.jpg",     // a "screens" folder, after the "screenshot" ones
+		"docs/screenshot@2x.png",               // a copy at double size
+		"assets/preview.png",                   // usually a social card
+	}
+	pics := map[string][]byte{
+		"/raw/o/r/HEAD/screenshots/main window.png":      pngOf(1600, 1000),
+		"/raw/o/r/HEAD/screenshots/settings.png":         pngOf(300, 200),
+		"/raw/o/r/HEAD/.github/screenshots/dark.png":     pngOf(1600, 1000),
+		"/raw/o/r/HEAD/web/public/screens/dashboard.jpg": pngOf(1600, 1000),
+		"/raw/o/r/HEAD/docs/demo.gif":                    pngOf(1600, 1000),
+		"/raw/o/r/HEAD/node_modules/x/screenshot.png":    pngOf(1600, 1000),
+		"/raw/o/r/HEAD/a/b/c/d/e/screenshot.png":         pngOf(1600, 1000),
+		"/raw/o/r/HEAD/assets/preview.png":               pngOf(1600, 1000),
+	}
+	srv := readmeServer(t, "", files, pics)
+	f := &Fetcher{Client: srv.Client(), Token: "t", RESTEndpoint: srv.URL, RawEndpoint: srv.URL + "/raw"}
+	var urls []string
+	for _, s := range f.repoScreenshots(context.Background(), "o/r") {
+		urls = append(urls, strings.TrimPrefix(s.URL, srv.URL+"/raw/o/r/HEAD/"))
+	}
+	want := []string{"screenshots/main%20window.png", ".github/screenshots/dark.png",
+		"web/public/screens/dashboard.jpg", "docs/demo.gif"}
 	if strings.Join(urls, " ") != strings.Join(want, " ") {
 		t.Errorf("screenshots = %q, want %q", urls, want)
 	}

@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
@@ -17,11 +19,14 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/appimage"
@@ -33,7 +38,8 @@ import (
 // A GitHub repo says little about the app it ships: no icon, often no description. The AppImage itself
 // carries the app's name, a one-line description, categories and icon (its desktop entry), and sometimes
 // AppStream metainfo with screenshots. Reading those takes a few range requests (about 400 KB) per AppImage.
-// Screenshots otherwise come from the images in the README.
+// Screenshots otherwise come from the images in the README, and failing that from picture files in the repo
+// named like screenshots.
 //
 // What was found is kept per release file, so an app is read again only when it ships a new version.
 
@@ -59,8 +65,8 @@ const (
 
 // MediaVersion changes whenever what enrich reads changes, so cached facts and cached GitHub results made
 // the old way are not reused. 2: the right desktop entry when an image has several. 3: only the app's own
-// metainfo, not a bundled library's.
-const MediaVersion = 3
+// metainfo, not a bundled library's. 4: screenshots from repo files, and a size check on every screenshot.
+const MediaVersion = 4
 
 // IconDir is where enrich keeps icons, under MediaDir. The publisher uploads them from here.
 func IconDir(mediaDir string) string { return filepath.Join(mediaDir, "icons") }
@@ -160,6 +166,9 @@ func (f *Fetcher) read(ctx context.Context, l catalog.Listing) facts {
 	}
 	if len(fc.Screenshots) == 0 {
 		fc.Screenshots = f.readmeScreenshots(ctx, l.Ref)
+	}
+	if len(fc.Screenshots) == 0 {
+		fc.Screenshots = f.repoScreenshots(ctx, l.Ref)
 	}
 	return fc
 }
@@ -292,23 +301,54 @@ func (f *Fetcher) readmeScreenshots(ctx context.Context, repo string) []catalog.
 	return append(hinted, other...)[:min(maxScreenshots, len(hinted)+len(other))]
 }
 
-// isPicture checks that an address serves a picture (not a video or a page) of a sensible size.
+// Screenshots smaller than this, or narrower than 1:3, are icons, buttons or strips, not screenshots.
+// Pictures exactly the size of a social card (GitHub's 1280x640, the usual 1200x630) are logo cards.
+const (
+	minShotWidth  = 480
+	minShotHeight = 270
+	pictureHead   = 128 << 10 // enough of a picture to find its size
+)
+
+// isPicture checks that an address serves a picture (not a video or a page) of a sensible size, from the
+// start of the file.
 func (f *Fetcher) isPicture(ctx context.Context, u string) bool {
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(c, http.MethodHead, u, nil)
+	req, err := http.NewRequestWithContext(c, http.MethodGet, u, nil)
 	if err != nil {
 		return false
 	}
 	req.Header.Set("User-Agent", fetch.UserAgent)
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", pictureHead-1))
 	resp, err := f.Client.Do(req)
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	ct := resp.Header.Get("Content-Type")
-	return resp.StatusCode == http.StatusOK && strings.HasPrefix(ct, "image/") && !strings.Contains(ct, "svg") &&
-		resp.ContentLength < 15<<20
+	if (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent) ||
+		!strings.HasPrefix(ct, "image/") || strings.Contains(ct, "svg") || pictureSize(resp) >= 15<<20 {
+		return false
+	}
+	cfg, _, err := image.DecodeConfig(io.LimitReader(resp.Body, pictureHead))
+	if err != nil {
+		return false
+	}
+	w, h := cfg.Width, cfg.Height
+	if (w == 1280 && h == 640) || (w == 1200 && h == 630) {
+		return false
+	}
+	return w >= minShotWidth && h >= minShotHeight && w <= 3*h && h <= 3*w
+}
+
+// pictureSize is a response's whole file size: the total in Content-Range for a partial response.
+func pictureSize(resp *http.Response) int64 {
+	if _, total, ok := strings.Cut(resp.Header.Get("Content-Range"), "/"); ok {
+		if n, err := strconv.ParseInt(total, 10, 64); err == nil {
+			return n
+		}
+	}
+	return resp.ContentLength
 }
 
 // resolveImage makes an image address absolute, and returns "" for anything that isn't a picture on the
@@ -348,35 +388,130 @@ func resolveImage(src, base string) string {
 	return ""
 }
 
-// readme returns a repo's README as text, and the address relative images in it are resolved against.
-func (f *Fetcher) readme(ctx context.Context, repo string) (string, string, error) {
+// Repo files that are screenshots: by name, then a demo picture. ("preview" is mostly a social card.) notRepoShot leaves out
+// pictures in vendored code, tests, docs of other things, and icons.
+var (
+	repoShotName = regexp.MustCompile(`(?i)screen.?shots?|(^|/)screens?(/|[-_.])|(^|/)demo\.(png|jpe?g|webp|gif)$`)
+	repoPicture  = regexp.MustCompile(`(?i)\.(png|jpe?g|webp|gif)$`)
+	notRepoShot  = regexp.MustCompile(`(?i)(^|/)(node_modules|vendor|3rdparty|third_party|thirdparty|external|extern|deps|` +
+		`\.repos|\.yarn|tests?|testdata|fixtures?|__tests__|__screenshots__|spec|e2e|examples?|samples?|blog|contribute|` +
+		`bindings|plugins|evidence|rfcs?|case-studies|covers?|themes?|locales?|i18n|build|dist|out|Pods)/|` +
+		`icon|logo|favicon|badge|avatar|@[23]x\.`)
+)
+
+const maxRepoShotDepth = 4 // folders deep
+
+// repoScreenshots returns up to maxScreenshots picture files in a repo named like screenshots, such as
+// screenshots/main.png or docs/screenshot-dark.png: shallowest first, and "screenshot" before "demo".
+func (f *Fetcher) repoScreenshots(ctx context.Context, repo string) []catalog.Screenshot {
+	paths, err := f.repoFiles(ctx, repo)
+	if err != nil {
+		return nil
+	}
+	type cand struct {
+		path        string
+		rank, depth int
+	}
+	var cands []cand
+	for _, p := range paths {
+		depth := strings.Count(p, "/")
+		if depth > maxRepoShotDepth || !repoPicture.MatchString(p) || !repoShotName.MatchString(p) ||
+			notRepoShot.MatchString(p) {
+			continue
+		}
+		rank := 2
+		if m := strings.ToLower(repoShotName.FindString(p)); strings.Contains(m, "shot") {
+			rank = 0
+		} else if strings.Contains(m, "screen") {
+			rank = 1
+		}
+		cands = append(cands, cand{p, rank, depth})
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		a, b := cands[i], cands[j]
+		if a.rank != b.rank {
+			return a.rank < b.rank
+		}
+		if a.depth != b.depth {
+			return a.depth < b.depth
+		}
+		return a.path < b.path
+	})
+	raw := f.RawEndpoint
+	if raw == "" {
+		raw = "https://raw.githubusercontent.com"
+	}
+	var shots []catalog.Screenshot
+	for i, c := range cands {
+		if i >= 3*maxScreenshots || len(shots) == maxScreenshots {
+			break
+		}
+		segs := strings.Split(c.path, "/")
+		for k := range segs {
+			segs[k] = url.PathEscape(segs[k])
+		}
+		u := raw + "/" + repo + "/HEAD/" + strings.Join(segs, "/")
+		if f.isPicture(ctx, u) {
+			shots = append(shots, catalog.Screenshot{URL: u})
+		}
+	}
+	return shots
+}
+
+// repoFiles lists the files in a repo's default branch (GitHub stops at about 100,000).
+func (f *Fetcher) repoFiles(ctx context.Context, repo string) ([]string, error) {
+	var body struct {
+		Tree []struct {
+			Path string `json:"path"`
+			Type string `json:"type"`
+		} `json:"tree"`
+	}
+	if err := f.rest(ctx, "/repos/"+repo+"/git/trees/HEAD?recursive=1", 32<<20, &body); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range body.Tree {
+		if e.Type == "blob" {
+			out = append(out, e.Path)
+		}
+	}
+	return out, nil
+}
+
+// rest gets a GitHub REST API path into v, reading at most limit bytes.
+func (f *Fetcher) rest(ctx context.Context, path string, limit int64, v any) error {
 	api := f.RESTEndpoint
 	if api == "" {
 		api = "https://api.github.com"
 	}
 	c, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(c, http.MethodGet, api+"/repos/"+repo+"/readme", nil)
+	req, err := http.NewRequestWithContext(c, http.MethodGet, api+path, nil)
 	if err != nil {
-		return "", "", err
+		return err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+f.Token)
 	req.Header.Set("User-Agent", fetch.UserAgent)
 	resp, err := f.Client.Do(req)
 	if err != nil {
-		return "", "", err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("readme: %s", resp.Status)
+		return fmt.Errorf("%s: %s", path, resp.Status)
 	}
+	return json.NewDecoder(io.LimitReader(resp.Body, limit)).Decode(v)
+}
+
+// readme returns a repo's README as text, and the address relative images in it are resolved against.
+func (f *Fetcher) readme(ctx context.Context, repo string) (string, string, error) {
 	var body struct {
 		Content     string `json:"content"`
 		Encoding    string `json:"encoding"`
 		DownloadURL string `json:"download_url"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
+	if err := f.rest(ctx, "/repos/"+repo+"/readme", 4<<20, &body); err != nil {
 		return "", "", err
 	}
 	if body.Encoding != "base64" {
