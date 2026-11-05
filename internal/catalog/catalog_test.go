@@ -337,3 +337,50 @@ func TestSearchShort(t *testing.T) {
 		t.Errorf("results = %v", ids)
 	}
 }
+
+func TestCategoryWords(t *testing.T) {
+	got := categoryWords([]string{"WebBrowser", "IDE", "3DGraphics", "GUIDesigner", "P2P", "Office"})
+	want := []string{"web browser", "ide", "3d graphics", "gui designer", "p2p", "office"}
+	if !slices.Equal(got, want) {
+		t.Errorf("categoryWords = %q, want %q", got, want)
+	}
+}
+
+// TestSearchSynonyms finds apps by category words and by the names of well-known apps of their kind.
+func TestSearchSynonyms(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	app := func(id, name, summary string, categories ...string) App {
+		return App{ID: id, Kind: KindDesktopApp, Name: name, Summary: summary, Categories: categories,
+			Listings: []Listing{{Source: SourceFlathub, Ref: "app/" + id + "/x86_64/stable", Name: name}}}
+	}
+	apps := []App{
+		app("org.example.Calc", "Calc", "Work with numbers", "Office", "Spreadsheet"),
+		app("org.example.Builder", "Builder", "Write software", "Development", "IDE"),
+		app("org.example.Tagger", "Tagger", "Identify songs", "AudioVideo"),
+		app("org.example.Surf", "Surf", "Go places", "Network", "WebBrowser"),
+	}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for q, want := range map[string]string{
+		"excel":       "org.example.Calc",    // a synonym of a category word
+		"spreadsheet": "org.example.Calc",    // a category word
+		"ide":         "org.example.Builder", // whole word: not "identify"
+		"web browser": "org.example.Surf",
+		"browser":     "org.example.Surf",
+	} {
+		res, err := db.Search(context.Background(), q, SearchOptions{})
+		var ids []string
+		for _, r := range res {
+			ids = append(ids, r.ID)
+		}
+		if err != nil || len(ids) != 1 || ids[0] != want {
+			t.Errorf("Search(%q) = %v, %v; want only %s", q, ids, err, want)
+		}
+	}
+}

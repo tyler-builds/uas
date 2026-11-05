@@ -171,8 +171,10 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 				return err
 			}
 		}
-		// The ID is searchable too, through the keywords column, so "org.mozilla" finds Firefox.
-		keywords := strings.Join(append(append([]string{}, a.Keywords...), a.ID), " ")
+		// The ID and categories are searchable too, through the keywords column, so "org.mozilla" finds
+		// Firefox and "web browser" finds apps in the WebBrowser category.
+		keywords := strings.Join(append(append(append([]string{}, a.Keywords...), a.ID),
+			categoryWords(a.Categories)...), " ")
 		if _, err := insFTS.ExecContext(ctx, a.ID, a.Name, keywords, a.Summary, a.Developer,
 			a.Description); err != nil {
 			return err

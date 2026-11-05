@@ -121,14 +121,17 @@ func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]Sea
 	if len(words) == 0 {
 		return nil, nil
 	}
-	if len(words) == 1 && len([]rune(words[0])) <= 2 && orderBy(opt.Order) == "" {
+	if len(words) == 1 && len([]rune(words[0])) <= 2 && synonyms[words[0]] == nil && orderBy(opt.Order) == "" {
 		return d.searchShort(ctx, words[0], opt)
 	}
-	results, err := d.search(ctx, ftsQuery(words, "AND"), strings.Join(words, " "), opt)
+	// A word with synonyms names a kind of app ("office", "browser"), so an app whose name merely starts with
+	// it ("Office Runner") is no better a match than any other.
+	byName := len(words) > 1 || synonyms[words[0]] == nil
+	results, err := d.search(ctx, ftsQuery(words, "AND"), strings.Join(words, " "), byName, opt)
 	if err != nil || len(results) > 0 || len(words) == 1 {
 		return results, err
 	}
-	return d.search(ctx, ftsQuery(words, "OR"), strings.Join(words, " "), opt)
+	return d.search(ctx, ftsQuery(words, "OR"), strings.Join(words, " "), byName, opt)
 }
 
 // searchShort searches for one or two letters, as the first keystrokes of a search are. Nearly every app
@@ -149,14 +152,18 @@ func (d *DB) searchShort(ctx context.Context, word string, opt SearchOptions) ([
 	return scanResults(rows)
 }
 
-func (d *DB) search(ctx context.Context, match, exactName string, opt SearchOptions) ([]SearchResult, error) {
+func (d *DB) search(ctx context.Context, match, exactName string, byName bool, opt SearchOptions) (
+	[]SearchResult, error) {
 	// bm25 weights, one per FTS column: app_id, name, keywords, summary, developer, description.
-	// By relevance, an exact name match comes first, then names that start with the query as whole words
-	// ("Godot Engine" for "godot", before "Godots", which the stemmer also matches).
+	// By relevance, an exact name match comes first, then (when byName) names that start with the query as
+	// whole words ("Godot Engine" for "godot", before "Godots", which the stemmer also matches).
 	sort := orderBy(opt.Order)
 	if sort == "" {
-		sort = "lower(a.name) = ?2 DESC, lower(a.name) LIKE ?2 || ' %' DESC, " + // query words are letters and digits only
-			"bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
+		sort = "lower(a.name) = ?2 DESC, "
+		if byName {
+			sort += "lower(a.name) LIKE ?2 || ' %' DESC, " // query words are letters and digits only
+		}
+		sort += "bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
 	}
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT `+resultColumns+`
@@ -269,10 +276,21 @@ func queryWords(q string) []string {
 	})
 }
 
+// ftsQuery joins words with op. Each word matches as a prefix, except a word with synonyms, which matches
+// whole (so "ide" doesn't find "identify") or as any of its synonyms.
 func ftsQuery(words []string, op string) string {
 	parts := make([]string, len(words))
 	for i, w := range words {
-		parts[i] = `"` + w + `"*`
+		syns, ok := synonyms[w]
+		if !ok {
+			parts[i] = `"` + w + `"*`
+			continue
+		}
+		alts := []string{`"` + w + `"`}
+		for _, s := range syns {
+			alts = append(alts, `"`+s+`"`)
+		}
+		parts[i] = "(" + strings.Join(alts, " OR ") + ")"
 	}
 	return strings.Join(parts, " "+op+" ")
 }
