@@ -110,8 +110,9 @@ func main() {
 				SweepMinStars: github.DefaultSweepMinStars, SweepCache: filepath.Join(*cache, "github", "sweep.json"),
 				MediaDir: mediaDir, IconBase: *publishURL},
 			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
-			Key: fmt.Sprintf("schema=%d arch=%s queries=%s sweep=%d media=%d icons=%s", catalog.SchemaVersion, *arch,
-				strings.Join(github.DefaultQueries, "|"), github.DefaultSweepMinStars, github.MediaVersion, *publishURL),
+			Key: fmt.Sprintf("schema=%d arch=%s queries=%s sweep=%d media=%d listing=%d icons=%s",
+				catalog.SchemaVersion, *arch, strings.Join(github.DefaultQueries, "|"), github.DefaultSweepMinStars,
+				github.MediaVersion, github.ListingVersion, *publishURL),
 		},
 	}
 	var fetchers []fetch.Fetcher
