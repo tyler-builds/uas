@@ -29,6 +29,7 @@ func TestShots(t *testing.T) {
 		t.Fatal(err)
 	}
 	useBundledFont(t)
+	spotlightDay = func() int { return 0 } // the most popular app, so the shots don't change by the day
 	light, dark := Themes()
 	fp := &fakeBackend{src: catalog.SourceFlathub, installed: []backend.InstalledApp{
 		{Source: catalog.SourceFlathub, Ref: "app/org.mozilla.firefox/x86_64/stable", AppID: "org.mozilla.firefox", Name: "Firefox", Version: "159.0.1", Scope: "system"},

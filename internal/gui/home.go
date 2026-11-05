@@ -83,6 +83,9 @@ func (a *App) intro(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		}))
 }
 
+// spotlightDay picks the Spotlight app; the screenshot test pins it.
+var spotlightDay = func() int { return time.Now().YearDay() }
+
 // spotlight features one popular app, a different one each day: its name, summary and first screenshot,
 // with Install and a way to its page.
 func (a *App) spotlight(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResult]) ui.Element {
@@ -91,7 +94,7 @@ func (a *App) spotlight(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResu
 	if len(res.Data) == 0 {
 		return ui.Skeleton().Height(ui.Px(height))
 	}
-	r := res.Data[time.Now().YearDay()%len(res.Data)]
+	r := res.Data[spotlightDay()%len(res.Data)]
 	app := ui.Query(ctx, a.key("app", r.ID), func(c context.Context) (*catalog.App, error) {
 		db, err := a.catalog(c)
 		if err != nil {
