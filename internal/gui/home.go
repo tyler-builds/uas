@@ -125,9 +125,7 @@ func (a *App) spotlight(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResu
 		BackgroundGradient(ui.LinearGradient(120, t.Surface, t.Surface.Mix(glow, 0.06))).
 		Child(ui.Div().Column().Justify(ui.Center).Gap(space2).PaddingX(space8).Grow(1).Basis(ui.Px(0)).
 			MinWidth(ui.Px(0)).
-			Child(ui.Div().Row().Align(ui.Center).Gap(6).
-				Child(ui.Icon(icons.Sparkles).Size(13).Color(glow)).
-				Child(ui.Text("Spotlight").FontSize(12).Medium().TextColor(t.TextMuted))).
+			Child(ui.Text("Spotlight").FontSize(12).Medium().TextColor(t.TextMuted)).
 			Child(ui.Div().Row().Align(ui.Center).Gap(space3).MarginTop(space1).
 				Child(a.appIcon(ctx, r.IconURL, 44, r.Name)).
 				Child(ui.Text(r.Name).FontSize(22).Medium().Truncate())).

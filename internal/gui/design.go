@@ -242,15 +242,6 @@ func sourceColor(ctx *ui.Context, s catalog.SourceID) ui.Color { return tintColo
 const verifiedTip = "Flathub has confirmed that the publisher is the app's own developer, through the " +
 	"developer's website or code-hosting account"
 
-// sourcePill is a source's name as a labeled pill, for places that spell sources out (Settings).
-func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
-	c := sourceColor(ctx, s)
-	return ui.Div().Row().Align(ui.Center).Gap(6).PaddingX(10).Height(ui.Px(26)).Radius(13).Shrink(0).
-		Background(c.Alpha(0.14)).Tooltip(sourceTips[s]).
-		Child(ui.Icon(sourceIcons[s]).Size(14).Color(c)).
-		Child(ui.Text(s.Name()).FontSize(12.5).Semibold().TextColor(c))
-}
-
 // statusPill is a short "Ready" or "Not available" status.
 func statusPill(ctx *ui.Context, ok bool, label string) ui.Element {
 	t := ctx.Theme()
