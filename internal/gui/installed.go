@@ -55,7 +55,7 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 		Child(a.refreshButton(ctx, res, ups))
 	page := pageBody(listMaxWidth).
 		Child(a.listHeader(ctx, icons.RefreshCw, ui.Color{}, "Updates",
-			"Newer versions from Flathub, Homebrew and GitHub. Layered packages update with the system (ujust update).",
+			"Newer versions from Flathub, Homebrew and GitHub. Layered packages update with the system.",
 			actions))
 	switch {
 	case res.Loading || ups.Loading:

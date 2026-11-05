@@ -126,13 +126,14 @@ func (a *App) listHeader(ctx *ui.Context, icon *icons.Icon, color ui.Color, titl
 	if color == (ui.Color{}) {
 		color = t.Accent
 	}
-	return ui.Div().Row().Align(ui.Center).Gap(space4).
+	return ui.Div().Row().Align(ui.Start).Gap(space4).
 		Child(ui.Div().Size(ui.Px(56), ui.Px(56)).Radius(radiusM).Background(color.Alpha(0.15)).Center().Shrink(0).
 			Child(ui.Icon(icon).Size(28).Color(color))).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(title(titleText)).
 			Child(muted(ctx, sub))).
-		Child(trailing)
+		// Centered on the icon, so a description that wraps leaves the buttons where they were.
+		Child(ui.Div().Row().Align(ui.Center).Height(ui.Px(56)).Shrink(0).Child(trailing))
 }
 
 // sourcesPage explains each source and opens its list.

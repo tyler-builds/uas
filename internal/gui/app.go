@@ -301,7 +301,7 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 	// The selected item's fill marks it; no bar beside it.
 	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).NoIndicator().
 		OnChange(func(key string) { a.goTo(navView(key)) }).
-		Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space5).PaddingBottom(space3).
+		Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space4).PaddingBottom(space3).
 			Child(brandMark(ctx, 30)).
 			Child(ui.Text("uas").FontSize(18).Bold())).
 		Footer(a.sidebarFooter(ctx, info, ready))
