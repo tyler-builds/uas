@@ -204,7 +204,9 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
   `popularity` (the highest install count of its listings: Homebrew's installs-on-request in the past year,
   Flathub's last-month installs from its `collection/popular` API times 12, matched by the Flatpak ID in the
   listing's ref because an old-style AppStream ID such as `org.godotengine.Godot.desktop` differs from it) and a precomputed search `boost`
-  that multiplies the bm25 score, so well-known apps rank first.
+  that multiplies the bm25 score, so well-known apps rank first. Each app's freedesktop categories are
+  indexed as words ("WebBrowser" as "web browser"), and a short synonym list (`internal/catalog/synonyms.go`)
+  maps the names of well-known apps to their kind, so "excel" finds spreadsheets.
 - **state:** A local SQLite database of what UAS installed and from where (needed for GitHub apps, which nothing
   else tracks). Reconciled on startup against `flatpak list`, `brew list` and the rpm-ostree deployment, so
   installs made outside UAS still show up.
@@ -241,8 +243,13 @@ type Backend interface {
   icon are read from the squashfs image inside it (`internal/client/appimage`), without running it, and a
   launcher is written to `~/.local/share/applications/uas-<owner>__<repo>.desktop` with `Exec` rebuilt to run
   only the AppImage. Installs are recorded in `~/.local/share/uas/state.json` (`internal/client/state`).
-  Update compares the installed checksum with the catalog's current release. `.flatpak` bundles and `.rpm`
-  files from releases are in the catalog but not installable yet.
+  Update compares the installed checksum with the catalog's current release. A release with no AppImage but
+  a `.flatpak` bundle (with a published checksum) is installed with `flatpak install --user --bundle`, after
+  checking the download and reading the bundle's ref from its header; Flatpak fetches the runtime from
+  Flathub. Bundle installs are recorded in the same state file and hidden from the Flatpak backend's lists,
+  and an update that changes the bundle's branch removes the old one. `.rpm` files from releases are in the
+  catalog but not installable. Releases that ship only `.zip` or `.tar.gz` files are left out: of 482
+  popular repos found that way, nearly all were command-line tools and servers, which Homebrew covers.
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
   New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers
@@ -364,12 +371,10 @@ uas/
 4. **Fedora + rpm-ostree:** layering, reboot-needed state. Done.
 5. **Homebrew.** Done. `uas install tree` works by package name: the CLI resolves app IDs, package names,
    AppStream IDs and refs, and lists the choices when a name is ambiguous.
-6. **GitHub:** fetcher, trust scoring, AppImage installer, update tracking. Done. Follow-ups: installing
-   `.flatpak` bundles and `.rpm` files from releases.
+6. **GitHub:** fetcher, trust scoring, AppImage and Flatpak bundle installer, update tracking. Done.
 7. **COPR:** fetcher, trust scoring, pkexec repo enabling. Done (live install untested; see above).
-8. **Jamb UI:** Discover, app pages, Installed, Settings. Done. Follow-ups: an Updates page (available
-   updates per source), icons for apps whose catalog entry has only cached icons (some Fedora and KDE apps),
-   synonyms in search ("photo editor" doesn't find GIMP).
+8. **Jamb UI:** Discover, app pages, Installed, Updates, Settings. Done. Follow-up: icons for apps whose
+   catalog entry has only cached icons (some Fedora and KDE apps).
 
 ## Decisions
 
