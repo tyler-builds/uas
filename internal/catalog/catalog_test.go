@@ -384,3 +384,37 @@ func TestSearchSynonyms(t *testing.T) {
 		}
 	}
 }
+
+// TestSearchGenericByPopularity ranks a search for a kind of app by installs among apps that name the kind
+// in their name, summary or categories; apps that only mention it in their description, or only start a
+// word with it, come after.
+func TestSearchGenericByPopularity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	app := func(id, name, summary, description string, pop int) App {
+		return App{ID: id, Kind: KindDesktopApp, Name: name, Summary: summary, Description: description,
+			Popularity: pop, Listings: []Listing{{Source: SourceFlathub, Ref: "app/" + id + "/x86_64/stable", Name: name}}}
+	}
+	apps := []App{
+		app("org.example.Small", "Vault", "A password manager", "", 100),
+		app("org.example.Big", "Keys", "Password manager and secure wallet", "", 90000),
+		app("org.example.Vpn", "Tunnel", "Private networking", "Has a password manager built in.", 900000),
+		app("org.example.Managers", "Pass", "Managerless passwordless logins", "", 500000),
+	}
+	if err := Write(context.Background(), path, apps, BuildInfo{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	res, err := db.Search(context.Background(), "password manager", SearchOptions{})
+	var ids []string
+	for _, r := range res {
+		ids = append(ids, r.ID)
+	}
+	want := []string{"org.example.Big", "org.example.Small", "org.example.Managers", "org.example.Vpn"}
+	if err != nil || !slices.Equal(ids, want) {
+		t.Errorf("results = %v, %v; want %v", ids, err, want)
+	}
+}

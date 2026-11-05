@@ -206,7 +206,10 @@ about 15 minutes. Incremental fetching with ETags keeps it there; drop to every 
   listing's ref because an old-style AppStream ID such as `org.godotengine.Godot.desktop` differs from it) and a precomputed search `boost`
   that multiplies the bm25 score, so well-known apps rank first. Each app's freedesktop categories are
   indexed as words ("WebBrowser" as "web browser"), and a short synonym list (`internal/catalog/synonyms.go`)
-  maps the names of well-known apps to their kind, so "excel" finds spreadsheets.
+  maps the names of well-known apps to their kind, so "excel" finds spreadsheets. By relevance, an exact
+  name comes first, then names starting with the query. A search for a kind of app (several words, or a
+  word with synonyms) then puts apps with the words whole in their name, summary or categories, most
+  installed first, ahead of apps that only mention them in their description.
 - **state:** A local SQLite database of what UAS installed and from where (needed for GitHub apps, which nothing
   else tracks). Reconciled on startup against `flatpak list`, `brew list` and the rpm-ostree deployment, so
   installs made outside UAS still show up.

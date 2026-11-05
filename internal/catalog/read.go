@@ -115,7 +115,8 @@ type SearchOptions struct {
 }
 
 // Search finds apps matching query. All words must match; if that finds nothing, any word may match. Each
-// word also matches as a prefix, so "firef" finds Firefox. With OrderRelevance, the best match comes first.
+// word also matches as a prefix, so "firef" finds Firefox. With OrderRelevance, the best match comes first:
+// see search.
 func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]SearchResult, error) {
 	words := queryWords(query)
 	if len(words) == 0 {
@@ -124,14 +125,47 @@ func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]Sea
 	if len(words) == 1 && len([]rune(words[0])) <= 2 && synonyms[words[0]] == nil && orderBy(opt.Order) == "" {
 		return d.searchShort(ctx, words[0], opt)
 	}
-	// A word with synonyms names a kind of app ("office", "browser"), so an app whose name merely starts with
-	// it ("Office Runner") is no better a match than any other.
-	byName := len(words) > 1 || synonyms[words[0]] == nil
-	results, err := d.search(ctx, ftsQuery(words, "AND"), strings.Join(words, " "), byName, opt)
-	if err != nil || len(results) > 0 || len(words) == 1 {
-		return results, err
+	// A search of several words, or a word with synonyms ("office", "browser"), asks for a kind of app
+	// rather than one by name.
+	generic := len(words) > 1 || synonyms[words[0]] != nil
+	for _, op := range []string{"AND", "OR"} {
+		r := ranking{exactName: strings.Join(words, " "), byName: !generic || len(words) > 1}
+		if generic {
+			r.wholeWords = wholeWordQuery(words, op)
+		}
+		results, err := d.search(ctx, ftsQuery(words, op), r, opt)
+		if err != nil || len(results) > 0 || len(words) == 1 {
+			return results, err
+		}
 	}
-	return d.search(ctx, ftsQuery(words, "OR"), strings.Join(words, " "), byName, opt)
+	return nil, nil
+}
+
+// ranking is how search orders matches by relevance.
+type ranking struct {
+	exactName string // an app with this name comes first
+	// byName puts apps whose names start with exactName as whole words next ("Godot Engine" for "godot",
+	// before "Godots", which the stemmer also matches). A word with synonyms names a kind of app, so an app
+	// named "Office Runner" is no better a match for "office" than any other.
+	byName bool
+	// wholeWords, when set, is an FTS query for apps whose name, summary, keywords or categories have the
+	// words whole. These come next, the most installed first, so "password manager" puts Bitwarden and
+	// KeePassXC ahead of rarely used apps; apps that only mention the words in their description, or only
+	// start words with them ("codec" for "code"), follow by text relevance.
+	wholeWords string
+}
+
+// wholeWordQuery is an FTS query for words whole (no prefix matches) in the name, keywords and summary.
+func wholeWordQuery(words []string, op string) string {
+	parts := make([]string, len(words))
+	for i, w := range words {
+		alts := []string{`"` + w + `"`}
+		for _, s := range synonyms[w] {
+			alts = append(alts, `"`+s+`"`)
+		}
+		parts[i] = "(" + strings.Join(alts, " OR ") + ")"
+	}
+	return "{name keywords summary} : (" + strings.Join(parts, " "+op+" ") + ")"
 }
 
 // searchShort searches for one or two letters, as the first keystrokes of a search are. Nearly every app
@@ -152,27 +186,29 @@ func (d *DB) searchShort(ctx context.Context, word string, opt SearchOptions) ([
 	return scanResults(rows)
 }
 
-func (d *DB) search(ctx context.Context, match, exactName string, byName bool, opt SearchOptions) (
-	[]SearchResult, error) {
+func (d *DB) search(ctx context.Context, match string, r ranking, opt SearchOptions) ([]SearchResult, error) {
 	// bm25 weights, one per FTS column: app_id, name, keywords, summary, developer, description.
-	// By relevance, an exact name match comes first, then (when byName) names that start with the query as
-	// whole words ("Godot Engine" for "godot", before "Godots", which the stemmer also matches).
 	sort := orderBy(opt.Order)
 	if sort == "" {
 		sort = "lower(a.name) = ?2 DESC, "
-		if byName {
+		if r.byName {
 			sort += "lower(a.name) LIKE ?2 || ' %' DESC, " // query words are letters and digits only
+		}
+		if r.wholeWords != "" {
+			sort += "a.id IN whole DESC, CASE WHEN a.id IN whole THEN a.popularity END DESC, " +
+				"CASE WHEN a.id IN whole THEN a.stars END DESC, "
 		}
 		sort += "bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
 	}
 	rows, err := d.db.QueryContext(ctx, `
+		WITH whole AS (SELECT app_id FROM apps_fts WHERE ?5 != '' AND apps_fts MATCH ?5)
 		SELECT `+resultColumns+`
 		FROM apps_fts
 		JOIN apps a ON a.id = apps_fts.app_id
 		WHERE apps_fts MATCH ?1
 		  AND (?4 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?4))
 		ORDER BY `+sort+`
-		LIMIT ?3`, match, exactName, limitOr(opt.Limit), string(opt.Source))
+		LIMIT ?3`, match, r.exactName, limitOr(opt.Limit), string(opt.Source), r.wholeWords)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
