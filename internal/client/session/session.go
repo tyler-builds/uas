@@ -67,16 +67,20 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		CatalogPath:  catalogPath,
 	}
 	p := s.Platform
+	gh, ghErr := s.githubBackend()
+	if ghErr == nil {
+		s.Backends[catalog.SourceGitHub] = gh
+	}
 	if p.Flatpak != "" {
-		s.Backends[catalog.SourceFlathub] = &flatpak.Backend{Runner: run.Exec{}, Path: p.Flatpak,
-			Scope: st.FlatpakScope}
+		fp := &flatpak.Backend{Runner: run.Exec{}, Path: p.Flatpak, Scope: st.FlatpakScope}
+		if ghErr == nil {
+			fp.Exclude = gh.BundleApps // apps from GitHub bundles show up under GitHub, not Flathub
+		}
+		s.Backends[catalog.SourceFlathub] = fp
 	}
 	if p.Brew != "" {
 		s.Backends[catalog.SourceHomebrew] = &homebrew.Backend{
 			Runner: run.Exec{Env: []string{"HOMEBREW_NO_ENV_HINTS=1"}}, Path: p.Brew}
-	}
-	if gh, err := s.githubBackend(); err == nil {
-		s.Backends[catalog.SourceGitHub] = gh
 	}
 	// Layering needs an image-based system. Package-based Fedora (dnf) is outside the Bazzite slice.
 	if p.Atomic && p.RPMOSTree != "" && p.FedoraRelease() > 0 {
@@ -295,10 +299,17 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 	case catalog.SourceHomebrew:
 		notes = append(notes, "Installs with Homebrew for your user account. No restart needed.")
 	case catalog.SourceGitHub:
-		a, _ := l.Asset(catalog.AssetAppImage)
+		var a catalog.Asset
+		if gh, ok := s.Backends[catalog.SourceGitHub].(*github.Backend); ok {
+			a, _ = gh.Pick(l)
+		}
 		notes = append(notes, fmt.Sprintf("Downloads %s (%s) from github.com/%s. Not reviewed by any distribution.",
 			a.Name, HumanSize(a.Size), l.Ref))
-		if !s.Platform.LibFUSE2 {
+		switch {
+		case a.Kind == catalog.AssetFlatpak:
+			notes = append(notes, "A Flatpak bundle: it installs for your user account and runs in a sandbox. "+
+				"Flatpak fetches the runtime it needs from Flathub.")
+		case !s.Platform.LibFUSE2:
 			notes = append(notes, "FUSE 2 was not found; older AppImages may not start.")
 		}
 	case catalog.SourceCOPR:
@@ -359,7 +370,7 @@ func RefreshOptions(catalogPath string) refresh.Options {
 	}
 }
 
-// githubBackend sets up AppImage installs, looking up updates in the session's catalog.
+// githubBackend sets up installs from GitHub releases, looking up updates in the session's catalog.
 func (s *Session) githubBackend() (*github.Backend, error) {
 	dirs, err := github.DefaultDirs()
 	if err != nil {
@@ -370,10 +381,11 @@ func (s *Session) githubBackend() (*github.Backend, error) {
 		return nil, err
 	}
 	return &github.Backend{
-		State:  state.Store{Path: statePath},
-		Dirs:   dirs,
-		Client: &http.Client{Timeout: 30 * time.Minute},
-		Runner: run.Exec{},
+		State:   state.Store{Path: statePath},
+		Dirs:    dirs,
+		Client:  &http.Client{Timeout: 30 * time.Minute},
+		Runner:  run.Exec{},
+		Flatpak: s.Platform.Flatpak,
 		Latest: func(ctx context.Context, repo string) (catalog.Listing, error) {
 			db, err := catalog.Open(s.CatalogPath)
 			if err != nil {

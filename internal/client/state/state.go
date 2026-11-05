@@ -13,7 +13,11 @@ import (
 
 // GitHubInstall is one app installed from a GitHub release.
 type GitHubInstall struct {
-	Repo        string    `json:"repo"` // "owner/repo", the listing ref
+	Repo string `json:"repo"` // "owner/repo", the listing ref
+	// Kind is the release file installed: an AppImage ("" or "appimage") or a Flatpak bundle ("flatpak"),
+	// which flatpak keeps as FlatpakRef.
+	Kind        string    `json:"kind,omitempty"`
+	FlatpakRef  string    `json:"flatpak_ref,omitempty"`
 	Name        string    `json:"name"`
 	Version     string    `json:"version"`
 	Asset       string    `json:"asset"`

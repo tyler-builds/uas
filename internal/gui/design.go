@@ -183,7 +183,7 @@ var sourceTips = map[catalog.SourceID]string{
 		"(layering), which takes effect after a restart",
 	catalog.SourceHomebrew: "A Homebrew formula, mostly command-line tools. Installs for your user without " +
 		"a restart",
-	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage. No distribution reviews it; " +
+	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +
 		"its page shows a trust score",
 	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
 		"and installing layers it into the system image",

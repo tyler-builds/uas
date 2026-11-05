@@ -32,6 +32,16 @@ type Backend struct {
 	Path   string // the flatpak binary
 	// Scope is where new apps are installed. Updates and removals use the scope the app is in.
 	Scope settings.FlatpakScope
+	// Exclude, if set, returns the IDs of apps another backend accounts for (bundles from GitHub releases),
+	// which are left out of Installed and Updates.
+	Exclude func() map[string]bool
+}
+
+func (b *Backend) excluded() map[string]bool {
+	if b.Exclude == nil {
+		return nil
+	}
+	return b.Exclude()
 }
 
 // Source implements backend.Backend.
@@ -49,10 +59,11 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 	if err != nil {
 		return nil, err
 	}
+	skip := b.excluded()
 	var apps []backend.InstalledApp
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) != 6 || f[0] == "" {
+		if len(f) != 6 || f[0] == "" || skip[f[0]] {
 			continue
 		}
 		ref := f[1]
@@ -70,6 +81,7 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 // Updates implements backend.UpdateChecker. It asks the remotes of the user and system installations;
 // an installation with no remotes has nothing to update.
 func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
+	skip := b.excluded()
 	var ups []backend.AvailableUpdate
 	var errs []error
 	for _, scope := range []string{string(settings.ScopeUser), string(settings.ScopeSystem)} {
@@ -81,7 +93,7 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 		}
 		for _, line := range strings.Split(out, "\n") {
 			f := strings.Split(line, "\t")
-			if len(f) != 3 || f[1] == "" {
+			if len(f) != 3 || f[1] == "" || skip[f[0]] {
 				continue
 			}
 			ref := f[1]

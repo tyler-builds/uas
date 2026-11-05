@@ -1,9 +1,10 @@
-// Package github installs AppImages from GitHub releases.
+// Package github installs apps from GitHub releases: AppImages, and Flatpak bundles.
 //
-// The AppImage is downloaded, checked against the SHA-256 GitHub publishes for it, made executable and given
-// a launcher (desktop entry and icon) read from inside the image without running it. uas records the install
-// in its state file, since no package manager tracks AppImages. Flatpak bundles and RPMs from releases are
-// listed in the catalog but not installable yet.
+// An AppImage is downloaded, checked against the SHA-256 GitHub publishes for it, made executable and given
+// a launcher (desktop entry and icon) read from inside the image without running it. A Flatpak bundle is
+// downloaded and checked the same way, then installed for the user with flatpak, which also fetches the
+// runtime it needs from Flathub. uas records each install in its state file, since nothing else ties it to
+// its GitHub release. RPMs from releases are listed in the catalog but not installable.
 package github
 
 import (
@@ -59,18 +60,34 @@ type Backend struct {
 	Client *http.Client
 	// Latest returns the current catalog listing for a repo, for updates.
 	Latest func(ctx context.Context, repo string) (catalog.Listing, error)
-	// Runner, if set, runs update-desktop-database after launchers change.
+	// Runner runs flatpak for bundles and, if set, update-desktop-database after launchers change.
 	Runner run.Runner
-	Now    func() time.Time
+	// Flatpak is the flatpak binary. Without it, Flatpak bundles aren't installable.
+	Flatpak string
+	Now     func() time.Time
 }
 
 // Source implements backend.Backend.
 func (b *Backend) Source() catalog.SourceID { return catalog.SourceGitHub }
 
-// Supports implements backend.Backend: the listing needs an AppImage with a published checksum.
+// Supports implements backend.Backend: the listing needs an AppImage, or a Flatpak bundle when flatpak is
+// installed, with a published checksum.
 func (b *Backend) Supports(l catalog.Listing) bool {
-	a, ok := l.Asset(catalog.AssetAppImage)
-	return l.Source == catalog.SourceGitHub && ok && a.SHA256 != "" && validAsset(l.Ref, a)
+	_, ok := b.Pick(l)
+	return l.Source == catalog.SourceGitHub && ok
+}
+
+// Pick returns the release file to install: the AppImage, else the Flatpak bundle (assets come best first).
+func (b *Backend) Pick(l catalog.Listing) (catalog.Asset, bool) {
+	for _, a := range l.Assets {
+		if a.SHA256 == "" || !validAsset(l.Ref, a) {
+			continue
+		}
+		if a.Kind == catalog.AssetAppImage || (a.Kind == catalog.AssetFlatpak && b.Flatpak != "") {
+			return a, true
+		}
+	}
+	return catalog.Asset{}, false
 }
 
 func validAsset(repo string, a catalog.Asset) bool {
@@ -100,14 +117,17 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	if l.Source != catalog.SourceGitHub {
 		return backend.ErrWrongSource
 	}
-	if !b.Supports(l) {
-		return fmt.Errorf("github: %s has no AppImage with a published checksum", l.Ref)
+	a, ok := b.Pick(l)
+	if !ok {
+		return fmt.Errorf("github: %s has no AppImage or Flatpak bundle with a published checksum", l.Ref)
 	}
-	a, _ := l.Asset(catalog.AssetAppImage)
 	for _, d := range []string{b.Dirs.AppImages, b.Dirs.Icons, b.Dirs.Applications} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
+	}
+	if a.Kind == catalog.AssetFlatpak {
+		return b.installBundle(ctx, l, a, progress)
 	}
 
 	k := key(l.Ref)
@@ -148,6 +168,9 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	}
 	if old.IconFile != "" && old.IconFile != iconFile {
 		os.Remove(old.IconFile)
+	}
+	if old.Kind == catalog.AssetFlatpak { // it was installed as a bundle before
+		b.uninstallBundle(ctx, old.FlatpakRef, progress)
 	}
 	desktop, err := appimage.DesktopFile(appimage.Entry{Name: l.Name, Comment: l.Summary, AppImage: final,
 		Icon: icon, Source: "github:" + l.Ref}, info.Desktop)
@@ -211,8 +234,8 @@ func (b *Backend) download(ctx context.Context, a catalog.Asset, dst string, pro
 	return nil
 }
 
-// Updates implements backend.UpdateChecker: an app has an update when the catalog's current AppImage has a
-// different checksum from the installed one.
+// Updates implements backend.UpdateChecker: an app has an update when the release file the catalog offers
+// now has a different checksum from the installed one.
 func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
 	if b.Latest == nil {
 		return nil, nil
@@ -227,7 +250,7 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 		if err != nil {
 			continue // no longer in the catalog: nothing to offer
 		}
-		if a, ok := l.Asset(catalog.AssetAppImage); ok && a.SHA256 != "" && a.SHA256 != g.SHA256 {
+		if a, ok := b.Pick(l); ok && a.SHA256 != g.SHA256 {
 			ups = append(ups, backend.AvailableUpdate{Ref: g.Repo, Scope: "user", Version: l.Version})
 		}
 	}
@@ -254,7 +277,7 @@ func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress f
 	if err != nil {
 		return err
 	}
-	if asset, ok := l.Asset(catalog.AssetAppImage); ok && asset.SHA256 == cur.SHA256 {
+	if asset, ok := b.Pick(l); ok && asset.SHA256 == cur.SHA256 {
 		report(progress, "Already up to date ("+cur.Version+")")
 		return nil
 	}
@@ -262,8 +285,8 @@ func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress f
 	return b.Install(ctx, l, progress)
 }
 
-// Remove implements backend.Backend. It deletes the AppImage, its launcher and icon. App settings in the
-// home folder are left alone.
+// Remove implements backend.Backend. It deletes the AppImage, its launcher and icon, or uninstalls the
+// Flatpak bundle. App settings in the home folder are left alone.
 func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress func(backend.Progress)) error {
 	if a.Source != catalog.SourceGitHub {
 		return backend.ErrWrongSource
@@ -276,6 +299,23 @@ func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress f
 	if !ok {
 		return fmt.Errorf("github: %s is not installed", a.Ref)
 	}
+	if g.Kind == catalog.AssetFlatpak {
+		if err := b.uninstallBundle(ctx, g.FlatpakRef, progress); err != nil {
+			return err
+		}
+	} else {
+		if err := b.removeFiles(g); err != nil {
+			return err
+		}
+		b.refreshLaunchers(ctx)
+	}
+	report(progress, "Removed "+g.Name)
+	st.Delete(a.Ref)
+	return b.State.Save(st)
+}
+
+// removeFiles deletes an AppImage install's files.
+func (b *Backend) removeFiles(g state.GitHubInstall) error {
 	for _, p := range []string{g.Path, g.DesktopFile, g.IconFile} {
 		if p == "" || !b.owns(p) {
 			continue
@@ -284,10 +324,7 @@ func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress f
 			return err
 		}
 	}
-	report(progress, "Removed "+g.Name)
-	b.refreshLaunchers(ctx)
-	st.Delete(a.Ref)
-	return b.State.Save(st)
+	return nil
 }
 
 // owns reports whether p is inside one of the directories uas manages, so a corrupted state file cannot
