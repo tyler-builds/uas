@@ -173,11 +173,12 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 				Background(ctx.Theme().AccentSoft).
 				Child(ui.Icon(icons.CircleCheck).Size(18).Color(ctx.Theme().Accent)).
 				Child(ui.Text(installedLabel(in)).FontSize(15).Semibold())).
-			Child(ui.Div().Row().Gap(space2).
-				Child(ui.Div().Grow(1).Basis(ui.Px(0)).Child(a.updateControl(ctx, in, app.ID, app.Name, busy))).
-				Child(ui.Button("Remove").Secondary().Disabled(busy).OnClick(func() {
-					a.removing.Set(&removal{app: in, name: app.Name})
-				})))
+			Child(ui.Div().Row().Align(ui.Center).Gap(space2).
+				Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+					Child(a.updateControl(ctx, in, app.ID, app.Name, busy))).
+				// An icon, so an Update button with a long version beside it still fits.
+				Child(ui.IconButton(icons.Trash).Label("Remove").Tooltip("Remove "+app.Name).Disabled(busy).
+					OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) })))
 	default:
 		action = ui.Button("Install").Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
 			Loading(busy).OnClick(func() { a.requestInstall(ctx, app, listing) })
@@ -200,7 +201,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	}
 	picker := ui.Select(chosen, opts...).Label("Install from").Small().Width(ui.Full).
 		RenderValue(withMark).RenderOption(withMark)
-	col := ui.Div().Column().Gap(space3).Width(ui.Px(200)).Shrink(0).Child(action).Child(picker)
+	col := ui.Div().Column().Gap(space3).Width(ui.Px(240)).Shrink(0).Child(action).Child(picker)
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
@@ -395,10 +396,11 @@ func (a *App) updateControl(ctx *ui.Context, in backend.InstalledApp, jobID, nam
 	switch {
 	case ok:
 		label := "Update"
-		if version != "" {
+		if version != "" && len(version) <= 10 {
 			label = "Update to " + version
 		}
-		return ui.Button(label).Primary().Icon(icons.Download).Loading(busy).OnClick(func() {
+		return ui.Button(label).Primary().Icon(icons.Download).Width(ui.Full).Loading(busy).
+			Tooltip("Update to "+version).OnClick(func() {
 			a.startJob(ctx, jobID, "Updating "+name, a.s.NeedsRestart(in.Source), name+" is up to date",
 				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 		})
