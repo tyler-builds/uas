@@ -38,6 +38,9 @@ type view struct {
 	arg  string
 }
 
+// isList reports whether the view is Installed or Updates, whose lists the top bar filters.
+func (v view) isList() bool { return v.page == pageInstalled || v.page == pageUpdates }
+
 // navKey is the sidebar key of a view, such as "category:Game".
 func (v view) navKey() string {
 	if v.arg != "" && v.page != pageApp {
@@ -56,6 +59,9 @@ type App struct {
 
 	query        *ui.Signal[string] // the search field's text
 	search       *ui.Signal[string] // the query being searched, set after a pause in typing
+	// listFilter and listSource narrow the Installed and Updates lists.
+	listFilter *ui.Signal[string]
+	listSource *ui.Signal[catalog.SourceID]
 	searchSource *ui.Signal[catalog.SourceID]
 	searchOrder  *ui.Signal[catalog.Order]
 	browseOrder  *ui.Signal[catalog.Order]
@@ -81,6 +87,8 @@ func New(s *session.Session) *App {
 		navSel:       ui.NewSignal(pageHome),
 		query:        ui.NewSignal(""),
 		search:       ui.NewSignal(""),
+		listFilter:   ui.NewSignal(""),
+		listSource:   ui.NewSignal[catalog.SourceID](""),
 		searchSource: ui.NewSignal[catalog.SourceID](""),
 		searchOrder:  ui.NewSignal(catalog.OrderRelevance),
 		browseOrder:  ui.NewSignal(catalog.OrderPopular),
@@ -115,6 +123,10 @@ func (a *App) openApp(id string) { a.open(view{page: pageApp, arg: id}) }
 
 // goTo starts over at v, as the sidebar does.
 func (a *App) goTo(v view) {
+	if !v.isList() {
+		a.listFilter.Set("")
+		a.listSource.Set("")
+	}
 	a.history.Set([]view{v})
 	a.navSel.Set(v.navKey())
 }
@@ -332,14 +344,25 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 	if len(a.history.Get()) > 1 {
 		back = ui.IconButton(icons.ChevronLeft).Label("Back").Tooltip("Back").OnClick(a.back)
 	}
-	search := ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps…").Icon(icons.Search).
-		Large().Clearable().Width(ui.Full).
-		Styles(ui.FieldStyle{Frame: ui.Style{Radius: 22, Background: t.Surface}}).
-		OnChange(a.typed).
-		OnSubmit(func(s string) {
-			a.search.Set(strings.TrimSpace(s))
-			a.showSearch()
-		})
+	frame := ui.FieldStyle{Frame: ui.Style{Radius: 22, Background: t.Surface}}
+	var search ui.Element
+	if v := a.current(); v.isList() {
+		// Installed and Updates filter their own list instead of searching the catalog.
+		placeholder := "Filter installed apps…"
+		if v.page == pageUpdates {
+			placeholder = "Filter updates…"
+		}
+		search = ui.TextInput(a.listFilter).Label("Filter apps").Placeholder(placeholder).Icon(icons.ListFilter).
+			Large().Clearable().Width(ui.Full).Styles(frame).Key("list-filter")
+	} else {
+		search = ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps…").Icon(icons.Search).
+			Large().Clearable().Width(ui.Full).Styles(frame).Key("search").
+			OnChange(a.typed).
+			OnSubmit(func(s string) {
+				a.search.Set(strings.TrimSpace(s))
+				a.showSearch()
+			})
+	}
 	settings := ui.IconButton(icons.Settings).Label("Settings").Tooltip("Settings").
 		OnClick(func() { a.goTo(view{page: pageSettings}) })
 	return ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space6).PaddingTop(space4).PaddingBottom(space2).

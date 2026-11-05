@@ -36,11 +36,7 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 		return scroll(page.Child(ui.Empty("No apps installed yet").Icon(icons.Package).
 			Description("Apps you install from any source show up here.")))
 	}
-	list := ui.Div().Column().Gap(space3)
-	for _, in := range res.Data {
-		list = list.Child(a.installedRow(ctx, in, ups.Data))
-	}
-	return scroll(page.Child(muted(ctx, plural(len(res.Data), "app", "apps")+" installed")).Child(list))
+	return scroll(page.Child(a.filteredList(ctx, res.Data, ups.Data, "installed")))
 }
 
 // updatesPage lists the installed apps that have updates, with Update all.
@@ -68,11 +64,76 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 		return scroll(page.Child(ui.Empty("Everything is up to date").Icon(icons.CircleCheck).
 			Description("uas checks for updates every ten minutes while it runs.")))
 	}
-	list := ui.Div().Column().Gap(space3)
-	for _, in := range with {
-		list = list.Child(a.installedRow(ctx, in, ups.Data))
+	return scroll(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")))
+}
+
+// filteredList shows apps narrowed by the top bar's filter and the source chips, with a count. The chips
+// appear when the apps come from more than one source.
+func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map[string]string,
+	what string) ui.Element {
+	q := strings.ToLower(strings.TrimSpace(a.listFilter.Get()))
+	src := a.listSource.Get()
+	counts := map[catalog.SourceID]int{}
+	for _, in := range apps {
+		counts[in.Source]++
 	}
-	return scroll(page.Child(list))
+	if counts[src] == 0 {
+		src = "" // the chosen source has nothing here (any more)
+	}
+	var shown []backend.InstalledApp
+	for _, in := range apps {
+		if (src == "" || in.Source == src) && matchesFilter(in, q) {
+			shown = append(shown, in)
+		}
+	}
+
+	count := plural(len(apps), "app", "apps") + " " + what
+	if len(shown) != len(apps) {
+		count = fmt.Sprintf("%d of %s", len(shown), count)
+	}
+	bar := ui.Div().Row().Align(ui.Center).Gap(space4)
+	if len(counts) > 1 {
+		chips := ui.Div().Row().Gap(space2).Wrap().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(filterChip(ctx, "All", src == "", func() { a.listSource.Set("") }))
+		for _, s := range sources {
+			if n := counts[s]; n > 0 {
+				chips = chips.Child(filterChip(ctx, fmt.Sprintf("%s %d", s.Name(), n), src == s,
+					func() { a.listSource.Set(s) }))
+			}
+		}
+		bar = bar.Child(chips).Child(muted(ctx, count))
+	} else {
+		bar = bar.Child(muted(ctx, count))
+	}
+
+	if len(shown) == 0 {
+		return ui.Div().Column().Gap(space5).Child(bar).
+			Child(ui.Empty("No apps match").Icon(icons.ListFilter).
+				Description("Nothing "+what+" matches the filter.").
+				Action(ui.Button("Clear filter").Secondary().OnClick(func() {
+					a.listFilter.Set("")
+					a.listSource.Set("")
+				})))
+	}
+	list := ui.Div().Column().Gap(space3)
+	for _, in := range shown {
+		list = list.Child(a.installedRow(ctx, in, ups))
+	}
+	return ui.Div().Column().Gap(space5).Child(bar).Child(list)
+}
+
+// sources are the sources in the order the chips show them: the catalog's, then added AppImages.
+var sources = append(append([]catalog.SourceID{}, catalog.SourcePrecedence...), catalog.SourceAppImage)
+
+// matchesFilter reports whether every word of q (lowercase) is in the app's name, ID, package or source.
+func matchesFilter(in backend.InstalledApp, q string) bool {
+	hay := strings.ToLower(strings.Join([]string{in.Name, in.AppID, in.Package, in.Source.Name(), in.Origin}, " "))
+	for _, w := range strings.Fields(q) {
+		if !strings.Contains(hay, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // addAppImageButton asks for a downloaded AppImage and adds it, so uas keeps it up to date.
