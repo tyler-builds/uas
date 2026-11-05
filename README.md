@@ -4,35 +4,28 @@
 
 # uas
 
-**One app store for Bazzite.**<br>
-Find, install and update apps from Flathub, Fedora, Homebrew, COPR and GitHub, compared and ranked in one place.
+**One app store for every source.**<br>
+Flathub, Homebrew, GitHub releases, Fedora and COPR, searched and installed from one place.
 
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-Bazzite%20%C2%B7%20Fedora%20Atomic-0f766e)
+![Platform](https://img.shields.io/badge/platform-Linux-0f766e)
 ![Display](https://img.shields.io/badge/display-Wayland-555)
 
 <img src="docs/screenshots/home.png" alt="The uas home page: a Spotlight app, popular and new apps, categories and sources" width="900">
 
 </div>
 
-## Why uas
+## Features
 
-On an image-based system like Bazzite, the same app can come from five places, and each one behaves differently.
-A Flatpak is sandboxed and installs right away. A Fedora package is layered into the system image and
-needs a restart. A Homebrew formula installs for your user. A GitHub release is whatever its developer
-published. uas puts all of them in one catalog and lets you pick with that context in front of you.
-
-- **One search across every source.** About 7,700 apps from Flathub, Fedora, Homebrew, COPR and GitHub
-  releases, merged so each app appears once with all the places it's available.
-- **A recommended source for every app.** uas picks the best fit for your system (sandboxed and
-  restart-free first) and explains why, with the alternatives a click away.
-- **Trust scores for unreviewed sources.** GitHub releases and COPR projects get a 0–100 score from public
-  signals such as age, activity and release history, with the breakdown shown next to Install. See
-  [docs/trust-score.md](docs/trust-score.md).
-- **Installs and updates in one place.** One list for everything installed, from every source, with updates
-  you can apply one at a time or all at once. Downloaded AppImages can be added and kept up to date too.
-- **A signed catalog.** The catalog is rebuilt every 6 hours, and every catalog is signed and verified before
-  the client uses it.
+- **One catalog.** About 7,700 apps, merged so each app appears once with every source it's on.
+- **A recommended source.** uas picks the best fit for your system and tells you why, with the other sources a
+  click away.
+- **Trust scores.** GitHub releases and COPR projects are scored 0–100 from public signals, with the breakdown
+  shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
+- **One list for everything installed,** whatever its source, with updates and Update all.
+- **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
+- **A signed catalog,** rebuilt every 6 hours and verified before use.
+- **Native tools underneath.** uas installs through flatpak, brew and rpm-ostree, so nothing is hidden from them.
 
 ## Screenshots
 
@@ -42,110 +35,155 @@ published. uas puts all of them in one catalog and lets you pick with that conte
     <td width="50%"><img src="docs/screenshots/search.png" alt="Search results across sources, with installs a year and release dates"></td>
   </tr>
   <tr>
-    <td align="center"><b>App page:</b> the recommended source, install notes and details</td>
-    <td align="center"><b>Search:</b> every source in one list, filterable by source</td>
+    <td align="center">App page</td>
+    <td align="center">Search</td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/installed.png" alt="Installed apps from Flathub and Homebrew, with an available update"></td>
     <td width="50%"><img src="docs/screenshots/home-light.png" alt="The home page in the light theme"></td>
   </tr>
   <tr>
-    <td align="center"><b>Installed:</b> everything on the system, with updates</td>
-    <td align="center"><b>Light theme:</b> follows the system setting</td>
+    <td align="center">Installed</td>
+    <td align="center">Light theme</td>
   </tr>
 </table>
 
-## Getting started
+## Compatibility
 
-uas is written in Go. You need Go 1.27 or newer, and the desktop app needs a Wayland session.
+uas runs on any Linux distribution and enables each source it finds tools for.
 
-### Desktop app
+| Source | Needs | Works on |
+| --- | --- | --- |
+| Flathub | `flatpak` | Any distro |
+| Homebrew | `brew` | Any distro |
+| GitHub releases, AppImages | — (Flatpak bundles need `flatpak`) | Any distro |
+| Fedora packages | `rpm-ostree` | Fedora Atomic (Bazzite, Silverblue, Kinoite, Bluefin, Aurora…) |
+| COPR | `rpm-ostree`, `pkexec` | Fedora Atomic |
+
+The desktop app needs a **Wayland** session. The CLI runs anywhere.
+
+**Tested on**
+
+- Bazzite (Fedora 45) with GNOME, Wayland
+- Bazzite with KDE Plasma, Wayland
+
+**Notes for other systems**
+
+- On package-based distros (Fedora Workstation, Ubuntu, Arch…), Fedora and COPR listings show as unavailable
+  and uas recommends another source. dnf, apt and pacman aren't supported yet.
+- On Fedora Atomic, Fedora and COPR packages are layered into the image and take effect after a restart.
+- AppImage launchers and dock matching have only been tested on GNOME and KDE; other desktops should work
+  but are untested.
+- Missing `flatpak` or `brew`? Install it and those sources turn on the next time uas starts.
+
+## Install
+
+You need Go 1.27 or newer. From a clone of this repo:
 
 ```sh
-go run ./cmd/uas-gui
-```
+go install ./cmd/uas-gui ./cmd/uas      # to ~/go/bin; make sure it's on your PATH
 
-To install it with its icon and launcher entry:
-
-```sh
-go install ./cmd/uas-gui        # installs to ~/go/bin; make sure that's on your PATH
+# launcher entry and icon
 cp packaging/linux/io.github.tyler_builds.uas.desktop ~/.local/share/applications/
 cp -r packaging/linux/icons ~/.local/share/
 ```
 
-### Command line
-
-`uas` downloads the published catalog on first use (or with `uas refresh`) into `~/.cache/uas/`.
+## CLI
 
 ```sh
-go run ./cmd/uas search firefox
-go run ./cmd/uas info org.mozilla.firefox
-go run ./cmd/uas install org.mozilla.firefox
+uas search firefox
+uas info org.mozilla.firefox
+uas install org.mozilla.firefox
 ```
 
-| Command | What it does |
+| Command | |
 | --- | --- |
-| `refresh` | Download the latest catalog |
 | `search <words>` | Find apps |
-| `info <app-id>` | Show one app and where it's available |
-| `install <app-id>` | Install an app from its recommended source |
-| `add <file.AppImage>` | Add a downloaded AppImage and keep it updated |
-| `remove <app-id>` | Remove an installed app |
-| `update <app-id>` / `updates` | Update an app, or list the apps that have updates |
+| `info <app-id>` | Show an app and its sources |
+| `install <app-id>` | Install from the recommended source |
+| `add <file.AppImage>` | Add an AppImage and keep it updated |
+| `remove <app-id>` | Remove an app |
+| `update <app-id>` | Update an app |
+| `updates` | List available updates |
 | `list` | List installed apps |
-| `system` | Show what uas detected about this system |
+| `refresh` | Download the latest catalog |
+| `system` | Show what uas detected |
 | `settings [key value]` | Show or change settings |
 
-Run `uas <command> -h` for a command's flags.
+## FAQ
+
+**Why not just use GNOME Software or KDE Discover?**<br>
+They cover Flatpak and your distro's packages. uas also covers Homebrew, GitHub releases, COPR and AppImages,
+compares the sources an app is on, and scores the ones no distribution reviews.
+
+**Why not just use Flathub?**<br>
+Use Flathub when it has the app; uas recommends it first for that reason. But plenty of tools aren't there: CLI
+tools live in Homebrew, and many apps ship only as GitHub releases.
+
+**Why not install GitHub releases by hand, or with Gear Lever?**<br>
+You can. uas finds the release, checks its checksum, shows a trust score before you install, adds it to your
+app menu and keeps it updated alongside everything else.
+
+**Why not Distrobox?**<br>
+Distrobox is great for a full distro's packages in a container. uas is for installing apps on the host from the
+sources built for it. They work fine together.
+
+**Does uas replace flatpak, brew or rpm-ostree?**<br>
+No. It runs them for you. Anything uas installs shows up in those tools, and anything they install shows up
+in uas.
+
+**Is installing from GitHub or COPR safe?**<br>
+No distribution reviews those sources, so uas asks before installing, shows a trust score with its breakdown,
+and verifies GitHub downloads against their checksums. The score measures how well kept a project is, not
+whether its code is safe.
+
+**Does uas collect data?**<br>
+No. It downloads the catalog and app icons, and talks to the sources you install from.
 
 ## How it works
 
 ```
  Flathub · Fedora · Homebrew · COPR · GitHub
                     │
-            uas-indexer (every 6h)        merges, ranks and scores apps,
-                    │                     signs the catalog
+            uas-indexer (every 6h)        merge, rank, score, sign
+                    │
                     ▼
      Cloudflare Worker + R2 (catalog.db)
                     │
           ┌─────────┴─────────┐
-       uas-gui              uas (CLI)      verify the signature, then search
-          └─────────┬─────────┘            and install through each source's
-                    ▼                      own tool (flatpak, rpm-ostree, brew…)
+       uas-gui              uas (CLI)      verify, search, install
+          └─────────┬─────────┘            through the native tools
+                    ▼
                 your system
 ```
 
-The full design is in [docs/architecture.md](docs/architecture.md), and the desktop app's design system is in
-[docs/design.md](docs/design.md).
+More in [docs/architecture.md](docs/architecture.md) and [docs/design.md](docs/design.md).
 
 ## Development
 
 ```sh
 go test ./...
+go run ./cmd/uas-gui
 ```
 
-To try the client against a catalog you built yourself:
+Build and use a local catalog:
 
 ```sh
 go run ./cmd/uas-indexer -out out/catalog.db
 UAS_CATALOG=out/catalog.db go run ./cmd/uas search firefox
 ```
 
-`TestShots` renders every page of the desktop app in both themes to PNGs for design review (the README's
-screenshots come from it):
+Render every page of the desktop app in both themes (the README's screenshots come from this):
 
 ```sh
 UAS_SHOTS=/tmp/uas-shots UAS_CATALOG=out/catalog.db go test ./internal/gui -run TestShots
 ```
 
-### Publishing
-
-The `Index` workflow builds and publishes the catalog every 6 hours, and can be run by hand from the Actions
-tab. Publishing needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The catalog Worker lives in
-`deploy/cloudflare`; deploy it with `npx wrangler deploy` from that directory.
+**Publishing.** The `Index` workflow builds and publishes the catalog every 6 hours, or by hand from the
+Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The catalog Worker is in
+`deploy/cloudflare`; deploy it with `npx wrangler deploy`.
 
 ## Acknowledgements
 
-The UI is built with [jamb](https://github.com/tyler-builds/jamb). The interface font is
-[Inter](https://rsms.me/inter/) by Rasmus Andersson (SIL Open Font License). Source logos are from
-[Simple Icons](https://simpleicons.org/).
+Built with [jamb](https://github.com/tyler-builds/jamb). Interface font: [Inter](https://rsms.me/inter/)
+(SIL Open Font License). Source logos: [Simple Icons](https://simpleicons.org/).
