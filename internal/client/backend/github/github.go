@@ -111,7 +111,8 @@ func (b *Backend) Installed(context.Context) ([]backend.InstalledApp, error) {
 	var apps []backend.InstalledApp
 	for _, g := range st.GitHub {
 		apps = append(apps, backend.InstalledApp{Source: catalog.SourceGitHub, Ref: g.Repo, AppID: g.Repo,
-			Name: g.Name, Version: g.Version, Scope: "user", Origin: "github", Icon: iconURL(g.IconFile)})
+			Name: g.Name, Version: g.Version, Scope: "user", Origin: "github", Icon: iconURL(g.IconFile),
+			Desktop: g.DesktopFile})
 	}
 	return apps, nil
 }

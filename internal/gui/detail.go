@@ -376,15 +376,14 @@ func statusChip(ctx *ui.Context, label string, c ui.Color) ui.Element {
 		Child(ui.Text(label).FontSize(12).Semibold().TextColor(c))
 }
 
-// installedAction is the big button of an installed app, Update when there is one and the installed state
-// otherwise, over a line with the installed version and Remove.
+// installedAction is the big button of an installed app: Update when there is one, else Open when uas finds
+// its launcher, else the installed state. Under it is a line with the installed version and Remove.
 func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *catalog.App, busy bool,
 	big ui.ButtonStyle) ui.Element {
 	t := ctx.Theme()
 	ups := a.updates(ctx)
 	version, hasUpdate := ups.Data[in.Key()]
-	checks := a.canCheck(in)
-	hasUpdate = hasUpdate && checks
+	hasUpdate = hasUpdate && a.canCheck(in)
 
 	var main ui.Element
 	if hasUpdate {
@@ -397,7 +396,16 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 			a.startJob(ctx, app.ID, "Updating "+app.Name, a.s.NeedsRestart(in.Source), app.Name+" is up to date",
 				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 		})
+	} else if path := a.launcher(ctx, in, app.ID); path != "" {
+		// Installed with nothing to update: the button opens the app.
+		main = ui.Button("Open").Icon(icons.ExternalLink).Primary().Large().Width(ui.Full).Styles(big).
+			Disabled(busy).OnClick(func() {
+			if err := a.s.Launch(path); err != nil {
+				ctx.Toast(ui.ToastError, errText(err)).Title("Could not open " + app.Name)
+			}
+		})
 	} else {
+		// Nothing to open, as for a command-line tool or a package that waits for a restart.
 		label := "Installed"
 		if in.Pending {
 			label += " (after restart)"
@@ -408,23 +416,24 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 			Child(ui.Text(label).FontSize(15).Semibold())
 	}
 
-	var status []string
+	status := ""
 	if in.Version != "" {
-		status = append(status, "Version "+in.Version)
-	}
-	switch {
-	case !checks || hasUpdate:
-	case ups.Loading:
-		status = append(status, "checking…")
-	case ups.Err == nil:
-		status = append(status, "up to date")
+		status = "Version " + in.Version
 	}
 	line := ui.Div().Row().Align(ui.Center).Gap(space2).
 		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Child(caption(ctx, strings.Join(status, " · ")).Truncate())).
+			Child(caption(ctx, status).Truncate())).
 		Child(ui.Button("Remove").Ghost().Small().Disabled(busy).
 			OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) }))
 	return ui.Div().Column().Gap(space1).Child(main).Child(line)
+}
+
+// launcher finds an installed app's launcher, kept for a minute since it reads the disk.
+func (a *App) launcher(ctx *ui.Context, in backend.InstalledApp, appID string) string {
+	res := ui.Query(ctx, "launcher:"+in.Key()+"|"+in.Desktop, func(context.Context) (string, error) {
+		return a.s.Launcher(in, appID), nil
+	}, ui.QueryStaleTime(time.Minute))
+	return res.Data
 }
 
 // whyPanel explains what installing from the picked source means and how the app's other sources compare.

@@ -25,6 +25,8 @@ type InstalledApp struct {
 	Package string `json:"package,omitempty"`
 	// Icon is a file:// URL of the app's icon, for apps whose files uas keeps (AppImages).
 	Icon string `json:"icon,omitempty"`
+	// Desktop is the path of the app's launcher, for apps whose launcher uas wrote (AppImages).
+	Desktop string `json:"desktop,omitempty"`
 	// Pending is true when the change takes effect only after a restart.
 	Pending bool `json:"pending,omitempty"`
 }

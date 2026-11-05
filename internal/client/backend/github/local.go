@@ -242,7 +242,7 @@ func (l *Local) Installed(context.Context) ([]backend.InstalledApp, error) {
 	for _, a := range st.AppImages {
 		apps = append(apps, backend.InstalledApp{Source: catalog.SourceAppImage, Ref: a.ID, AppID: a.ID,
 			Name: a.Name, Version: a.Version, Scope: "user", Origin: updateOrigin(updateSource(a)),
-			Icon: iconURL(a.IconFile)})
+			Icon: iconURL(a.IconFile), Desktop: a.DesktopFile})
 	}
 	return apps, nil
 }
