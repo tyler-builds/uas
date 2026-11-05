@@ -113,7 +113,7 @@ func settingsRow(ctx *ui.Context, icon ui.Element, titleText, sub string, right 
 	if sub != "" {
 		text = text.Child(caption(ctx, sub))
 	}
-	return ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(52)).PaddingX(space4).PaddingY(space2+2).
+	return ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(52)).PaddingX(space4).PaddingY(space2 + 2).
 		Child(ui.Div().Size(ui.Px(20), ui.Px(20)).Center().Shrink(0).Child(icon)).
 		Child(text).
 		Child(ui.If(right != nil, ui.Div().Row().Align(ui.Center).Shrink(0).Child(right)))
