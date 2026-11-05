@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -17,24 +16,25 @@ const listMaxWidth = 1280
 
 // searchPage shows results for the top bar's search, with source filters and a sort.
 func (a *App) searchPage(ctx *ui.Context) ui.Element {
-	t := ctx.Theme()
 	q := strings.TrimSpace(a.search.Get())
 	src := a.searchSource.Get()
 	order := a.searchOrder.Get()
 
-	filters := ui.Div().Row().Gap(space2).Wrap().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-		Child(filterChip(ctx, "All", src == "", func() { a.searchSource.Set("") }))
+	filters := segmented(ctx, filterChip(ctx, "All", src == "", func() { a.searchSource.Set("") }))
 	for _, s := range catalog.SourcePrecedence {
 		s := s
 		filters = filters.Child(filterChip(ctx, s.Name(), src == s, func() { a.searchSource.Set(s) }))
 	}
-	page := pageBody(listMaxWidth).
-		Child(ui.Div().Row().Align(ui.Center).Gap(space4).Child(filters).Child(orderPicker(a.searchOrder, true)))
+	controls := ui.Div().Row().Align(ui.Center).Gap(space4).
+		Child(ui.Div().Row().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(filters)).
+		Child(orderPicker(a.searchOrder, true))
+	page := pageBody(listMaxWidth)
 
 	if q == "" {
 		return scroll(page.
-			Child(ui.Div().Column().Gap(space1).Child(title("Search")).
-				Child(muted(ctx, "Type in the box above to search "+a.appCount(ctx)+" apps by name or what they do."))).
+			Child(pageHeader(ctx, "Search", "Type in the box above to search "+a.appCount(ctx)+
+				" apps by name or what they do.", nil)).
+			Child(controls).
 			Child(ui.Div().Row().Wrap().Gap(space2).Children(a.categoryChips(ctx)...)))
 	}
 	res := ui.Query(ctx, a.key("search", q, string(src), string(order)),
@@ -53,12 +53,13 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 	if len(res.Data) == 100 {
 		summary = "Showing the first 100 results for “" + q + "”; add words to narrow it down"
 	}
+	var busy ui.Element
+	if res.Fetching && !res.Loading {
+		busy = ui.ProgressRing().Size(ui.RingSmall).Label("Searching")
+	}
 	return scroll(page.
-		Child(ui.Div().Column().Gap(space1).
-			Child(ui.Div().Row().Align(ui.Center).Gap(space3).
-				Child(title("Search Results")).
-				Child(ui.If(res.Fetching && !res.Loading, ui.ProgressRing().Size(ui.RingSmall).Label("Searching")))).
-			Child(ui.Text(summary).FontSize(15).TextColor(t.TextMuted))).
+		Child(pageHeader(ctx, "Search results", summary, busy)).
+		Child(controls).
 		Child(a.resultList(ctx, res, "Try other words, another source, or check the spelling.")))
 }
 
@@ -92,14 +93,8 @@ func (a *App) categoryPage(ctx *ui.Context, key string) ui.Element {
 		order = catalog.OrderPopular
 	}
 	res := a.browse(ctx, catalog.BrowseQuery{Category: key, Order: order, AppsOnly: true, Limit: 120})
-	var icon *icons.Icon = icons.Flame
-	for _, c := range navCategories {
-		if c.key == key {
-			icon = c.icon
-		}
-	}
 	return scroll(pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, icon, ui.Color{}, categoryLabel(key), categoryTip(key), orderPicker(a.browseOrder, false))).
+		Child(pageHeader(ctx, categoryLabel(key), categoryTip(key), orderPicker(a.browseOrder, false))).
 		Child(a.resultList(ctx, res, "Nothing in this category yet.")))
 }
 
@@ -115,25 +110,17 @@ func (a *App) sourcePage(ctx *ui.Context, src catalog.SourceID) ui.Element {
 		sub += " This system can't install from it."
 	}
 	return scroll(pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, sourceIcons[src], sourceColor(ctx, src), src.Name(), sub, orderPicker(a.browseOrder, false))).
+		Child(pageHeader(ctx, src.Name(), sub, orderPicker(a.browseOrder, false))).
 		Child(a.resultList(ctx, res, "This source has no apps in the catalog.")))
 }
 
-// listHeader is the top of a category or source page: an icon tile, the title, a line about it, and the sort.
-func (a *App) listHeader(ctx *ui.Context, icon *icons.Icon, color ui.Color, titleText, sub string,
-	trailing ui.Element) ui.Element {
-	t := ctx.Theme()
-	if color == (ui.Color{}) {
-		color = t.Accent
-	}
-	return ui.Div().Row().Align(ui.Start).Gap(space4).
-		Child(ui.Div().Size(ui.Px(56), ui.Px(56)).Radius(radiusM).Background(color.Alpha(0.15)).Center().Shrink(0).
-			Child(ui.Icon(icon).Size(28).Color(color))).
+// pageHeader is the top of every page: its title, a line about it, and controls on the right.
+func pageHeader(ctx *ui.Context, titleText, sub string, trailing ui.Element) ui.Element {
+	return ui.Div().Row().Align(ui.End).Gap(space4).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(title(titleText)).
-			Child(muted(ctx, sub))).
-		// Centered on the icon, so a description that wraps leaves the buttons where they were.
-		Child(ui.Div().Row().Align(ui.Center).Height(ui.Px(56)).Shrink(0).Child(trailing))
+			Child(ui.If(sub != "", muted(ctx, sub)))).
+		Child(ui.If(trailing != nil, ui.Div().Row().Align(ui.Center).Shrink(0).Child(trailing)))
 }
 
 // sourcesPage explains each source and opens its list.
@@ -147,9 +134,7 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 		catalog.SourceCOPR:     "Community builds from Fedora COPR, each with a trust score from its build history.",
 	}
 	page := pageBody(listMaxWidth).
-		Child(ui.Div().Column().Gap(space1).
-			Child(title("Sources")).
-			Child(muted(ctx, "Where uas finds apps, and how it treats each one. uas recommends the best fit for this system on every app's page."))).
+		Child(pageHeader(ctx, "Sources", "Where uas finds apps, and how it treats each one. uas recommends the best fit for this system on every app's page.", nil)).
 		Child(a.sourceTiles(ctx))
 	list := ui.Div().Column().Gap(space3)
 	for _, s := range catalog.SourcePrecedence {

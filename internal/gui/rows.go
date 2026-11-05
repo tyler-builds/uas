@@ -2,8 +2,11 @@ package gui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/tyler-builds/jamb/access"
 	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
 
@@ -56,54 +59,108 @@ func reachText(r catalog.SearchResult) (icon *icons.Icon, text, tip string) {
 	return icons.Download, "No install data", "This app's sources don't publish install counts"
 }
 
-// appCard is an app in a home page row: icon, name, summary and where it comes from.
+// appCard is an app in a home page row: icon, name, a line of summary and where it comes from.
 func (a *App) appCard(ctx *ui.Context, r catalog.SearchResult) ui.Element {
 	t := ctx.Theme()
-	return ui.Card().Row().Align(ui.Center).Gap(space4).MinWidth(ui.Px(0)).
-		Styles(ui.CardStyle{Card: ui.Style{Height: ui.Px(128)}}).
+	return ui.Card().Row().Align(ui.Center).Gap(space3).Padding(space3).MinWidth(ui.Px(0)).
 		Label(r.Name).OnClick(func() { a.openApp(r.ID) }).
-		Child(a.appIcon(ctx, r.IconURL, 60, r.Name)).
-		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Child(ui.Text(r.Name).FontSize(16).Semibold().Truncate()).
+		Child(a.appIcon(ctx, r.IconURL, 44, r.Name)).
+		Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Text(r.Name).FontSize(14).Medium().Truncate()).
 			Child(ui.Text(r.Summary).FontSize(13).TextColor(t.TextMuted).Truncate()).
-			Child(ui.Div().MarginTop(space3).Child(sourceTags(ctx, r.Sources, false, 2)))).
+			Child(ui.Div().MarginTop(2).Child(metaLine(ctx, sourceWords(ctx, r.Sources, false, 2)...)))).
 		Key("row:" + r.ID)
 }
 
-// resultRow is an app in a list: icon, name, summary, sources, figures, and Install and Details.
-func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult, installed installedIndex) ui.Element {
+// metaLine is a row of quiet words split by middle dots, such as an app's sources and developer.
+func metaLine(ctx *ui.Context, parts ...ui.Element) ui.Element {
 	t := ctx.Theme()
-	reachIcon, reach, reachTip := reachText(r)
-	updated := "Release date unknown"
-	if !r.Updated.IsZero() {
-		updated = "Updated " + r.Updated.Local().Format("Jan 2, 2006")
+	row := ui.Div().Row().Align(ui.Center).Gap(6).MinWidth(ui.Px(0))
+	for i, p := range parts {
+		if i > 0 {
+			row = row.Child(ui.Text("·").FontSize(12).TextColor(t.TextSubtle))
+		}
+		row = row.Child(p)
 	}
-	row := ui.Div().Row().Align(ui.Center).Gap(space5).PaddingX(space6).PaddingY(space4).
-		Radius(radiusL).Background(t.Surface).Hover(ui.Style{Background: t.SurfaceHover}).
-		Child(ui.Div().Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }).
-			Child(a.appIcon(ctx, r.IconURL, 72, r.Name))).
-		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }). // Details is the keyboard way in
-			Child(ui.Text(r.Name).FontSize(18).Semibold().Truncate()).
-			Child(ui.Text(r.Summary).FontSize(15).TextColor(t.TextMuted).Truncate()).
-			Child(ui.Div().Row().Align(ui.Center).Gap(space4).MarginTop(space2).MinWidth(ui.Px(0)).
-				Child(sourceTags(ctx, r.Sources, r.Verified, 0)).
-				Child(ui.If(r.Developer != "", developerTag(ctx, r.Developer))))).
-		Child(ui.Div().Column().Gap(space2).Width(ui.Px(200)).Shrink(0).
-			Child(statLine(ctx, reachIcon, reach, reachTip)).
-			Child(statLine(ctx, icons.Clock, updated, "")))
-	return row.Child(a.rowActions(ctx, r, installed)).Key("row:" + r.ID)
+	return row
 }
 
-// developerTag is who makes an app, after its sources in a result row.
-func developerTag(ctx *ui.Context, dev string) ui.Element {
+// sourceWords are an app's sources as words for a metaLine, each explained on hover, with Verified last.
+// With max above zero, sources past max collapse into a "+n".
+func sourceWords(ctx *ui.Context, sources []catalog.SourceID, verified bool, max int) []ui.Element {
 	t := ctx.Theme()
-	return ui.Div().Row().Align(ui.Center).Gap(6).MinWidth(ui.Px(0)).Tooltip("Developer: " + dev).
-		Child(ui.Icon(icons.User).Size(14).Color(t.TextMuted)).
-		Child(ui.Text(dev).FontSize(13).TextColor(t.TextMuted).Truncate())
+	var out []ui.Element
+	for i, s := range sources {
+		if max > 0 && i == max {
+			rest := make([]string, 0, len(sources)-max)
+			for _, r := range sources[max:] {
+				rest = append(rest, r.Name())
+			}
+			out = append(out, ui.Div().Tooltip("Also on "+strings.Join(rest, " and ")).Shrink(0).
+				Child(ui.Text(fmt.Sprintf("+%d", len(sources)-max)).FontSize(12).TextColor(t.TextSubtle)))
+			break
+		}
+		out = append(out, ui.Div().Tooltip(s.Name()+": "+sourceTips[s]).Shrink(0).
+			Child(ui.Text(s.Name()).FontSize(12).TextColor(t.TextSubtle)))
+	}
+	if verified {
+		out = append(out, ui.Div().Row().Align(ui.Center).Gap(4).Shrink(0).Tooltip("Verified publisher: "+verifiedTip).
+			Child(ui.Icon(icons.ShieldCheck).Size(12).Color(t.Success.Alpha(0.8))).
+			Child(ui.Text("Verified").FontSize(12).TextColor(t.TextSubtle)))
+	}
+	return out
 }
 
-// rowActions is the Install (or Installed) button and the Details link of a result row.
+// resultRow is an app in a list: icon, name and summary, its sources and developer, figures, and Install.
+// Rows sit in a bordered list (see listBox), split by hairlines; the row opens the app's page.
+func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult, installed installedIndex, first bool) ui.Element {
+	return ui.Component(func(ctx *ui.Context) ui.Element {
+		t := ctx.Theme()
+		_, reach, reachTip := reachText(r)
+		updated := "Release date unknown"
+		if !r.Updated.IsZero() {
+			updated = "Updated " + r.Updated.Local().Format("Jan 2, 2006")
+		}
+		meta := sourceWords(ctx, r.Sources, r.Verified, 0)
+		if r.Developer != "" {
+			meta = append(meta, ui.Div().MinWidth(ui.Px(0)).Tooltip("Developer: "+r.Developer).
+				Child(ui.Text(r.Developer).FontSize(12).TextColor(t.TextSubtle).Truncate()))
+		}
+		row := listRow(ctx, first).
+			Child(ui.Div().Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }).
+				Child(a.appIcon(ctx, r.IconURL, 36, r.Name))).
+			Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Cursor(ui.CursorPointer).OnClick(func() { a.openApp(r.ID) }).
+				Role(access.RoleLink).Label(r.Name + " details").TabIndex(0).
+				Child(ui.Div().Row().Align(ui.Center).Gap(space3).MinWidth(ui.Px(0)).
+					Child(ui.Text(r.Name).FontSize(14).Medium().Truncate().Shrink(0)).
+					Child(metaLine(ctx, meta...))).
+				Child(ui.Text(r.Summary).FontSize(13).TextColor(t.TextMuted).Truncate())).
+			Child(ui.Div().Column().Gap(3).Align(ui.End).Width(ui.Px(150)).Shrink(0).
+				Child(ui.Div().Tooltip(reachTip).Child(ui.Text(reach).FontSize(12).TextColor(t.TextMuted).Medium())).
+				Child(ui.Text(updated).FontSize(12).TextColor(t.TextSubtle)))
+		return row.Child(a.rowActions(ctx, r, installed))
+	}).Key("row:" + r.ID)
+}
+
+// listRow is one row of a listBox; rows after the first have a hairline above them.
+func listRow(ctx *ui.Context, first bool) *ui.DivElement {
+	t := ctx.Theme()
+	row := ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space4).PaddingY(10).
+		Hover(ui.Style{Background: t.SurfaceHover})
+	if !first {
+		row = row.BorderEdges(ui.Edges{Top: 1}, t.Border)
+	}
+	return row
+}
+
+// listBox is the bordered frame around a list of rows.
+func listBox(ctx *ui.Context) *ui.DivElement {
+	t := ctx.Theme()
+	return ui.Div().Column().Radius(radiusL).Border(1, t.Border).Background(t.Surface).ClipContent()
+}
+
+// rowActions is the Install (or Installed) button of a result row. The row itself opens the app's page.
 func (a *App) rowActions(ctx *ui.Context, r catalog.SearchResult, installed installedIndex) ui.Element {
 	_, busy := a.running(r.ID)
 	var main ui.Element
@@ -112,15 +169,15 @@ func (a *App) rowActions(ctx *ui.Context, r catalog.SearchResult, installed inst
 		if in.Pending {
 			label = "After restart"
 		}
-		main = ui.Button(label).Icon(icons.Check).Secondary().Width(ui.Full).Tooltip("Open its page to update or remove it").
+		main = ui.IconButton(icons.Check).Ghost().Small().Label(label).
+			Tooltip(label + ": open its page to update or remove it").
 			OnClick(func() { a.openApp(r.ID) })
 	} else {
-		main = ui.Button("Install").Icon(icons.Download).Primary().Width(ui.Full).Loading(busy).
-			OnClick(func() { a.quickInstall(ctx, r) })
+		// An outlined icon button, so a long list isn't a column of repeated words.
+		main = ui.IconButton(icons.Download).Secondary().Small().Label("Install").Tooltip("Install " + r.Name).
+			Loading(busy).OnClick(func() { a.quickInstall(ctx, r) })
 	}
-	return ui.Div().Column().Align(ui.Center).Gap(space2).Width(ui.Px(150)).Shrink(0).
-		Child(main).
-		Child(linkButton(ctx, "Details", icons.ChevronRight, func() { a.openApp(r.ID) }))
+	return ui.Div().Row().Justify(ui.End).Width(ui.Px(40)).Shrink(0).Child(main)
 }
 
 // quickInstall installs an app from a list, from the source its page would recommend. Unreviewed and
@@ -151,9 +208,9 @@ func (a *App) quickInstall(ctx *ui.Context, r catalog.SearchResult) {
 func (a *App) resultList(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResult], empty string) ui.Element {
 	switch {
 	case res.Loading:
-		col := ui.Div().Column().Gap(space3)
-		for range 4 {
-			col = col.Child(ui.Skeleton().Height(ui.Px(108)))
+		col := ui.Div().Column().Gap(space2)
+		for range 6 {
+			col = col.Child(ui.Skeleton().Height(ui.Px(60)))
 		}
 		return col
 	case res.Err != nil:
@@ -162,9 +219,9 @@ func (a *App) resultList(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchRes
 		return ui.Empty("No apps found").Icon(icons.Search).Description(empty)
 	}
 	installed := a.installedApps(ctx)
-	col := ui.Div().Column().Gap(space3)
-	for _, r := range res.Data {
-		col = col.Child(a.resultRow(ctx, r, installed))
+	col := listBox(ctx)
+	for i, r := range res.Data {
+		col = col.Child(a.resultRow(ctx, r, installed, i == 0))
 	}
 	return col
 }
@@ -179,12 +236,12 @@ func orderPicker(sig *ui.Signal[catalog.Order], withRelevance bool) ui.Element {
 	if withRelevance {
 		opts = append([]ui.Option[catalog.Order]{{Value: catalog.OrderRelevance, Label: "Most relevant"}}, opts...)
 	}
-	return ui.Select(sig, opts...).Label("Sort by").Width(ui.Px(190))
+	return ui.Select(sig, opts...).Label("Sort by").Small().Width(ui.Px(170))
 }
 
 // pageBody is a scrolling page with the standard padding, centered up to maxWidth.
 func pageBody(maxWidth float32) *ui.DivElement {
-	return ui.Div().Column().Gap(space6).PaddingX(space6 + 4).PaddingTop(space4).PaddingBottom(space8).
+	return ui.Div().Column().Gap(space6).PaddingX(space8).PaddingTop(space6).PaddingBottom(space8).
 		MaxWidth(ui.Px(maxWidth))
 }
 
@@ -197,7 +254,7 @@ func scroll(page *ui.DivElement) ui.Element {
 // gridColumns fits items of about minWidth into the content area, up to most.
 func gridColumns(ctx *ui.Context, maxWidth, minWidth float32, most int) int {
 	w, _ := ctx.WindowSize()
-	content := min(w-sidebarWidth, maxWidth) - 2*(space6+4)
+	content := min(w-sidebarWidth-space2, maxWidth) - 2*space8
 	return max(1, min(most, int(content/minWidth)))
 }
 

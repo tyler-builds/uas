@@ -28,6 +28,7 @@ func TestShots(t *testing.T) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	useBundledFont(t)
 	light, dark := Themes()
 	fp := &fakeBackend{src: catalog.SourceFlathub, installed: []backend.InstalledApp{
 		{Source: catalog.SourceFlathub, Ref: "app/org.mozilla.firefox/x86_64/stable", AppID: "org.mozilla.firefox", Name: "Firefox", Version: "159.0.1", Scope: "system"},
@@ -43,9 +44,9 @@ func TestShots(t *testing.T) {
 		selected string
 		w        float32 // 0: 1440
 	}{
-		{"home", func(a *App) {}, 1250, "", 0},
+		{"home", func(a *App) {}, 1110, "", 0},
 		{"detail-github", func(a *App) {}, 1400, "github:adileo/squirreldisk", 0},
-		{"detail-darktable", func(a *App) {}, 1400, "org.darktable.Darktable", 0},
+		{"detail-darktable", func(a *App) {}, 940, "org.darktable.Darktable", 0},
 		{"detail-vscode", func(a *App) {}, 1100, "com.visualstudio.code", 0},
 		// Narrow enough that the side panel goes under the main column.
 		{"detail-narrow", func(a *App) {}, 1900, "org.darktable.Darktable", 1100},
@@ -54,7 +55,7 @@ func TestShots(t *testing.T) {
 		// At the default window width, a row with several sources, a verified mark and a long developer name.
 		{"search-narrow", func(a *App) { a.query.Set("discord"); a.search.Set("discord"); a.goTo(view{page: pageSearch}) },
 			800, "", 1180},
-		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 820, "", 0},
+		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 640, "", 0},
 		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, "", 0},
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
 	}
@@ -93,4 +94,22 @@ func TestShots(t *testing.T) {
 			u.Close()
 		}
 	}
+}
+
+// useBundledFont makes fontconfig answer "sans-serif" with the bundled Inter, so the shots show the font the
+// app registers (uitest can't register fonts itself). It must run before the first text is laid out.
+func useBundledFont(t *testing.T) {
+	dir, err := filepath.Abs("fonts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := filepath.Join(t.TempDir(), "fonts.conf")
+	xml := `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig>
+<include ignore_missing="yes">/etc/fonts/fonts.conf</include><dir>` + dir + `</dir>
+<alias binding="strong"><family>sans-serif</family><prefer><family>Inter</family></prefer></alias>
+</fontconfig>`
+	if err := os.WriteFile(conf, []byte(xml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FONTCONFIG_FILE", conf)
 }

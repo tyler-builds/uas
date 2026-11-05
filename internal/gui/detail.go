@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyler-builds/jamb/access"
 	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/markdown"
 	"github.com/tyler-builds/jamb/ui"
@@ -75,28 +76,33 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 
 		page = page.
 			Child(a.detailHeader(ctx, app, available, chosen, listing, chooseErr)).
-			Child(ui.Div().Height(ui.Px(1)).Background(ctx.Theme().Border)).
-			Child(statsStrip(ctx, app, listing)).
-			Child(ui.Div().Height(ui.Px(1)).Background(ctx.Theme().Border))
+			Child(statsStrip(ctx, app, listing))
 
 		main := ui.Div().Column().Gap(space6).MinWidth(ui.Px(0))
 		if len(app.Screenshots) > 0 {
-			shots := ui.Div().Row().Gap(space4).ScrollX().PaddingBottom(space2)
+			// Two screenshots side by side, sized to the main column.
+			w, _ := ctx.WindowSize()
+			mainW := min(w-sidebarWidth-space2-2, detailMaxWidth) - 2*space8
+			if w-sidebarWidth > 1000 {
+				mainW -= 290 + space6
+			}
+			shotW := (mainW - space3) / 2
+			shots := ui.Div().Row().Gap(space3).Align(ui.Start)
 			for i, s := range app.Screenshots {
-				if i == 4 {
+				if i == 2 {
 					break
 				}
 				url := s.ThumbURL
 				if url == "" {
 					url = s.URL
 				}
-				shots = shots.Child(a.screenshot(url, 440, s.Caption))
+				shots = shots.Child(a.screenshot(url, shotW, s.Caption))
 			}
 			main = main.Child(shots)
 		}
 		if app.Description != "" {
-			main = main.Child(heading("About This App")).
-				Child(markdown.View(app.Description).Key("desc:" + app.ID).Label("Description").OnLink(openURL))
+			main = main.Child(ui.Div().Column().Gap(space1).Child(heading("About")).
+				Child(markdown.View(app.Description).Key("desc:" + app.ID).Label("Description").OnLink(openURL)))
 		}
 		if listing.Trust != nil {
 			main = main.Child(trustPanel(ctx, listing))
@@ -106,10 +112,14 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 		// The side panel sits beside the main column when there is room, and under it otherwise.
 		body := ui.Div().Column().Gap(space6)
 		if w, _ := ctx.WindowSize(); w-sidebarWidth > 1000 {
-			body = ui.Div().Row().Gap(space8).Align(ui.Start)
-			side = ui.Div().Width(ui.Px(280)).Shrink(0).Child(side)
+			body = ui.Div().Row().Gap(space6).Align(ui.Start)
+			side = ui.Div().Width(ui.Px(290)).Shrink(0).Child(side)
 		}
-		return scroll(page.Child(body.Child(main.Grow(1).Basis(ui.Px(0))).Child(side)))
+		page = page.Child(body.Child(main.Grow(1).Basis(ui.Px(0))).Child(side))
+		if more := a.moreLike(ctx, app); more != nil {
+			page = page.Child(more)
+		}
+		return scroll(page)
 	}).Key("detail:" + id)
 }
 
@@ -137,12 +147,12 @@ func (a *App) detailHeader(ctx *ui.Context, app *catalog.App, available []catalo
 	} else {
 		install = a.installArea(ctx, app, available, chosen, listing)
 	}
-	return ui.Div().Row().Gap(space6).Align(ui.Center).
-		Child(ui.Div().Size(ui.Px(140), ui.Px(140)).Radius(32).Background(t.Surface).Center().
-			Shrink(0).Child(a.appIcon(ctx, app.IconURL, 104, app.Name))).
-		Child(ui.Div().Column().Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Child(ui.Text(app.Name).FontSize(36).Bold()).
-			Child(ui.Text(app.Summary).FontSize(18).TextColor(t.TextMuted)).
+	return ui.Div().Row().Gap(space5).Align(ui.Center).
+		Child(ui.Div().Size(ui.Px(88), ui.Px(88)).Radius(20).Background(t.Surface).Border(1, t.Border).Center().
+			Shrink(0).Child(a.appIcon(ctx, app.IconURL, 60, app.Name))).
+		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Text(app.Name).FontSize(24).Semibold()).
+			Child(ui.Text(app.Summary).FontSize(14).TextColor(t.TextMuted)).
 			Child(ui.Div().MarginTop(space2).Child(tags))).
 		Child(install)
 }
@@ -159,7 +169,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 		}
 	}
 	job, busy := a.running(app.ID)
-	big := ui.ButtonStyle{Root: ui.Style{Height: ui.Px(48), FontSize: 16, Radius: 10}}
+	big := ui.ButtonStyle{Root: ui.Style{Height: ui.Px(34), FontSize: 14, Radius: radiusS}}
 
 	var action ui.Element
 	switch {
@@ -190,7 +200,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	}
 	picker := ui.Select(chosen, opts...).Label("Install from").Small().Width(ui.Full).
 		RenderValue(withMark).RenderOption(withMark)
-	col := ui.Div().Column().Gap(space3).Width(ui.Px(240)).Shrink(0).Child(action).Child(picker)
+	col := ui.Div().Column().Gap(space2).Width(ui.Px(230)).Shrink(0).Child(action).Child(picker)
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
@@ -234,21 +244,24 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 		}
 		stats = append(stats, stat{icons.ShieldCheck, fmt.Sprintf("%d / 100", listing.Trust.Score), "Trust score", c,
 			"How well kept the project is; see the breakdown below"})
-	case listing.Source != "":
-		stats = append(stats, stat{sourceIcons[listing.Source], listing.Source.Name(), "Source",
-			sourceColor(ctx, listing.Source), sourceTips[listing.Source]})
 	}
-	row := ui.Div().Row().Align(ui.Center).PaddingY(space2)
-	for i, s := range stats {
-		if i > 0 {
-			row = row.Child(ui.Div().Width(ui.Px(1)).Height(ui.Px(44)).Background(t.Border))
+	if len(app.Categories) > 0 {
+		// The source is in the side panel and the picker; the category rounds out the strip.
+		if c := mainCategory(app.Categories); c != "" && len(stats) < 4 {
+			stats = append(stats, stat{icons.LayoutGrid, c, "Category", t.TextMuted, ""})
 		}
-		cell := ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space3).Grow(1).Basis(ui.Px(0)).
-			MinWidth(ui.Px(0)).
-			Child(ui.Icon(s.icon).Size(22).Color(s.color)).
-			Child(ui.Div().Column().Gap(2).
-				Child(ui.Text(s.value).FontSize(17).Semibold()).
-				Child(muted(ctx, s.label)))
+	}
+	row := ui.Div().Row().Align(ui.Stretch).BorderEdges(ui.Edges{Top: 1, Bottom: 1}, t.Border)
+	for i, s := range stats {
+		cell := ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			PaddingX(space4).PaddingY(space4).
+			Child(ui.Div().Row().Align(ui.Center).Gap(6).
+				Child(ui.Icon(s.icon).Size(13).Color(s.color)).
+				Child(caption(ctx, s.label))).
+			Child(ui.Text(s.value).FontSize(15).Semibold())
+		if i > 0 {
+			cell = cell.BorderEdges(ui.Edges{Left: 1}, t.Border)
+		}
 		if s.tip != "" {
 			cell = cell.Tooltip(s.tip)
 		}
@@ -265,52 +278,53 @@ func shortVersion(v string) string {
 	return v
 }
 
-// sidePanel lists the source, category, license and developer, the install notes, and Report an Issue.
+// sidePanel lists the source, license and developer, the install notes, and Report an Issue.
 func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listing, choice recommend.Choice,
 	recommended bool) ui.Element {
 	t := ctx.Theme()
-	field := func(label string, value ui.Element) ui.Element {
-		return ui.Div().Column().Gap(space1).Child(muted(ctx, label)).Child(value)
+	// Properties are rows of a muted label and a value, as in an issue tracker's side panel.
+	props := ui.Div().Column().Gap(space1)
+	field := func(label string, value ui.Element) {
+		props = props.Child(ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(30)).
+			Child(ui.Div().Width(ui.Px(80)).Shrink(0).Child(muted(ctx, label))).
+			Child(ui.Div().Row().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(value)))
 	}
-	panel := ui.Div().Column().Gap(space5)
+	value := func(s string) *ui.TextElement { return ui.Text(s).FontSize(13).Medium().Truncate() }
 	if listing.Source != "" {
-		panel = panel.Child(field("Source", ui.Div().Row().Align(ui.Center).Gap(space2).
-			Child(ui.Icon(sourceIcons[listing.Source]).Size(20).Color(sourceColor(ctx, listing.Source))).
-			Child(ui.Text(listing.Source.Name()).FontSize(17).Semibold())))
-	}
-	if c := mainCategory(app.Categories); c != "" {
-		panel = panel.Child(field("Category", ui.Text(c).FontSize(17).Semibold()))
+		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).
+			Child(ui.Icon(sourceIcons[listing.Source]).Size(14).Color(sourceColor(ctx, listing.Source))).
+			Child(value(listing.Source.Name())))
 	}
 	if app.License != "" {
-		panel = panel.Child(field("License", ui.Div().Tooltip(app.License).
-			Child(ui.Text(licenseName(app.License)).FontSize(17).Semibold())))
+		field("License", ui.Div().Tooltip(app.License).Child(value(licenseName(app.License))))
 	}
 	if app.Developer != "" {
-		dev := ui.Element(ui.Text(app.Developer).FontSize(17).Semibold())
+		dev := ui.Element(value(app.Developer))
 		if web := app.Homepage; strings.HasPrefix(web, "http") {
-			dev = linkButton(ctx, app.Developer, icons.ExternalLink, func() { openURL(web) })
+			dev = ui.Div().Row().Align(ui.Center).Gap(5).MinWidth(ui.Px(0)).Cursor(ui.CursorPointer).
+				Tooltip(web).OnClick(func() { openURL(web) }).
+				Child(value(app.Developer)).
+				Child(ui.Icon(icons.ArrowUpRight).Size(13).Color(t.TextSubtle))
 		}
-		panel = panel.Child(field("Developer", dev))
+		field("Developer", dev)
 	}
+	panel := ui.Div().Column().Gap(space3).Child(props)
 
-	notes := ui.Div().Column().Gap(space2)
-	note := func(icon *icons.Icon, color ui.Color, text string) ui.Element {
-		return ui.Div().Row().Gap(space2).Align(ui.Start).
-			Child(ui.Div().PaddingTop(1).Child(ui.Icon(icon).Size(15).Color(color))).
-			Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(ui.Text(text).FontSize(13)))
-	}
+	// The notes, the "Why" toggle and the links share one row style: an icon in a fixed column, then text.
+	notes := ui.Div().Column().Gap(space1)
 	if choice.Reason != "" {
 		if recommended {
-			notes = notes.Child(note(icons.Sparkles, t.Accent, "Recommended: "+choice.Reason+"."))
+			notes = notes.Child(infoRow(ctx, icons.Sparkles, brandColor(t), "Recommended: "+choice.Reason+"."))
 		} else {
-			notes = notes.Child(note(icons.Sparkles, t.Accent, "uas recommends "+listingLabel(choice.Listing)+": "+
-				choice.Reason+"."))
+			notes = notes.Child(infoRow(ctx, icons.Sparkles, brandColor(t), "uas recommends "+
+				listingLabel(choice.Listing)+": "+choice.Reason+"."))
 		}
 	}
 	for _, n := range a.s.InstallNotes(listing) {
-		notes = notes.Child(note(icons.Info, t.TextMuted, n))
+		notes = notes.Child(infoRow(ctx, icons.Info, t.TextSubtle, n))
 	}
-	panel = panel.Child(ui.Card().Gap(space3).Padding(space4).Child(notes).Child(a.whyPanel(ctx, app, listing)))
+	panel = panel.Child(ui.Div().Height(ui.Px(1)).Background(t.Border)).
+		Child(notes.Child(a.whyPanel(ctx, app, listing)))
 
 	bugs := ""
 	for _, l := range app.Listings {
@@ -319,17 +333,18 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 			break
 		}
 	}
-	links := ui.Div().Column().Gap(space2)
+	link := func(icon *icons.Icon, label, url string) ui.Element {
+		return actionRow(ctx, icon, label, icons.ArrowUpRight).Role(access.RoleLink).Tooltip(url).
+			OnClick(func() { openURL(url) })
+	}
+	links := ui.Div().Column().Gap(space1)
 	if bugs != "" {
-		links = links.Child(ui.Button("Report an Issue").Icon(icons.Flag).Secondary().Width(ui.Full).
-			Tooltip(bugs).OnClick(func() { openURL(bugs) }))
+		links = links.Child(link(icons.Flag, "Report an issue", bugs))
 	}
 	if strings.HasPrefix(app.VCSURL, "http") {
-		vcs := app.VCSURL
-		links = links.Child(ui.Button("Source Code").Icon(icons.Code).Ghost().Width(ui.Full).Tooltip(vcs).
-			OnClick(func() { openURL(vcs) }))
+		links = links.Child(link(icons.Code, "Source code", app.VCSURL))
 	}
-	return panel.Child(links)
+	return panel.Child(ui.Div().Height(ui.Px(1)).Background(t.Border)).Child(links)
 }
 
 // mainCategory is the first of an app's categories that the sidebar has, or its first category.
@@ -410,10 +425,10 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 		if in.Pending {
 			label += " (after restart)"
 		}
-		main = ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space2).Height(ui.Px(48)).Radius(10).
+		main = ui.Div().Row().Align(ui.Center).Justify(ui.Center).Gap(space2).Height(ui.Px(36)).Radius(radiusS).
 			Background(t.AccentSoft).
-			Child(ui.Icon(icons.CircleCheck).Size(18).Color(t.Accent)).
-			Child(ui.Text(label).FontSize(15).Semibold())
+			Child(ui.Icon(icons.CircleCheck).Size(16).Color(t.Success)).
+			Child(ui.Text(label).FontSize(14).Medium())
 	}
 
 	status := ""
@@ -436,16 +451,38 @@ func (a *App) launcher(ctx *ui.Context, in backend.InstalledApp, appID string) s
 	return res.Data
 }
 
+// infoRow is a line of the side panel: an icon in a fixed column, then text that wraps.
+func infoRow(ctx *ui.Context, icon *icons.Icon, color ui.Color, text string) ui.Element {
+	t := ctx.Theme()
+	return ui.Div().Row().Gap(space2).Align(ui.Start).PaddingY(space1).
+		Child(ui.Div().Width(ui.Px(16)).Height(ui.Px(18)).Center().Shrink(0).Child(ui.Icon(icon).Size(14).Color(color))).
+		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Text(text).FontSize(13).TextColor(t.TextMuted)))
+}
+
+// actionRow is a clickable line of the side panel in the infoRow style, with a mark at the end.
+func actionRow(ctx *ui.Context, icon *icons.Icon, label string, end *icons.Icon) *ui.DivElement {
+	t := ctx.Theme()
+	return ui.Div().Row().Gap(space2).Align(ui.Center).PaddingY(space1).Cursor(ui.CursorPointer).
+		Label(label).TabIndex(0).
+		Child(ui.Div().Width(ui.Px(16)).Height(ui.Px(18)).Center().Shrink(0).
+			Child(ui.Icon(icon).Size(14).Color(t.TextSubtle))).
+		Child(ui.Text(label).FontSize(13).TextColor(t.TextMuted)).
+		Child(ui.Icon(end).Size(13).Color(t.TextSubtle))
+}
+
 // whyPanel explains what installing from the picked source means and how the app's other sources compare.
 // It opens from a "Why this source?" link, so the box stays short.
 func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
 		open := ui.Local(ctx, "open", false)
-		toggle := ui.Button("Why " + listing.Source.Name() + "?").Ghost().Small().Icon(icons.Info).
-			OnClick(func() { open.Set(!open.Peek()) })
+		toggle := func(icon *icons.Icon) ui.Element {
+			return actionRow(ctx, icons.CircleQuestionMark, "Why "+listing.Source.Name()+"?", icon).
+				Role(access.RoleButton).OnClick(func() { open.Set(!open.Peek()) })
+		}
 		if !open.Get() {
-			return ui.Div().Row().Child(toggle)
+			return toggle(icons.ChevronDown)
 		}
 		bullet := func(s string) ui.Element {
 			return ui.Div().Row().Gap(8).Align(ui.Start).
@@ -453,7 +490,7 @@ func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listin
 				Child(ui.Text(s).FontSize(13).Grow(1).Basis(ui.Px(0)))
 		}
 		panel := ui.Div().Column().Gap(6).
-			Child(ui.Div().Row().Child(toggle.Icon(icons.ChevronUp))).
+			Child(toggle(icons.ChevronUp)).
 			Child(ui.Text("Installing from " + listingLabel(listing) + ":").FontSize(13).Semibold())
 		for _, tr := range recommend.Traits(listing) {
 			panel = panel.Child(bullet(tr))
@@ -603,6 +640,41 @@ func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 		panel = panel.Child(ui.Alert(f).Warning())
 	}
 	return panel
+}
+
+// moreLike is a row of popular apps in the app's main category, or nil when it has none.
+func (a *App) moreLike(ctx *ui.Context, app *catalog.App) ui.Element {
+	key := ""
+	for _, c := range app.Categories {
+		for _, n := range navCategories {
+			if n.key == c && key == "" {
+				key = c
+			}
+		}
+	}
+	if key == "" {
+		return nil
+	}
+	cols := gridColumns(ctx, detailMaxWidth, 260, 4)
+	res := a.browse(ctx, catalog.BrowseQuery{AppsOnly: true, Category: key, Order: catalog.OrderPopular, Limit: cols + 1})
+	grid := ui.Div().Grid(repeatFr(cols)...).Gap(space3)
+	n := 0
+	for _, r := range res.Data {
+		if r.ID == app.ID || n == cols {
+			continue
+		}
+		grid = grid.Child(a.appCard(ctx, r))
+		n++
+	}
+	if n == 0 {
+		return nil
+	}
+	return ui.Div().Column().Gap(space3).MarginTop(space4).
+		Child(sectionHeader(ctx, "More in "+categoryLabel(key), "", linkButton(ctx, "See all", icons.ArrowRight, func() {
+			a.browseOrder.Set(catalog.OrderPopular)
+			a.open(view{page: pageCategory, arg: key})
+		}))).
+		Child(grid)
 }
 
 // details lists the app's license and links.

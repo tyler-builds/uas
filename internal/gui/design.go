@@ -5,6 +5,8 @@ package gui
 // docs/design.md.
 
 import (
+	"bytes"
+	_ "embed"
 	"fmt"
 	"strings"
 
@@ -28,13 +30,14 @@ const (
 
 // Corner radii.
 const (
-	radiusS  = 8  // buttons, inputs, chips
-	radiusM  = 12 // rows, tiles
-	radiusL  = 14 // cards
-	radiusXL = 20 // the featured banner
+	radiusS  = 6  // buttons, inputs, chips
+	radiusM  = 8  // rows, tiles
+	radiusL  = 10 // cards and lists
+	radiusXL = 12 // the featured banner and the content panel
 )
 
-// palette is the colors for one mode: charcoal surfaces with a teal accent.
+// palette is the colors for one mode: neutral near-black (or white) surfaces with hairline borders, and
+// teal kept for the brand mark and small status marks.
 type palette struct {
 	dark bool
 
@@ -42,31 +45,30 @@ type palette struct {
 	border, borderStrong                                    string
 	text, textMuted, textSubtle                             string
 	accent, accentHover, accentActive, accentText, link     string
+	brand                                                   string
 	success, warning, danger                                string
 	scrollbar, scrim                                        string
-	// art is the colors of the featured banner's shapes, darkest first.
-	art [3]string
 }
 
 var darkPalette = palette{
 	dark:       true,
-	background: "#16181d", panel: "#121418", surface: "#1e2128", surfaceHover: "#252932", surfaceActive: "#2c313b",
-	border: "#2a2e37", borderStrong: "#3a3f4a",
-	text: "#eef0f3", textMuted: "#a2a8b4", textSubtle: "#6e7480",
-	accent: "#2dd4bf", accentHover: "#5eead4", accentActive: "#14b8a6", accentText: "#042f2e", link: "#5eead4",
-	success: "#34d399", warning: "#fbbf24", danger: "#f87171",
-	scrollbar: "#3a3f4a", scrim: "#05060acc",
-	art: [3]string{"#0f3b3f", "#14706a", "#2dd4bf"},
+	background: "#0e0e10", panel: "#08080a", surface: "#19191d", surfaceHover: "#202025", surfaceActive: "#2a2a30",
+	border: "#222227", borderStrong: "#313137",
+	text: "#f2f2f4", textMuted: "#a9a9b3", textSubtle: "#75757f",
+	accent: "#14897e", accentHover: "#18978b", accentActive: "#117469", accentText: "#ffffff", link: "#7cc8bf",
+	brand:   "#2dd4bf",
+	success: "#3ecf8e", warning: "#f5b544", danger: "#f87171",
+	scrollbar: "#2e2e34", scrim: "#000000b3",
 }
 
 var lightPalette = palette{
-	background: "#eceff3", panel: "#e4e8ed", surface: "#ffffff", surfaceHover: "#f6f8fa", surfaceActive: "#d9dee5",
-	border: "#dfe3e8", borderStrong: "#c8ced6",
-	text: "#111418", textMuted: "#5b6472", textSubtle: "#8a919c",
-	accent: "#0d9488", accentHover: "#0f766e", accentActive: "#115e59", accentText: "#ffffff", link: "#0f766e",
-	success: "#047857", warning: "#b45309", danger: "#dc2626",
-	scrollbar: "#c3c8d4", scrim: "#0f121c59",
-	art: [3]string{"#b8ebe4", "#5fd1c3", "#14b8a6"},
+	background: "#ffffff", panel: "#f5f5f6", surface: "#ffffff", surfaceHover: "#f6f6f8", surfaceActive: "#ececef",
+	border: "#e8e8ec", borderStrong: "#d8d8de",
+	text: "#0c0c0e", textMuted: "#5d5d66", textSubtle: "#9a9aa3",
+	accent: "#0f766e", accentHover: "#115e59", accentActive: "#134e4a", accentText: "#ffffff", link: "#0f766e",
+	brand:   "#0d9488",
+	success: "#15803d", warning: "#b45309", danger: "#dc2626",
+	scrollbar: "#d0d0d6", scrim: "#0c0c0e59",
 }
 
 // Themes returns the uas light and dark themes, built over jamb's so every widget picks them up.
@@ -83,47 +85,70 @@ func buildTheme(t *ui.Theme, p palette) *ui.Theme {
 	t.Text, t.TextMuted, t.TextSubtle, t.Disabled = h(p.text), h(p.textMuted), h(p.textSubtle), h(p.textSubtle)
 	t.Accent, t.AccentHover, t.AccentActive = h(p.accent), h(p.accentHover), h(p.accentActive)
 	t.AccentText, t.Link, t.FocusRing = h(p.accentText), h(p.link), h(p.link)
-	t.AccentSoft = h(p.accent).Alpha(0.14)
+	t.AccentSoft = h(p.text).Alpha(0.08)
+	t.FocusRing = h(p.link)
 	t.Success, t.Warning, t.Danger = h(p.success), h(p.warning), h(p.danger)
 	t.Scrollbar, t.Scrim = h(p.scrollbar), h(p.scrim)
-	t.Radius, t.FontSize = radiusS, 14
+	t.Radius, t.FontSize = radiusS, 13
 
 	t.Sidebar = ui.SidebarStyle{
-		Pane:         ui.Style{Background: h(p.panel)},
-		Item:         ui.Style{Radius: radiusS, FontSize: 14, MinHeight: ui.Px(40)},
-		ItemSelected: ui.Style{Background: h(p.surfaceActive), TextColor: h(p.text), FontWeight: ui.FontSemibold},
-		Heading:      ui.Style{TextColor: h(p.textSubtle), FontSize: 11},
+		Pane: ui.Style{Background: h(p.panel), BorderColor: h(p.panel), Padding: ui.All(space2)},
+		Item: ui.Style{Radius: radiusS, FontSize: 13, MinHeight: ui.Px(30), TextColor: h(p.textMuted),
+			Padding: ui.XY(space2+2, 0), Gap: space2 + 2},
+		ItemHover:    ui.Style{Background: h(p.surfaceHover), TextColor: h(p.text)},
+		ItemSelected: ui.Style{Background: h(p.surfaceActive), TextColor: h(p.text), FontWeight: ui.FontMedium},
+		Heading: ui.Style{TextColor: h(p.textSubtle), FontSize: 11, FontWeight: ui.FontMedium,
+			Padding: ui.Edges{Top: space4, Right: 10, Bottom: space1, Left: 10}},
 	}
-	t.Buttons.Primary = ui.ButtonStyle{Root: ui.Style{FontWeight: ui.FontSemibold}}
-	// Cards are one flat color, lighter than the page; a clickable one lightens under the pointer.
+	t.Button = ui.ButtonStyle{Root: ui.Style{FontWeight: ui.FontMedium}}
+	// Teal marks what matters, sparingly: primary actions, links and focus.
+	t.Buttons.Primary = ui.ButtonStyle{Root: ui.Style{FontWeight: ui.FontMedium}}
+	t.Badge = ui.BadgeStyle{Badge: ui.Style{Background: h(p.surfaceActive)},
+		Label: ui.Style{TextColor: h(p.textMuted), FontWeight: ui.FontMedium}}
+	t.Buttons.Secondary = ui.ButtonStyle{
+		Root:      ui.Style{Background: h(p.surface), BorderColor: h(p.borderStrong)},
+		RootHover: ui.Style{Background: h(p.surfaceHover), BorderColor: h(p.borderStrong)},
+	}
+	t.Field = ui.FieldStyle{
+		Frame:            ui.Style{Background: h(p.surface), BorderColor: h(p.border)},
+		FrameHover:       ui.Style{BorderColor: h(p.borderStrong)},
+		FrameFocusWithin: ui.Style{BorderColor: h(p.textSubtle)},
+		Selection:        ui.Style{Background: h(p.link).Alpha(0.35)},
+	}
+	// Cards are a quiet fill a step off the page with a hairline border; a clickable one lightens under the
+	// pointer.
 	t.Card = ui.CardStyle{
-		Card:      ui.Style{Radius: radiusL, Padding: ui.All(space5), Gap: space3, Background: h(p.surface)},
-		CardHover: ui.Style{Background: h(p.surfaceHover), Cursor: ui.CursorPointer},
+		Card: ui.Style{Radius: radiusL, Padding: ui.All(space4), Gap: space3, Background: h(p.surface),
+			BorderWidth: 1, BorderColor: h(p.border)},
+		CardHover: ui.Style{Background: h(p.surfaceHover), BorderColor: h(p.borderStrong), Cursor: ui.CursorPointer},
 	}
 	return t
 }
 
-// artColors returns the featured banner's shape colors for the theme in use.
-func artColors(t *ui.Theme) [3]ui.Color {
-	p := lightPalette
+// brandColor is the teal of the uas mark, for the theme in use.
+func brandColor(t *ui.Theme) ui.Color {
 	if t.Dark {
-		p = darkPalette
+		return ui.Hex(darkPalette.brand)
 	}
-	return [3]ui.Color{ui.Hex(p.art[0]), ui.Hex(p.art[1]), ui.Hex(p.art[2])}
+	return ui.Hex(lightPalette.brand)
 }
 
 // Type scale.
-func display(s string) *ui.TextElement { return ui.Text(s).FontSize(38).Bold() }
-func title(s string) *ui.TextElement   { return ui.Text(s).FontSize(26).Bold() }
-func heading(s string) *ui.TextElement { return ui.Text(s).FontSize(20).Semibold() }
-func subhead(s string) *ui.TextElement { return ui.Text(s).FontSize(16).Semibold() }
+func title(s string) *ui.TextElement   { return ui.Text(s).FontSize(24).Semibold() }
+func heading(s string) *ui.TextElement { return ui.Text(s).FontSize(16).Semibold() }
+func subhead(s string) *ui.TextElement { return ui.Text(s).FontSize(14).Medium() }
 
 func muted(ctx *ui.Context, s string) *ui.TextElement {
-	return ui.Text(s).FontSize(14).TextColor(ctx.Theme().TextMuted)
+	return ui.Text(s).FontSize(13).TextColor(ctx.Theme().TextMuted)
 }
 
 func caption(ctx *ui.Context, s string) *ui.TextElement {
 	return ui.Text(s).FontSize(12).TextColor(ctx.Theme().TextMuted)
+}
+
+// section is a header and its content, kept closer together than sections are to each other.
+func section(header, content ui.Element) ui.Element {
+	return ui.Div().Column().Gap(space3).Child(header).Child(content)
 }
 
 // sectionHeader is a section's title with optional controls on the right, such as a "See all" link.
@@ -132,7 +157,7 @@ func sectionHeader(ctx *ui.Context, titleText, sub string, trailing ...ui.Elemen
 	if sub != "" {
 		left = left.Child(muted(ctx, sub))
 	}
-	row := ui.Div().Row().Align(ui.End).Gap(space3).Child(left)
+	row := ui.Div().Row().Align(ui.Center).Gap(space3).Child(left)
 	for _, el := range trailing {
 		row = row.Child(el)
 	}
@@ -147,21 +172,33 @@ func linkButton(_ *ui.Context, label string, icon *icons.Icon, onClick func()) u
 // chip is a rounded tag, such as a category on an app page.
 func chip(ctx *ui.Context, label string) ui.Element {
 	t := ctx.Theme()
-	return ui.Div().PaddingX(space3 + 2).PaddingY(6).Radius(16).Background(t.SurfaceActive).Shrink(0).
-		Child(ui.Text(label).FontSize(14))
+	return ui.Div().PaddingX(space2+2).Height(ui.Px(24)).Center().Radius(radiusS).Border(1, t.Border).
+		Background(t.Surface).Shrink(0).
+		Child(ui.Text(label).FontSize(12).TextColor(t.TextMuted))
 }
 
-// filterChip is one choice of a row of filters; the selected one is filled with the accent.
+// filterChip is one choice of a segmented row of filters (see segmented); the selected one is raised.
 func filterChip(ctx *ui.Context, label string, selected bool, onClick func()) ui.Element {
 	t := ctx.Theme()
-	d := ui.Div().PaddingX(space4 + 2).Height(ui.Px(38)).Radius(19).Center().Shrink(0).
+	d := ui.Div().PaddingX(space3).Height(ui.Px(26)).Radius(radiusS - 1).Center().Shrink(0).
 		Cursor(ui.CursorPointer).Role(access.RoleButton).Label(label).TabIndex(0).OnClick(onClick).
 		AccessSelected(selected)
 	if selected {
-		return d.Background(t.Accent).Child(ui.Text(label).FontSize(14).Semibold().TextColor(t.AccentText))
+		return d.Background(t.SurfaceActive).Child(ui.Text(label).FontSize(13).Medium())
 	}
-	return d.Background(t.Surface).Border(1, t.Border).Hover(ui.Style{Background: t.SurfaceHover}).
-		Child(ui.Text(label).FontSize(14))
+	return d.Hover(ui.Style{Background: t.SurfaceHover}).
+		Child(ui.Text(label).FontSize(13).TextColor(t.TextMuted))
+}
+
+// segmented holds filter chips in one bordered strip, like a segmented control.
+func segmented(ctx *ui.Context, chips ...ui.Element) *ui.DivElement {
+	t := ctx.Theme()
+	d := ui.Div().Row().Align(ui.Center).Gap(2).Padding(2).Radius(radiusS+2).Border(1, t.Border).
+		Background(t.Surface).Shrink(0)
+	for _, c := range chips {
+		d = d.Child(c)
+	}
+	return d
 }
 
 // tint is a source's color, by darkness.
@@ -205,44 +242,6 @@ func sourceColor(ctx *ui.Context, s catalog.SourceID) ui.Color { return tintColo
 const verifiedTip = "Flathub has confirmed that the publisher is the app's own developer, through the " +
 	"developer's website or code-hosting account"
 
-// sourceTag is a source's icon in its color followed by its name, as the lists show where an app comes from.
-func sourceTag(ctx *ui.Context, s catalog.SourceID) ui.Element {
-	return ui.Div().Row().Align(ui.Center).Gap(6).Shrink(0).Tooltip(s.Name() + ": " + sourceTips[s]).
-		Child(ui.Icon(sourceIcons[s]).Size(15).Color(sourceColor(ctx, s))).
-		Child(ui.Text(s.Name()).FontSize(13).TextColor(ctx.Theme().TextMuted))
-}
-
-// verifiedTag is the shield shown for a Flathub-verified publisher.
-func verifiedTag(ctx *ui.Context) ui.Element {
-	t := ctx.Theme()
-	return ui.Div().Row().Align(ui.Center).Gap(6).Shrink(0).Tooltip("Verified publisher: " + verifiedTip).
-		Child(ui.Icon(icons.ShieldCheck).Size(15).Color(t.Success)).
-		Child(ui.Text("Verified").FontSize(13).TextColor(t.TextMuted))
-}
-
-// sourceTags shows where an app is available, and whether its publisher is verified. With max above zero,
-// sources past max collapse into a "+n".
-func sourceTags(ctx *ui.Context, sources []catalog.SourceID, verified bool, max int) ui.Element {
-	// The tags keep their width; whatever sits beside them (such as the developer) gives way instead.
-	row := ui.Div().Row().Align(ui.Center).Gap(space4).Shrink(0)
-	for i, s := range sources {
-		if max > 0 && i == max {
-			rest := make([]string, 0, len(sources)-max)
-			for _, r := range sources[max:] {
-				rest = append(rest, r.Name())
-			}
-			row = row.Child(ui.Div().Tooltip("Also on " + strings.Join(rest, " and ")).
-				Child(caption(ctx, fmt.Sprintf("+%d", len(sources)-max))))
-			break
-		}
-		row = row.Child(sourceTag(ctx, s))
-	}
-	if verified {
-		row = row.Child(verifiedTag(ctx))
-	}
-	return row
-}
-
 // sourcePill is a source's name as a labeled pill, for places that spell sources out (Settings).
 func sourcePill(ctx *ui.Context, s catalog.SourceID) ui.Element {
 	c := sourceColor(ctx, s)
@@ -265,33 +264,17 @@ func statusPill(ctx *ui.Context, ok bool, label string) ui.Element {
 		Child(ui.Text(label).FontSize(12).Semibold().TextColor(c))
 }
 
-// statLine is an icon and a short figure, as the result rows show installs and release dates.
-func statLine(ctx *ui.Context, icon *icons.Icon, text, tip string) ui.Element {
-	t := ctx.Theme()
-	d := ui.Div().Row().Align(ui.Center).Gap(space2).Shrink(0).
-		Child(ui.Icon(icon).Size(16).Color(t.TextMuted)).
-		Child(ui.Text(text).FontSize(14).TextColor(t.TextMuted))
-	if tip != "" {
-		d = d.Tooltip(tip)
-	}
-	return d
-}
+// The uas logo, a package on a teal tile. brand/uas.svg is also the desktop icon, which keeps a margin
+// around the tile; in the app the tile fills the box.
+//
+//go:embed brand/uas.svg
+var logoSVG []byte
 
-// brandMark is the uas logo: the store icon on a teal tile.
-func brandMark(ctx *ui.Context, size float32) ui.Element {
-	t := ctx.Theme()
-	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.28).
-		BackgroundGradient(ui.LinearGradient(135, t.Accent, t.AccentActive)).Center().
-		Child(ui.Icon(icons.Store).Size(size * 0.55).Color(t.AccentText))
-}
+var logo = ui.MustSVG(bytes.Replace(logoSVG, []byte(`viewBox="0 0 128 128"`), []byte(`viewBox="8 8 112 112"`), 1))
 
-// iconTile frames an app icon on a surface tile, so icons of any shape sit on a consistent base.
-func (a *App) iconTile(ctx *ui.Context, url string, size float32, name string) ui.Element {
-	t := ctx.Theme()
-	pad := size * 0.14
-	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size * 0.24).Background(t.SurfaceActive).
-		Center().Shrink(0).
-		Child(a.appIcon(ctx, url, size-2*pad, name))
+// brandMark is the uas logo at size.
+func brandMark(_ *ui.Context, size float32) ui.Element {
+	return ui.SVG(logo).Size(ui.Px(size), ui.Px(size)).Alt("uas")
 }
 
 // compact formats a count like 1.2M or 34k.

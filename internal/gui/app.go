@@ -188,7 +188,7 @@ func (a *App) refreshCatalog(ctx context.Context) (refresh.Result, error) {
 }
 
 // sidebarWidth is the width of the navigation pane.
-const sidebarWidth = 236
+const sidebarWidth = 224
 
 // Root renders the window.
 func (a *App) Root(ctx *ui.Context) ui.Element {
@@ -223,10 +223,12 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		content = a.page(ctx, res.Data)
 	}
 
-	return ui.Div().Row().Size(ui.Full, ui.Full).Background(t.Background).TextColor(t.Text).
+	// The pages sit on an inset panel, a step off the sidebar, with a hairline border.
+	return ui.Div().Row().Size(ui.Full, ui.Full).Background(t.Panel).TextColor(t.Text).
 		Child(a.sidebar(ctx, res.Data, !res.Loading && res.Err == nil)).
-		Child(ui.Div().Width(ui.Px(1)).Height(ui.Full).Background(t.Border)).
 		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			MarginTop(space2).MarginRight(space2).MarginBottom(space2).
+			Radius(radiusXL).Border(1, t.Border).Background(t.Background).ClipContent().
 			Child(a.topBar(ctx)).
 			Child(content)).
 		Child(a.confirmDialog(ctx)).
@@ -260,17 +262,17 @@ func (a *App) page(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 
 // navCategories are the categories in the sidebar.
 var navCategories = []struct {
-	key, label, tip string
-	icon            *icons.Icon
+	key, label, tip, blurb string
+	icon                   *icons.Icon
 }{
-	{"Development", "Development", "Code editors, IDEs, debuggers and other tools for programmers", icons.Code},
-	{"Game", "Games", "Games, game launchers and emulators", icons.Gamepad2},
-	{"Graphics", "Graphics", "Image editors, drawing and painting, photo tools, 3D and design apps", icons.Palette},
-	{"Network", "Internet", "Browsers, chat, email, file sharing and remote desktop apps", icons.Globe},
-	{"AudioVideo", "Multimedia", "Music and video players, editors, recorders and streaming apps", icons.Play},
-	{"Office", "Productivity", "Documents, spreadsheets, notes, calendars and other productivity apps", icons.CircleCheck},
-	{"System", "System", "System monitors, settings, terminals, disk and hardware tools", icons.Settings},
-	{"Utility", "Utilities", "Small tools: calculators, archivers, clipboard managers and the like", icons.Wrench},
+	{"Development", "Development", "Code editors, IDEs, debuggers and other tools for programmers", "Editors, IDEs, tools", icons.Code},
+	{"Game", "Games", "Games, game launchers and emulators", "Games, launchers, emulators", icons.Gamepad2},
+	{"Graphics", "Graphics", "Image editors, drawing and painting, photo tools, 3D and design apps", "Photo, drawing, 3D", icons.Palette},
+	{"Network", "Internet", "Browsers, chat, email, file sharing and remote desktop apps", "Browsers, chat, email", icons.Globe},
+	{"AudioVideo", "Multimedia", "Music and video players, editors, recorders and streaming apps", "Players, editors, streaming", icons.Play},
+	{"Office", "Productivity", "Documents, spreadsheets, notes, calendars and other productivity apps", "Documents, notes, calendars", icons.CircleCheck},
+	{"System", "System", "System monitors, settings, terminals, disk and hardware tools", "Monitors, terminals, disks", icons.Settings},
+	{"Utility", "Utilities", "Small tools: calculators, archivers, clipboard managers and the like", "Calculators, archivers", icons.Wrench},
 }
 
 func categoryLabel(key string) string {
@@ -313,9 +315,9 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 	// The selected item's fill marks it; no bar beside it.
 	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).NoIndicator().
 		OnChange(func(key string) { a.goTo(navView(key)) }).
-		Header(ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingTop(space4).PaddingBottom(space3).
-			Child(brandMark(ctx, 30)).
-			Child(ui.Text("uas").FontSize(18).Bold())).
+		Header(ui.Div().Row().Align(ui.Center).Gap(space2 + 2).PaddingX(space2).PaddingTop(space2).PaddingBottom(space3).
+			Child(brandMark(ctx, 24)).
+			Child(ui.Text("uas").FontSize(15).Semibold())).
 		Footer(a.sidebarFooter(ctx, info, ready))
 }
 
@@ -330,21 +332,22 @@ func (a *App) sidebarFooter(ctx *ui.Context, info catalog.BuildInfo, ready bool)
 	if checking {
 		status = "Checking for a newer catalog…"
 	}
-	return ui.Div().Column().Gap(2).PaddingX(space4).PaddingY(space4).
+	return ui.Div().Column().Gap(2).PaddingX(space2 + 2).PaddingY(space3).
 		Child(ui.Div().Row().Align(ui.Center).Gap(6).
-			Child(ui.Div().Size(ui.Px(7), ui.Px(7)).Radius(4).Background(t.Success)).
-			Child(ui.Text(compactThousands(info.Apps) + " apps").FontSize(12).Semibold())).
+			Child(ui.Div().Size(ui.Px(6), ui.Px(6)).Radius(3).Background(t.Success.Alpha(0.7))).
+			Child(ui.Text(compactThousands(info.Apps) + " apps").FontSize(12).Medium())).
 		Child(caption(ctx, status))
 }
 
-// topBar holds the back button, the search field and the settings button.
+// topBar holds the back button and where you are, the search field and the settings button.
 func (a *App) topBar(ctx *ui.Context) ui.Element {
 	t := ctx.Theme()
-	back := ui.Element(ui.Div().Width(ui.Px(36)))
+	left := ui.Div().Row().Align(ui.Center).Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))
 	if len(a.history.Get()) > 1 {
-		back = ui.IconButton(icons.ChevronLeft).Label("Back").Tooltip("Back").OnClick(a.back)
+		left = left.Child(ui.IconButton(icons.ArrowLeft).Ghost().Small().Label("Back").Tooltip("Back").
+			OnClick(a.back))
 	}
-	frame := ui.FieldStyle{Frame: ui.Style{Radius: 22, Background: t.Surface}}
+	left = left.Child(a.crumbs(ctx))
 	var search ui.Element
 	if v := a.current(); v.isList() {
 		// Installed and Updates filter their own list instead of searching the catalog.
@@ -353,23 +356,102 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 			placeholder = "Filter updates…"
 		}
 		search = ui.TextInput(a.listFilter).Label("Filter apps").Placeholder(placeholder).Icon(icons.ListFilter).
-			Large().Clearable().Width(ui.Full).Styles(frame).Key("list-filter")
+			Small().Clearable().Width(ui.Full).Key("list-filter")
 	} else {
 		search = ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps…").Icon(icons.Search).
-			Large().Clearable().Width(ui.Full).Styles(frame).Key("search").
+			Small().Clearable().Width(ui.Full).Key("search").
 			OnChange(a.typed).
 			OnSubmit(func(s string) {
 				a.search.Set(strings.TrimSpace(s))
 				a.showSearch()
 			})
 	}
-	settings := ui.IconButton(icons.Settings).Label("Settings").Tooltip("Settings").
+	settings := ui.IconButton(icons.Settings).Ghost().Label("Settings").Tooltip("Settings").
 		OnClick(func() { a.goTo(view{page: pageSettings}) })
-	return ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space6).PaddingTop(space4).PaddingBottom(space2).
-		Child(back).
-		Child(ui.Div().Row().Justify(ui.Center).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Child(ui.Div().MaxWidth(ui.Px(860)).Grow(1).Basis(ui.Px(0)).Child(search))).
+	return ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).Height(ui.Px(52)).Shrink(0).
+		BorderEdges(ui.Edges{Bottom: 1}, t.Border).
+		Child(left).
+		Child(ui.Div().Width(ui.Px(340)).Shrink(1).MinWidth(ui.Px(160)).Child(search)).
 		Child(settings)
+}
+
+// crumbs names the page on screen, after the page it was opened from when that helps.
+func (a *App) crumbs(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	h := a.history.Get()
+	v := h[len(h)-1]
+	name := func(v view) string {
+		switch v.page {
+		case pageHome:
+			return "Home"
+		case pageSearch:
+			return "Search"
+		case pageSources:
+			return "Sources"
+		case pageCategory:
+			return categoryLabel(v.arg)
+		case pageSource:
+			return catalog.SourceID(v.arg).Name()
+		case pageInstalled:
+			return "Installed"
+		case pageUpdates:
+			return "Updates"
+		case pageSettings:
+			return "Settings"
+		}
+		return ""
+	}
+	row := ui.Div().Row().Align(ui.Center).Gap(6).MinWidth(ui.Px(0))
+	if v.page == pageApp {
+		// The app's name comes from the query its page runs, so it is usually there already.
+		res := ui.Query(ctx, a.key("app", v.arg), func(c context.Context) (*catalog.App, error) {
+			db, err := a.catalog(c)
+			if err != nil {
+				return nil, err
+			}
+			return db.Resolve(c, v.arg)
+		})
+		app := ""
+		if res.Data != nil {
+			app = res.Data.Name
+		}
+		for i := len(h) - 2; i >= 0; i-- {
+			if n := name(h[i]); n != "" {
+				row = row.Child(ui.Text(n).FontSize(13).TextColor(t.TextMuted).Shrink(0)).
+					Child(ui.Text("/").FontSize(13).TextColor(t.TextSubtle))
+				break
+			}
+		}
+		return row.Child(ui.Text(app).FontSize(13).Medium().Truncate())
+	}
+	return row.Child(ui.Icon(crumbIcon(v)).Size(15).Color(t.TextMuted)).
+		Child(ui.Text(name(v)).FontSize(13).Medium().Truncate())
+}
+
+// crumbIcon is the sidebar's icon for a view.
+func crumbIcon(v view) *icons.Icon {
+	switch v.page {
+	case pageSearch:
+		return icons.Search
+	case pageSources:
+		return icons.Layers
+	case pageSource:
+		return sourceIcons[catalog.SourceID(v.arg)]
+	case pageCategory:
+		for _, c := range navCategories {
+			if c.key == v.arg {
+				return c.icon
+			}
+		}
+		return icons.Flame
+	case pageInstalled:
+		return icons.Download
+	case pageUpdates:
+		return icons.RefreshCw
+	case pageSettings:
+		return icons.Settings
+	}
+	return icons.LayoutGrid
 }
 
 // typed reacts to the search field: it opens the search page and searches what the field holds, on every

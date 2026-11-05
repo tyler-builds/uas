@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyler-builds/jamb/access"
 	"github.com/tyler-builds/jamb/dialog"
 	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
@@ -21,7 +22,7 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 	res := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
 	ups := a.updates(ctx)
 	page := pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, icons.Download, ui.Color{}, "Installed",
+		Child(pageHeader(ctx, "Installed",
 			"Everything installed on this system, from every source.",
 			ui.Div().Row().Gap(space2).
 				Child(a.addAppImageButton(ctx)).
@@ -50,11 +51,11 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 		}
 	}
 	actions := ui.Div().Row().Gap(space2).
-		Child(ui.If(len(with) > 0, ui.Button(updatesLabel(len(with))).Icon(icons.Download).Primary().
+		Child(ui.If(len(with) > 0, ui.Button(updatesLabel(len(with))).Icon(icons.Download).Primary().Small().
 			OnClick(func() { a.updateAll(ctx, with) }))).
 		Child(a.refreshButton(ctx, res, ups))
 	page := pageBody(listMaxWidth).
-		Child(a.listHeader(ctx, icons.RefreshCw, ui.Color{}, "Updates",
+		Child(pageHeader(ctx, "Updates",
 			"Newer versions from Flathub, Homebrew and GitHub. Layered packages update with the system.",
 			actions))
 	switch {
@@ -93,15 +94,15 @@ func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map
 	}
 	bar := ui.Div().Row().Align(ui.Center).Gap(space4)
 	if len(counts) > 1 {
-		chips := ui.Div().Row().Gap(space2).Wrap().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Child(filterChip(ctx, "All", src == "", func() { a.listSource.Set("") }))
+		chips := segmented(ctx, filterChip(ctx, "All", src == "", func() { a.listSource.Set("") }))
 		for _, s := range sources {
 			if n := counts[s]; n > 0 {
 				chips = chips.Child(filterChip(ctx, fmt.Sprintf("%s %d", s.Name(), n), src == s,
 					func() { a.listSource.Set(s) }))
 			}
 		}
-		bar = bar.Child(chips).Child(muted(ctx, count))
+		bar = bar.Child(ui.Div().Row().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(chips)).
+			Child(muted(ctx, count))
 	} else {
 		bar = bar.Child(muted(ctx, count))
 	}
@@ -115,9 +116,9 @@ func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map
 					a.listSource.Set("")
 				})))
 	}
-	list := ui.Div().Column().Gap(space3)
-	for _, in := range shown {
-		list = list.Child(a.installedRow(ctx, in, ups))
+	list := listBox(ctx)
+	for i, in := range shown {
+		list = list.Child(a.installedRow(ctx, in, ups, i == 0))
 	}
 	return ui.Div().Column().Gap(space5).Child(bar).Child(list)
 }
@@ -139,7 +140,7 @@ func matchesFilter(in backend.InstalledApp, q string) bool {
 // addAppImageButton asks for a downloaded AppImage and adds it, so uas keeps it up to date.
 func (a *App) addAppImageButton(ctx *ui.Context) ui.Element {
 	_, busy := a.running("add-appimage")
-	return ui.Button("Add AppImage").Icon(icons.FilePlus).Secondary().Loading(busy).
+	return ui.Button("Add AppImage").Icon(icons.FilePlus).Secondary().Small().Loading(busy).
 		Tooltip("Add an AppImage you downloaded. uas moves it into its own folder, adds it to your app menu " +
 			"and keeps it up to date when the AppImage says where its updates come from.").
 		OnClick(func() {
@@ -171,7 +172,7 @@ func (a *App) addAppImage(ctx *ui.Context, path string) {
 // refreshButton checks again for installed apps and updates.
 func (a *App) refreshButton(ctx *ui.Context, res ui.QueryResult[[]backend.InstalledApp],
 	ups ui.QueryResult[map[string]string]) ui.Element {
-	return ui.Button("Refresh").Icon(icons.RefreshCw).Secondary().Loading(res.Fetching || ups.Fetching).
+	return ui.Button("Refresh").Icon(icons.RefreshCw).Secondary().Small().Loading(res.Fetching || ups.Fetching).
 		OnClick(func() {
 			res.Refetch()
 			ups.Refetch()
@@ -201,7 +202,7 @@ func (a *App) updateAll(ctx *ui.Context, apps []backend.InstalledApp) {
 }
 
 // installedRow is one installed app, matched to the catalog for its icon and page when possible.
-func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[string]string) ui.Element {
+func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[string]string, first bool) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
 		match := ui.Query(ctx, a.key("resolve", in.AppID), func(c context.Context) (*catalog.App, error) {
@@ -243,15 +244,21 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 			meta = append(meta, "installed from a file")
 		}
 
-		row := ui.Div().Row().Align(ui.Center).Gap(space5).PaddingX(space6).PaddingY(space4).
-			Radius(radiusL).Background(t.Surface).
-			Child(a.appIcon(ctx, icon, 56, name)).
-			Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-				Child(ui.Text(name).FontSize(17).Semibold().Truncate()).
-				Child(ui.If(summary != "", ui.Text(summary).FontSize(14).TextColor(t.TextMuted).Truncate())).
-				Child(ui.Div().Row().Align(ui.Center).Gap(space4).MarginTop(space1).
-					Child(sourceTag(ctx, in.Source)).
-					Child(caption(ctx, strings.Join(meta, " · "))))).
+		// The row opens the app's page when the catalog has it.
+		text := ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Div().Row().Align(ui.Center).Gap(space2).MinWidth(ui.Px(0)).
+				Child(ui.Text(name).FontSize(14).Medium().Truncate().Shrink(0)).
+				Child(ui.If(summary != "", ui.Text(summary).FontSize(13).TextColor(t.TextMuted).Truncate()))).
+			Child(metaLine(ctx, append([]ui.Element{ui.Div().Tooltip(in.Source.Name() + ": " + sourceTips[in.Source]).
+				Shrink(0).Child(ui.Text(in.Source.Name()).FontSize(12).TextColor(t.TextSubtle))},
+				ui.Text(strings.Join(meta, " · ")).FontSize(12).TextColor(t.TextSubtle).Truncate())...))
+		if match.Data != nil {
+			text = text.Cursor(ui.CursorPointer).OnClick(func() { a.openApp(appID) }).
+				Role(access.RoleLink).Label(name + " details").TabIndex(0)
+		}
+		row := listRow(ctx, first).
+			Child(a.appIcon(ctx, icon, 36, name)).
+			Child(text).
 			Child(ui.If(in.Pending, statusChip(ctx, "After restart", t.Warning)))
 
 		actions := ui.Div().Row().Align(ui.Center).Gap(space2).Shrink(0)
@@ -260,16 +267,14 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 			if version != "" {
 				label = "Update to " + version
 			}
-			actions = actions.Child(ui.Button(label).Icon(icons.Download).Primary().Loading(busy).OnClick(func() {
+			actions = actions.Child(ui.Button(label).Icon(icons.Download).Secondary().Small().Loading(busy).
+				Styles(ui.ButtonStyle{Icon: ui.Style{TextColor: t.Link}}).OnClick(func() {
 				a.startJob(ctx, appID, "Updating "+name, false, name+" is up to date",
 					func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
 			}))
 		}
-		if match.Data != nil {
-			actions = actions.Child(linkButton(ctx, "Details", icons.ChevronRight, func() { a.openApp(appID) }))
-		}
 		if in.Origin != "local file" {
-			actions = actions.Child(ui.Button("Remove").Secondary().Disabled(busy).OnClick(func() {
+			actions = actions.Child(ui.Button("Remove").Secondary().Small().Disabled(busy).OnClick(func() {
 				a.removing.Set(&removal{app: in, name: name})
 			}))
 		}

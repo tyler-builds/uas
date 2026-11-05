@@ -161,7 +161,7 @@ func TestGitHubInstallAsksWithTrustScore(t *testing.T) {
 	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
 	u.ByRole(access.RoleTextField, "Search apps").Type("tool")
 	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
-	u.Get("row:github:example/tool").ByRole(access.RoleButton, "Details").Click()
+	u.Get("row:github:example/tool").ByRole(access.RoleLink, "tool details").Click()
 	waitText(t, u, "detail:github:example/tool", "Trust score")
 
 	clickButton(u, "Install") // the row's Install button installs from the recommended source

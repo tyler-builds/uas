@@ -97,7 +97,7 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 			Child(muted(ctx, "uas collects no usage data. If that ever changes, it will be a setting that is off until you turn it on."))
 
 		page := ui.Div().Column().Gap(space5).Padding(space8).MaxWidth(ui.Px(820)).
-			Child(title("Settings")).
+			Child(pageHeader(ctx, "Settings", "", nil)).
 			Child(flatpak).Child(cat).Child(system).Child(privacy)
 		return scroll(page)
 	}).Key("settings")

@@ -24,20 +24,20 @@ func (a *App) homePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	fresh := a.browse(ctx, catalog.BrowseQuery{AppsOnly: true, Order: catalog.OrderUpdated,
 		MinPopularity: newMinPopularity, Limit: cols})
 
-	page := pageBody(homeMaxWidth).
-		Child(a.featured(ctx, info)).
-		Child(sectionHeader(ctx, "Popular Apps", "", linkButton(ctx, "See all", icons.ArrowRight, func() {
+	spot := a.browse(ctx, catalog.BrowseQuery{AppsOnly: true, Order: catalog.OrderPopular, Limit: 12})
+	page := pageBody(homeMaxWidth).Gap(space8 + space1).
+		Child(a.intro(ctx, info)).
+		Child(a.spotlight(ctx, spot)).
+		Child(section(sectionHeader(ctx, "Popular Apps", "", linkButton(ctx, "See all", icons.ArrowRight, func() {
 			a.browseOrder.Set(catalog.OrderPopular)
 			a.open(view{page: pageCategory})
-		}))).
-		Child(a.cardRow(ctx, popular, cols)).
-		Child(sectionHeader(ctx, "New & Updated", "", linkButton(ctx, "See all", icons.ArrowRight, func() {
+		})), a.cardRow(ctx, popular, cols))).
+		Child(section(sectionHeader(ctx, "New & Updated", "", linkButton(ctx, "See all", icons.ArrowRight, func() {
 			a.browseOrder.Set(catalog.OrderUpdated)
 			a.open(view{page: pageCategory})
-		}))).
-		Child(a.cardRow(ctx, fresh, cols)).
-		Child(sectionHeader(ctx, "Browse by Source", "")).
-		Child(a.sourceTiles(ctx))
+		})), a.cardRow(ctx, fresh, cols))).
+		Child(section(sectionHeader(ctx, "Categories", ""), a.categoryTiles(ctx))).
+		Child(section(sectionHeader(ctx, "Sources", ""), a.sourceTiles(ctx)))
 	return scroll(page)
 }
 
@@ -56,10 +56,10 @@ func (a *App) browse(ctx *ui.Context, q catalog.BrowseQuery) ui.QueryResult[[]ca
 
 // cardRow lays out a row of app cards.
 func (a *App) cardRow(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResult], cols int) ui.Element {
-	grid := ui.Div().Grid(repeatFr(cols)...).Gap(space4)
+	grid := ui.Div().Grid(repeatFr(cols)...).Gap(space3)
 	if res.Loading {
 		for range cols {
-			grid = grid.Child(ui.Skeleton().Height(ui.Px(128)))
+			grid = grid.Child(ui.Skeleton().Height(ui.Px(76)))
 		}
 		return grid
 	}
@@ -69,59 +69,71 @@ func (a *App) cardRow(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResult
 	return grid
 }
 
-// featured is the banner at the top of the home page, with geometric art drawn on a canvas.
-func (a *App) featured(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
-	t := ctx.Theme()
-	art := artColors(t)
-	surface := t.Surface
+// intro is the top of the home page: a title and a line about the catalog, with a way to browse it.
+func (a *App) intro(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	system := a.s.Platform.PrettyName
 	if system == "" {
 		system = "your system"
 	}
-	draw := func(p *ui.Painter, w, h float32) {
-		p.FillRect(0, 0, w, h, ui.LinearPaint(0, 0, w, h,
-			ui.ColorStop{At: 0, Color: surface}, ui.ColorStop{At: 1, Color: art[0].Alpha(0.6)}))
-		shape := func(c ui.Color, alpha float32, pts ...[2]float32) {
-			path := ui.NewPath().MoveTo(pts[0][0]*w, pts[0][1]*h)
-			for _, pt := range pts[1:] {
-				path.LineTo(pt[0]*w, pt[1]*h)
-			}
-			path.Close()
-			p.Fill(path, ui.LinearPaint(pts[0][0]*w, h, w, 0,
-				ui.ColorStop{At: 0, Color: c.Alpha(alpha * 0.55)}, ui.ColorStop{At: 1, Color: c.Alpha(alpha)}))
-		}
-		shape(art[0], 0.95, [2]float32{0.52, 1}, [2]float32{0.70, 0.18}, [2]float32{0.86, 0}, [2]float32{1, 0}, [2]float32{1, 1})
-		shape(art[1], 0.55, [2]float32{0.60, 0}, [2]float32{0.76, 0}, [2]float32{0.58, 1}, [2]float32{0.44, 1})
-		shape(art[1], 0.85, [2]float32{0.66, 1}, [2]float32{0.80, 0.42}, [2]float32{1, 0.26}, [2]float32{1, 1})
-		shape(art[2], 0.80, [2]float32{0.84, 1}, [2]float32{0.92, 0.58}, [2]float32{1, 0.48}, [2]float32{1, 1})
-		shape(art[2], 0.35, [2]float32{0.88, 0}, [2]float32{1, 0}, [2]float32{1, 0.30})
-	}
-	// The art is decoration (RoleUnknown: no image node), so the words and the button laid over it are read
-	// as plain elements.
-	// The padding is on a child: a canvas draws inside its padding, which would inset the art. The rounded
-	// clip is on a parent: a canvas's own Radius and ClipContent don't clip what it draws (see jamb-notes.md).
-	return ui.Div().Radius(radiusXL).ClipContent().Child(ui.Canvas(draw).Size(ui.Full, ui.Px(220)).
-		Role(access.RoleUnknown).
-		Child(ui.Div().Column().Justify(ui.Center).Gap(space3).PaddingX(space8 + 8).Height(ui.Full).
-			Child(ui.Text("FEATURED").FontSize(12).Semibold().TextColor(t.TextMuted)).
-			Child(display("Every app for " + system + ". One store.").FontSize(32)).
-			Child(ui.Text(compactThousands(info.Apps) + " apps from Flathub, Fedora, Homebrew, COPR and GitHub, " +
-				"checked and ranked in one place.").FontSize(15).TextColor(t.TextMuted)).
-			Child(ui.Div().Row().MarginTop(space1).Child(a.featuredButton(ctx)))))
-}
-
-// featuredButton is the banner's light call to action.
-func (a *App) featuredButton(ctx *ui.Context) ui.Element {
-	ink := ui.Hex("#111418")
-	return ui.Div().Row().Align(ui.Center).Gap(space2).PaddingX(space4).Height(ui.Px(40)).Radius(radiusS).
-		Background(ui.Hex("#f4f6f8")).Hover(ui.Style{Background: ui.Hex("#ffffff")}).Shadow(ui.ShadowSm).
-		Cursor(ui.CursorPointer).Role(access.RoleButton).Label("Browse popular apps").TabIndex(0).
-		OnClick(func() {
+	return pageHeader(ctx, "Discover", compactThousands(info.Apps)+" apps for "+system+" from Flathub, Fedora, "+
+		"Homebrew, COPR and GitHub, checked and ranked in one place.",
+		ui.Button("Browse all").IconEnd(icons.ArrowRight).Secondary().Small().OnClick(func() {
 			a.browseOrder.Set(catalog.OrderPopular)
 			a.open(view{page: pageCategory})
-		}).
-		Child(ui.Text("Browse popular").FontSize(15).Semibold().TextColor(ink)).
-		Child(ui.Icon(icons.ArrowRight).Size(16).Color(ink))
+		}))
+}
+
+// spotlight features one popular app, a different one each day: its name, summary and first screenshot,
+// with Install and a way to its page.
+func (a *App) spotlight(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResult]) ui.Element {
+	t := ctx.Theme()
+	const height = 232
+	if len(res.Data) == 0 {
+		return ui.Skeleton().Height(ui.Px(height))
+	}
+	r := res.Data[time.Now().YearDay()%len(res.Data)]
+	app := ui.Query(ctx, a.key("app", r.ID), func(c context.Context) (*catalog.App, error) {
+		db, err := a.catalog(c)
+		if err != nil {
+			return nil, err
+		}
+		return db.Resolve(c, r.ID)
+	})
+	var shot ui.Element = ui.Div()
+	if app.Data != nil && len(app.Data.Screenshots) > 0 {
+		s := app.Data.Screenshots[0]
+		url := s.ThumbURL
+		if url == "" {
+			url = s.URL
+		}
+		// The whole screenshot, framed and centered in the card's right side.
+		shot = ui.Div().Width(ui.Px(340)).Height(ui.Full).Shrink(0).Center().PaddingX(space6).
+			Child(a.screenshot(url, 280, ""))
+	}
+	_, busy := a.running(r.ID)
+	installed := a.installedApps(ctx)
+	var action ui.Element = ui.Button("Install").Icon(icons.Download).Primary().Small().Loading(busy).
+		OnClick(func() { a.quickInstall(ctx, r) })
+	if _, ok := installed.find(r); ok {
+		action = ui.Button("Installed").Icon(icons.Check).Secondary().Small().OnClick(func() { a.openApp(r.ID) })
+	}
+	glow := brandColor(t)
+	return ui.Div().Row().Height(ui.Px(height)).Radius(radiusXL).Border(1, t.Border).ClipContent().
+		BackgroundGradient(ui.LinearGradient(120, t.Surface, t.Surface.Mix(glow, 0.06))).
+		Child(ui.Div().Column().Justify(ui.Center).Gap(space2).PaddingX(space8).Grow(1).Basis(ui.Px(0)).
+			MinWidth(ui.Px(0)).
+			Child(ui.Div().Row().Align(ui.Center).Gap(6).
+				Child(ui.Icon(icons.Sparkles).Size(13).Color(glow)).
+				Child(ui.Text("Spotlight").FontSize(12).Medium().TextColor(t.TextMuted))).
+			Child(ui.Div().Row().Align(ui.Center).Gap(space3).MarginTop(space1).
+				Child(a.appIcon(ctx, r.IconURL, 44, r.Name)).
+				Child(ui.Text(r.Name).FontSize(22).Medium().Truncate())).
+			Child(ui.Text(r.Summary).FontSize(14).TextColor(t.TextMuted).MaxLines(2)).
+			Child(metaLine(ctx, sourceWords(ctx, r.Sources, r.Verified, 0)...)).
+			Child(ui.Div().Row().Gap(space2).MarginTop(space2).
+				Child(action).
+				Child(ui.Button("View details").Secondary().Small().OnClick(func() { a.openApp(r.ID) })))).
+		Child(shot)
 }
 
 // sourceTiles are the sources with their app counts, each opening its list.
@@ -134,20 +146,43 @@ func (a *App) sourceTiles(ctx *ui.Context) ui.Element {
 		}
 		return db.SourceCounts(c)
 	}, ui.QueryStaleTime(time.Hour))
-	// At most three across on the widest page; fewer as the window narrows.
-	grid := ui.Div().Grid(ui.AutoFill(340)).Gap(space4)
-	for _, s := range catalog.SourcePrecedence {
+	// One strip, split by hairlines, with a cell per source.
+	strip := ui.Div().Row().Align(ui.Stretch).Radius(radiusL).Border(1, t.Border).Background(t.Surface).ClipContent()
+	for i, s := range catalog.SourcePrecedence {
 		s := s
 		c := sourceColor(ctx, s)
-		grid = grid.Child(ui.Card().Row().Align(ui.Center).Gap(space4).
-			Label(s.Name()).OnClick(func() { a.open(view{page: pageSource, arg: string(s)}) }).
-			Tooltip(sourceTips[s]).
-			Child(ui.Div().Size(ui.Px(48), ui.Px(48)).Radius(radiusM).Background(c.Alpha(0.15)).Center().
-				Child(ui.Icon(sourceIcons[s]).Size(26).Color(c))).
-			Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+		cell := ui.Div().Row().Align(ui.Center).Gap(space3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			PaddingX(space4).PaddingY(space3).Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
+			Role(access.RoleButton).Label(s.Name()).TabIndex(0).Tooltip(sourceTips[s]).
+			OnClick(func() { a.open(view{page: pageSource, arg: string(s)}) }).
+			Child(ui.Icon(sourceIcons[s]).Size(18).Color(c)).
+			Child(ui.Div().Column().Gap(1).MinWidth(ui.Px(0)).
 				Child(subhead(s.Name())).
-				Child(muted(ctx, plural(counts.Data[s], "app", "apps")))).
-			Child(ui.Icon(icons.ChevronRight).Size(20).Color(t.TextMuted)))
+				Child(caption(ctx, plural(counts.Data[s], "app", "apps"))))
+		if i > 0 {
+			cell = cell.BorderEdges(ui.Edges{Left: 1}, t.Border)
+		}
+		strip = strip.Child(cell)
+	}
+	grid := strip
+	return grid
+}
+
+// categoryTiles are the sidebar's categories as tiles, each opening its list.
+func (a *App) categoryTiles(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	grid := ui.Div().Grid(repeatFr(gridColumns(ctx, homeMaxWidth, 220, 4))...).Gap(space1)
+	for _, c := range navCategories {
+		c := c
+		grid = grid.Child(ui.Div().Row().Align(ui.Center).Gap(space3).Padding(space2).Radius(radiusM).
+			Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
+			Role(access.RoleButton).Label(c.label).TabIndex(0).
+			Tooltip(c.tip).OnClick(func() { a.goTo(view{page: pageCategory, arg: c.key}) }).
+			Child(ui.Div().Size(ui.Px(36), ui.Px(36)).Radius(radiusM).Background(t.Surface).Border(1, t.Border).
+				Center().Shrink(0).Child(ui.Icon(c.icon).Size(17).Color(t.TextMuted))).
+			Child(ui.Div().Column().Gap(1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(subhead(c.label)).
+				Child(ui.Text(c.blurb).FontSize(12).TextColor(t.TextMuted).Truncate())))
 	}
 	return grid
 }

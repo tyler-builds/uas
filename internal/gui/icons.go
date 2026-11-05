@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyler-builds/jamb/icons"
 	"github.com/tyler-builds/jamb/ui"
 )
 
@@ -107,9 +106,7 @@ func decodePicture(b []byte) (picture, error) {
 
 // appIcon shows an app's icon at size, or a placeholder while it loads or when there is none.
 func (a *App) appIcon(ctx *ui.Context, url string, size float32, name string) ui.Element {
-	t := ctx.Theme()
-	placeholder := ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size / 5).Background(t.Surface).Center().
-		Child(ui.Icon(icons.Package).Size(size / 2).Color(t.TextMuted))
+	placeholder := monogram(ctx, name, size)
 	if url == "" {
 		return placeholder
 	}
@@ -129,6 +126,30 @@ func (a *App) appIcon(ctx *ui.Context, url string, size float32, name string) ui
 		}
 		return placeholder
 	}).Key("icon:" + url)
+}
+
+// monogramTints are the hues of app monograms, picked by name so an app keeps its color.
+var monogramTints = []string{"#5eead4", "#93c5fd", "#c4b5fd", "#fcd34d", "#fda4af", "#86efac"}
+
+// monogram stands in for a missing app icon: the name's first letter on a tile tinted by the name.
+func monogram(ctx *ui.Context, name string, size float32) ui.Element {
+	t := ctx.Theme()
+	letter := "?"
+	for _, r := range name {
+		letter = strings.ToUpper(string(r))
+		break
+	}
+	sum := 0
+	for _, r := range name {
+		sum += int(r)
+	}
+	c := ui.Hex(monogramTints[sum%len(monogramTints)])
+	if !t.Dark {
+		c = c.Darken(0.45)
+	}
+	return ui.Div().Size(ui.Px(size), ui.Px(size)).Radius(size*0.24).Background(c.Alpha(0.14)).
+		Border(1, c.Alpha(0.22)).Center().Shrink(0).
+		Child(ui.Text(letter).FontSize(size * 0.44).Semibold().TextColor(c))
 }
 
 // screenshot shows an app screenshot scaled to width, keeping its aspect ratio.
@@ -154,8 +175,8 @@ func (a *App) screenshot(url string, width float32, caption string) ui.Element {
 			height = width * float32(h) / float32(w)
 		}
 		return ui.Div().Column().Gap(6).
-			Child(ui.Image(res.Data.img).Size(ui.Px(width), ui.Px(height)).Radius(8).Fit(ui.FitContain).
-				Alt(caption)).
+			Child(ui.Div().Radius(radiusM).Border(1, t.Border).ClipContent().
+				Child(ui.Image(res.Data.img).Size(ui.Px(width), ui.Px(height)).Fit(ui.FitContain).Alt(caption))).
 			Child(ui.If(caption != "", ui.Text(caption).FontSize(12).TextColor(t.TextMuted)))
 	}).Key("shot:" + url)
 }
