@@ -28,6 +28,9 @@ type Info struct {
 	IconExt     string // ".png" or ".svg"
 	// Metainfo is the app's AppStream metainfo file (usr/share/metainfo), if it ships one.
 	Metainfo []byte
+	// ElectronUpdate holds the keys of resources/app-update.yml, where apps built with electron-builder say
+	// where their updates come from.
+	ElectronUpdate map[string]string
 }
 
 const maxIcon = 4 << 20
@@ -151,6 +154,9 @@ func fromFS(fsys fs.FS) (*Info, error) {
 		}
 	}
 	info.Metainfo = findMetainfo(fsys, names[pick])
+	if b, err := readFile(fsys, "resources/app-update.yml", maxDesktop); err == nil {
+		info.ElectronUpdate = parseYAMLKeys(string(b))
+	}
 	return info, nil
 }
 

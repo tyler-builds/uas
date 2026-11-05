@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -19,7 +21,7 @@ import (
 
 // buildAppImage makes an AppImage-shaped file: an ELF64 header with a .upd_info section holding update,
 // followed by a squashfs image with a desktop entry named name. It needs mksquashfs.
-func buildAppImage(t *testing.T, name, version, update string) []byte {
+func buildAppImage(t *testing.T, name, version, update string, extra ...string) []byte {
 	t.Helper()
 	mksquashfs, err := exec.LookPath("mksquashfs")
 	if err != nil {
@@ -32,6 +34,10 @@ func buildAppImage(t *testing.T, name, version, update string) []byte {
 		"X-AppImage-Version=%s\n", name, version)
 	os.WriteFile(filepath.Join(root, "org.example.App.desktop"), []byte(desktop), 0o644)
 	os.WriteFile(filepath.Join(root, "app.svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), 0o644)
+	for i := 0; i+1 < len(extra); i += 2 { // extra files: path, contents, ...
+		os.MkdirAll(filepath.Join(root, filepath.Dir(extra[i])), 0o755)
+		os.WriteFile(filepath.Join(root, extra[i]), []byte(extra[i+1]), 0o644)
+	}
 	img := filepath.Join(dir, "img.sqfs")
 	if out, err := exec.Command(mksquashfs, root, img, "-quiet", "-noappend", "-comp", "gzip").CombinedOutput(); err != nil {
 		t.Fatalf("mksquashfs: %v\n%s", err, out)
@@ -286,5 +292,97 @@ func TestAdopt(t *testing.T) {
 	}
 	if err := b.Remove(ctx, backend.InstalledApp{Source: catalog.SourceGitHub, Ref: "example/notes"}, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func sha512b64(b []byte) string {
+	h := sha512.Sum512(b)
+	return base64.StdEncoding.EncodeToString(h[:])
+}
+
+func electronFeed(version string, body []byte) []byte {
+	return []byte(fmt.Sprintf("version: %s\nfiles:\n  - url: App-%s.AppImage\n    sha512: %s\n    size: %d\n"+
+		"    blockMapSize: 1234\n  - url: app_%s_amd64.deb\n    sha512: %s\n    size: 10\n"+
+		"path: App-%s.AppImage\nsha512: %s\nreleaseDate: '2026-10-20T12:48:49.418Z'\n",
+		version, version, sha512b64(body), len(body), version, sha512b64([]byte("deb")), version, sha512b64(body)))
+}
+
+// TestElectronUpdates follows the feed an electron-builder app names in resources/app-update.yml.
+func TestElectronUpdates(t *testing.T) {
+	cfg := "provider: generic\nurl: https://updates.example.com/app/linux\nupdaterCacheDirName: app-updater\n"
+	v1 := buildAppImage(t, "Example App", "1.0.0", "", "resources/app-update.yml", cfg)
+	v2 := buildAppImage(t, "Example App", "1.1.0", "", "resources/app-update.yml", cfg)
+	srv := files{}
+	b := newBackend(t, srv, catalog.Listing{})
+	l := &Local{GH: b}
+	ctx := context.Background()
+	f, err := ReadFile(writeDownload(t, v1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.UpdateErr != nil || f.Update.String() != "electron-updater|https://updates.example.com/app/linux/latest-linux.yml" {
+		t.Fatalf("update = %q, %v", f.Update.String(), f.UpdateErr)
+	}
+	app, err := l.Add(ctx, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.Origin != "updates.example.com" {
+		t.Errorf("origin = %q", app.Origin)
+	}
+
+	srv["https://updates.example.com/app/linux/latest-linux.yml"] = electronFeed("1.0.0", v1)
+	if ups, _ := l.Updates(ctx); len(ups) != 0 {
+		t.Errorf("updates while current = %+v", ups)
+	}
+	l.latest = nil
+	srv["https://updates.example.com/app/linux/latest-linux.yml"] = electronFeed("1.1.0", v2)
+	srv["https://updates.example.com/app/linux/App-1.1.0.AppImage"] = v2
+	ups, _ := l.Updates(ctx)
+	if len(ups) != 1 || ups[0].Version != "1.1.0" {
+		t.Fatalf("updates = %+v", ups)
+	}
+	if err := l.Update(ctx, app, nil); err != nil {
+		t.Fatal(err)
+	}
+	apps, _ := l.Installed(ctx)
+	if len(apps) != 1 || apps[0].Version != "1.1.0" {
+		t.Errorf("installed = %+v", apps)
+	}
+}
+
+// TestKnownFeed gives an AppImage that names no update source a known feed, also when it was added before
+// uas knew the feed and kept no SHA-512.
+func TestKnownFeed(t *testing.T) {
+	v1 := buildAppImage(t, "Example App", "1.0.0", "")
+	b := newBackend(t, files{}, catalog.Listing{})
+	l := &Local{GH: b}
+	ctx := context.Background()
+	f, err := ReadFile(writeDownload(t, v1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := l.Add(ctx, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := b.State.Load()
+	st.AppImages[0].SHA512 = ""
+	b.State.Save(st)
+
+	knownFeeds["org.example.App"] = "electron-updater|https://example.com/feed/latest-linux.yml"
+	defer delete(knownFeeds, "org.example.App")
+	b.Client.Transport = files{"https://example.com/feed/latest-linux.yml": electronFeed("1.0.0", v1)}
+	if apps, _ := l.Installed(ctx); apps[0].Origin != "example.com" {
+		t.Errorf("origin = %q", apps[0].Origin)
+	}
+	if ups, _ := l.Updates(ctx); len(ups) != 0 {
+		t.Errorf("updates = %+v", ups)
+	}
+	if st, _ := b.State.Load(); st.AppImages[0].SHA512 == "" {
+		t.Error("the SHA-512 was not filled in")
+	}
+	if err := l.Update(ctx, app, nil); err != nil {
+		t.Errorf("Update when current: %v", err)
 	}
 }

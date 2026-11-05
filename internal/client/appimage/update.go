@@ -13,12 +13,13 @@ import (
 // in the runtime's .upd_info section, as AppImageUpdate reads it. See
 // https://github.com/AppImage/AppImageSpec/blob/master/draft.md#update-information.
 type Update struct {
-	// Kind is "gh-releases-zsync", "gh-releases-direct" or "zsync".
+	// Kind is "gh-releases-zsync", "gh-releases-direct", "zsync", or uas's own "electron-updater".
 	Kind string
 	// For the GitHub kinds: the repo, the release ("latest", "latest-pre", "latest-all" or a tag) and a
 	// pattern of the file in it, with * wildcards (the .zsync file, or the AppImage itself for direct).
 	Owner, Repo, Release, Pattern string
-	// For zsync: the URL of the .zsync file.
+	// For zsync: the URL of the .zsync file. For electron-updater: the URL of the feed. The GitHub fields are
+	// also set when the feed is in a GitHub release.
 	URL string
 }
 
@@ -33,7 +34,7 @@ var ghName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 // String returns the update information as the AppImage holds it.
 func (u Update) String() string {
-	if u.Kind == UpdateZsync {
+	if u.Kind == UpdateZsync || u.Kind == UpdateElectron {
 		return u.Kind + "|" + u.URL
 	}
 	return strings.Join([]string{u.Kind, u.Owner, u.Repo, u.Release, u.Pattern}, "|")
@@ -58,6 +59,11 @@ func ParseUpdate(s string) (Update, error) {
 			return Update{}, fmt.Errorf("appimage: bad update information %q", s)
 		}
 		return Update{Kind: parts[0], Owner: parts[1], Repo: parts[2], Release: parts[3], Pattern: parts[4]}, nil
+	case UpdateElectron:
+		if len(parts) != 2 {
+			return Update{}, fmt.Errorf("appimage: bad update information %q", s)
+		}
+		return parseElectron(parts[1])
 	case UpdateZsync:
 		if len(parts) != 2 || !strings.HasPrefix(parts[1], "https://") {
 			return Update{}, fmt.Errorf("appimage: bad update information %q (uas follows only https URLs)", s)

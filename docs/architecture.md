@@ -265,8 +265,13 @@ type Backend interface {
   GitHub install and updates from the catalog. Otherwise it is kept as
   `~/.local/share/uas/appimages/file__<id>.AppImage` with a launcher, recorded in the state file, and updated
   from where the update information points. uas follows `gh-releases-zsync` and `gh-releases-direct` through
-  GitHub's releases API, and `zsync` URLs over https. A new file is used only if it matches a published
-  checksum: GitHub's SHA-256 digest of the release file, and the SHA-1 in the `.zsync` header. The file is
+  GitHub's releases API, and `zsync` URLs over https. Apps built with electron-builder leave `.upd_info` empty
+  and name their feed in `resources/app-update.yml` instead. uas follows its `generic`, `github` and `s3`
+  providers to the `latest-linux.yml` feed and checks the feed's SHA-512. A short list of known feeds
+  (`knownFeeds`) covers apps that name none in their files, such as CurseForge. It applies to installs
+  added before the feed was known too. A new file is used only if it matches a published
+  checksum: GitHub's SHA-256 digest of the release file, the SHA-1 in the `.zsync` header, or the feed's
+  SHA-512. The file is
   downloaded whole; zsync's partial downloads aren't used. Release lookups are unauthenticated, which
   GitHub limits to 60 an hour, so results are kept for an hour. The user's file is copied first and deleted
   only once the add succeeds. On btrfs the copy shares the file's data. An AppImage with no update information

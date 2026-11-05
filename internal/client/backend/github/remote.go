@@ -3,6 +3,8 @@ package github
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,15 +26,18 @@ type remoteFile struct {
 	Size    int64  // 0 when unknown
 	SHA256  string // hex, when GitHub publishes the file's digest
 	SHA1    string // hex, from the .zsync file
-	Version string // the release's tag, for GitHub
+	SHA512  string // hex, from an electron-updater feed
+	Version string // the release's tag, for GitHub, or the feed's version
 }
 
 // sameAs reports whether the remote file is the one with these checksums. ok is false when the remote file
 // has no checksum to compare.
-func (r remoteFile) sameAs(sha256, sha1 string) (same, ok bool) {
+func (r remoteFile) sameAs(sha256, sha512, sha1 string) (same, ok bool) {
 	switch {
 	case r.SHA256 != "":
 		return r.SHA256 == sha256, true
+	case r.SHA512 != "":
+		return r.SHA512 == sha512, true
 	case r.SHA1 != "":
 		return r.SHA1 == sha1, true
 	}
@@ -59,8 +64,11 @@ var hexSHA1 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // latestFile finds the file that u points to now.
 func (b *Backend) latestFile(ctx context.Context, api string, u appimage.Update) (remoteFile, error) {
-	if u.Kind == appimage.UpdateZsync {
+	switch u.Kind {
+	case appimage.UpdateZsync:
 		return b.zsyncFile(ctx, u.URL)
+	case appimage.UpdateElectron:
+		return b.electronFile(ctx, u.URL)
 	}
 	rel, err := b.release(ctx, api, u)
 	if err != nil {
@@ -198,4 +206,43 @@ func (b *Backend) zsyncFile(ctx context.Context, zsyncURL string) (remoteFile, e
 		name = path.Base(file.Path)
 	}
 	return remoteFile{URL: file.String(), Name: name, Size: size, SHA1: sha1}, nil
+}
+
+// maxFeed caps an electron-updater feed.
+const maxFeed = 1 << 20
+
+// electronFile reads an electron-updater feed (latest-linux.yml) for its AppImage, whose URL is relative to
+// the feed's.
+func (b *Backend) electronFile(ctx context.Context, feed string) (remoteFile, error) {
+	base, err := url.Parse(feed)
+	if err != nil || base.Scheme != "https" {
+		return remoteFile{}, fmt.Errorf("update feed %s is not an https URL", feed)
+	}
+	resp, err := b.get(ctx, feed)
+	if err != nil {
+		return remoteFile{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeed))
+	if err != nil {
+		return remoteFile{}, err
+	}
+	rel, err := appimage.ParseElectronFeed(string(body))
+	if err != nil {
+		return remoteFile{}, err
+	}
+	ref, err := url.Parse(rel.URL)
+	if err != nil {
+		return remoteFile{}, fmt.Errorf("update feed %s: bad file URL %q", feed, rel.URL)
+	}
+	file := base.ResolveReference(ref)
+	if file.Scheme != "https" {
+		return remoteFile{}, fmt.Errorf("update feed points to %s, which is not https", file)
+	}
+	sum, err := base64.StdEncoding.DecodeString(rel.SHA512)
+	if err != nil || len(sum) != 64 {
+		return remoteFile{}, fmt.Errorf("update feed %s has a bad SHA-512", feed)
+	}
+	return remoteFile{URL: file.String(), Name: path.Base(file.Path), Size: rel.Size,
+		SHA512: hex.EncodeToString(sum), Version: rel.Version}, nil
 }

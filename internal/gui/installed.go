@@ -109,7 +109,7 @@ func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map
 	if len(shown) == 0 {
 		return ui.Div().Column().Gap(space5).Child(bar).
 			Child(ui.Empty("No apps match").Icon(icons.ListFilter).
-				Description("Nothing "+what+" matches the filter.").
+				Description("Nothing " + what + " matches the filter.").
 				Action(ui.Button("Clear filter").Secondary().OnClick(func() {
 					a.listFilter.Set("")
 					a.listSource.Set("")

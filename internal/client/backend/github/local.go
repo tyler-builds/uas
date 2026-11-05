@@ -2,15 +2,13 @@ package github
 
 import (
 	"context"
-	"crypto/sha1"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,46 +56,79 @@ func ReadFile(path string) (*File, error) {
 	if err == nil {
 		file.Update, err = appimage.ParseUpdate(raw)
 	}
+	if err != nil && info.ElectronUpdate != nil {
+		// Apps built with electron-builder say where their updates come from inside the image instead.
+		if u, eerr := info.ElectronFeed(arch()); eerr == nil {
+			file.Update, err = u, nil
+		}
+	}
+	if err != nil {
+		if known, ok := knownFeeds[fileID(file)]; ok {
+			file.Update, err = appimage.ParseUpdate(known)
+		}
+	}
 	file.UpdateErr = err
 	return file, nil
 }
 
+// knownFeeds are where some AppImages that don't say where their updates come from get them, by the ID uas
+// keeps them under. Each feed publishes a checksum of the AppImage.
+var knownFeeds = map[string]string{
+	// CurseForge's app-update.yml names a GitLab provider with no project; the app finds its feed in code.
+	"curseforge": appimage.UpdateElectron + "|https://curseforge.overwolf.com/electron/linux/latest-linux.yml",
+}
+
+// updateSource is the update information an added AppImage follows: its own, else a known feed.
+func updateSource(a state.FileAppImage) string {
+	if a.Update != "" {
+		return a.Update
+	}
+	return knownFeeds[a.ID]
+}
+
+func arch() string {
+	if runtime.GOARCH == "arm64" {
+		return "aarch64"
+	}
+	return "x86_64"
+}
+
 // take copies the user's file into Dirs.AppImages as a temporary file and returns its path and checksums.
 // The user's file stays until the add has succeeded.
-func (b *Backend) take(f *File, k string) (tmp, sum256, sum1 string, err error) {
+func (b *Backend) take(f *File, k string) (tmp string, sum sums, err error) {
 	if b.owns(f.Path) {
-		return "", "", "", errors.New("this AppImage is already managed by uas")
+		return "", sums{}, errors.New("this AppImage is already managed by uas")
 	}
 	if err := os.MkdirAll(b.Dirs.AppImages, 0o755); err != nil {
-		return "", "", "", err
+		return "", sums{}, err
 	}
 	for _, d := range []string{b.Dirs.Icons, b.Dirs.Applications} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return "", "", "", err
+			return "", sums{}, err
 		}
 	}
 	src, err := os.Open(f.Path)
 	if err != nil {
-		return "", "", "", err
+		return "", sums{}, err
 	}
 	defer src.Close()
 	tmp = filepath.Join(b.Dirs.AppImages, "."+k+".adding")
 	dst, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", "", "", err
+		return "", sums{}, err
 	}
-	h256, h1 := sha256.New(), sha1.New()
+	h := newHasher()
 	// On Linux, copying file to file uses copy_file_range, which shares the data on btrfs instead of
 	// copying it.
-	_, err = io.Copy(dst, io.TeeReader(src, io.MultiWriter(h256, h1)))
+	_, err = io.Copy(dst, io.TeeReader(src, h))
 	if cerr := dst.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
 		os.Remove(tmp)
-		return "", "", "", err
+		return "", sums{}, err
 	}
-	return tmp, hex.EncodeToString(h256.Sum(nil)), hex.EncodeToString(h1.Sum(nil)), nil
+	return tmp, h.sums(), nil
 }
 
 // Adopt adds an AppImage file as the install of a GitHub listing, so it updates from the catalog like an
@@ -107,7 +138,7 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 		return backend.ErrWrongSource
 	}
 	k := key(l.Ref)
-	tmp, sum256, _, err := b.take(f, k)
+	tmp, sum, err := b.take(f, k)
 	if err != nil {
 		return err
 	}
@@ -118,7 +149,7 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 	}
 	old, _ := st.Find(l.Ref)
 	version, asset := fileVersion(f.Info), filepath.Base(f.Path)
-	if a, ok := b.Pick(l); ok && a.SHA256 == sum256 {
+	if a, ok := b.Pick(l); ok && a.SHA256 == sum.SHA256 {
 		version, asset = l.Version, a.Name
 	}
 	p, err := b.place(ctx, tmp, k, l.Name, l.Summary, "github:"+l.Ref, old.IconFile, f.Info)
@@ -128,7 +159,7 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 	if old.Kind == catalog.AssetFlatpak {
 		b.uninstallBundle(ctx, old.FlatpakRef, progress)
 	}
-	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: version, Asset: asset, SHA256: sum256,
+	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: version, Asset: asset, SHA256: sum.SHA256,
 		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, InstalledAt: b.now()})
 	if err := b.State.Save(st); err != nil {
 		return err
@@ -195,7 +226,8 @@ func (l *Local) Installed(context.Context) ([]backend.InstalledApp, error) {
 	var apps []backend.InstalledApp
 	for _, a := range st.AppImages {
 		apps = append(apps, backend.InstalledApp{Source: catalog.SourceAppImage, Ref: a.ID, AppID: a.ID,
-			Name: a.Name, Version: a.Version, Scope: "user", Origin: updateOrigin(a.Update), Icon: iconURL(a.IconFile)})
+			Name: a.Name, Version: a.Version, Scope: "user", Origin: updateOrigin(updateSource(a)),
+			Icon: iconURL(a.IconFile)})
 	}
 	return apps, nil
 }
@@ -229,7 +261,7 @@ func updateOrigin(info string) string {
 func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress)) (backend.InstalledApp, error) {
 	id := fileID(f)
 	k := fileKey(id)
-	tmp, sum256, sum1, err := l.GH.take(f, k)
+	tmp, sum, err := l.GH.take(f, k)
 	if err != nil {
 		return backend.InstalledApp{}, err
 	}
@@ -249,7 +281,7 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 		update = f.Update.String()
 	}
 	a := state.FileAppImage{ID: id, Name: p.name, Version: fileVersion(f.Info), Update: update,
-		SHA256: sum256, SHA1: sum1, Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile,
+		SHA256: sum.SHA256, SHA512: sum.SHA512, SHA1: sum.SHA1, Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile,
 		InstalledAt: l.GH.now()}
 	st.PutAppImage(a)
 	if err := l.GH.State.Save(st); err != nil {
@@ -301,16 +333,26 @@ func (l *Local) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) 
 		return nil, err
 	}
 	var ups []backend.AvailableUpdate
-	for _, a := range st.AppImages {
-		if a.Update == "" {
+	changed := false
+	for i, a := range st.AppImages {
+		src := updateSource(a)
+		if src == "" {
 			continue
 		}
-		f, err := l.latestFile(ctx, a.Update, false)
+		f, err := l.latestFile(ctx, src, false)
 		if err != nil {
 			continue
 		}
-		if same, ok := f.sameAs(a.SHA256, a.SHA1); ok && !same {
+		if f.SHA512 != "" && a.SHA512 == "" && fillSums(&st.AppImages[i]) == nil {
+			a, changed = st.AppImages[i], true
+		}
+		if same, ok := f.sameAs(a.SHA256, a.SHA512, a.SHA1); ok && !same {
 			ups = append(ups, backend.AvailableUpdate{Ref: a.ID, Scope: "user", Version: f.Version})
+		}
+	}
+	if changed {
+		if err := l.GH.State.Save(st); err != nil {
+			return ups, err
 		}
 	}
 	return ups, nil
@@ -330,15 +372,21 @@ func (l *Local) Update(ctx context.Context, app backend.InstalledApp, progress f
 	if !ok {
 		return fmt.Errorf("appimage: %s is not installed", app.Ref)
 	}
-	if a.Update == "" {
+	src := updateSource(a)
+	if src == "" {
 		return fmt.Errorf("%s doesn't say where its updates come from; download a new version and add it", a.Name)
 	}
-	report(progress, "Checking "+updateOrigin(a.Update)+" for a new version")
-	f, err := l.latestFile(ctx, a.Update, true)
+	report(progress, "Checking "+updateOrigin(src)+" for a new version")
+	f, err := l.latestFile(ctx, src, true)
 	if err != nil {
 		return err
 	}
-	same, ok := f.sameAs(a.SHA256, a.SHA1)
+	if f.SHA512 != "" && a.SHA512 == "" {
+		if err := fillSums(&a); err != nil {
+			return err
+		}
+	}
+	same, ok := f.sameAs(a.SHA256, a.SHA512, a.SHA1)
 	if !ok {
 		return fmt.Errorf("%s has no published checksum, so uas can't check the download", f.Name)
 	}
@@ -349,7 +397,7 @@ func (l *Local) Update(ctx context.Context, app backend.InstalledApp, progress f
 	k := fileKey(a.ID)
 	tmp := filepath.Join(l.GH.Dirs.AppImages, "."+k+".download")
 	defer os.Remove(tmp)
-	sum256, sum1, err := l.GH.fetch(ctx, f, tmp, progress)
+	sum, err := l.GH.fetch(ctx, f, tmp, progress)
 	if err != nil {
 		return err
 	}
@@ -367,8 +415,8 @@ func (l *Local) Update(ctx context.Context, app backend.InstalledApp, progress f
 			a.Update = u.String()
 		}
 	}
-	a.Name, a.SHA256, a.SHA1, a.Path, a.DesktopFile, a.IconFile = p.name, sum256, sum1, p.path, p.desktopFile,
-		p.iconFile
+	a.Name, a.Path, a.DesktopFile, a.IconFile = p.name, p.path, p.desktopFile, p.iconFile
+	a.SHA256, a.SHA512, a.SHA1 = sum.SHA256, sum.SHA512, sum.SHA1
 	a.Version = fileVersion(info)
 	if a.Version == "" {
 		a.Version = f.Version
@@ -385,6 +433,22 @@ func fileVersion(info *appimage.Info) string {
 		return v[1:]
 	}
 	return v
+}
+
+// fillSums computes the checksums of an AppImage added before uas kept its SHA-512.
+func fillSums(a *state.FileAppImage) error {
+	f, err := os.Open(a.Path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := newHasher()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	sum := h.sums()
+	a.SHA256, a.SHA512, a.SHA1 = sum.SHA256, sum.SHA512, sum.SHA1
+	return nil
 }
 
 func updateInfoOf(path string) (string, error) {

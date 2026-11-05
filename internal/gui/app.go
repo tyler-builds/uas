@@ -57,11 +57,11 @@ type App struct {
 	history *ui.Signal[[]view]
 	navSel  *ui.Signal[string] // the sidebar's selected key
 
-	query        *ui.Signal[string] // the search field's text
-	search       *ui.Signal[string] // the query being searched, set after a pause in typing
+	query  *ui.Signal[string] // the search field's text
+	search *ui.Signal[string] // the query being searched, set after a pause in typing
 	// listFilter and listSource narrow the Installed and Updates lists.
-	listFilter *ui.Signal[string]
-	listSource *ui.Signal[catalog.SourceID]
+	listFilter   *ui.Signal[string]
+	listSource   *ui.Signal[catalog.SourceID]
 	searchSource *ui.Signal[catalog.SourceID]
 	searchOrder  *ui.Signal[catalog.Order]
 	browseOrder  *ui.Signal[catalog.Order]

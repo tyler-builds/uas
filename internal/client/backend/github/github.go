@@ -11,9 +11,11 @@ import (
 	"context"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -210,20 +212,20 @@ func (b *Backend) place(ctx context.Context, tmp, k, name, summary, source, oldI
 
 // download fetches an asset to dst, checking its size and SHA-256.
 func (b *Backend) download(ctx context.Context, a catalog.Asset, dst string, progress func(backend.Progress)) error {
-	_, _, err := b.fetch(ctx, remoteFile{URL: a.URL, Name: a.Name, Size: a.Size, SHA256: a.SHA256}, dst, progress)
+	_, err := b.fetch(ctx, remoteFile{URL: a.URL, Name: a.Name, Size: a.Size, SHA256: a.SHA256}, dst, progress)
 	return err
 }
 
 // fetch downloads f to dst, checking its size and every checksum it has (it must have one), and returns the
 // file's SHA-256 and SHA-1.
 func (b *Backend) fetch(ctx context.Context, f remoteFile, dst string,
-	progress func(backend.Progress)) (sum256, sum1 string, err error) {
-	if f.SHA256 == "" && f.SHA1 == "" {
-		return "", "", fmt.Errorf("download %s: no published checksum to check it against", f.Name)
+	progress func(backend.Progress)) (sums, error) {
+	if f.SHA256 == "" && f.SHA512 == "" && f.SHA1 == "" {
+		return sums{}, fmt.Errorf("download %s: no published checksum to check it against", f.Name)
 	}
 	resp, err := b.get(ctx, f.URL)
 	if err != nil {
-		return "", "", fmt.Errorf("download %s: %w", f.Name, err)
+		return sums{}, fmt.Errorf("download %s: %w", f.Name, err)
 	}
 	defer resp.Body.Close()
 	limit := int64(maxAppImage)
@@ -232,26 +234,47 @@ func (b *Backend) fetch(ctx context.Context, f remoteFile, dst string,
 	}
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", "", err
+		return sums{}, err
 	}
-	h256, h1 := sha256.New(), sha1.New()
+	h := newHasher()
 	pw := &progressWriter{total: f.Size, name: f.Name, report: progress}
-	n, err := io.Copy(io.MultiWriter(out, h256, h1, pw), io.LimitReader(resp.Body, limit+1))
+	n, err := io.Copy(io.MultiWriter(out, h, pw), io.LimitReader(resp.Body, limit+1))
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("download %s: %w", f.Name, err)
+		return sums{}, fmt.Errorf("download %s: %w", f.Name, err)
 	}
 	if n > limit || (f.Size > 0 && n != f.Size) {
-		return "", "", fmt.Errorf("download %s: got %d bytes, expected %d", f.Name, n, f.Size)
+		return sums{}, fmt.Errorf("download %s: got %d bytes, expected %d", f.Name, n, f.Size)
 	}
-	sum256, sum1 = hex.EncodeToString(h256.Sum(nil)), hex.EncodeToString(h1.Sum(nil))
-	if (f.SHA256 != "" && sum256 != f.SHA256) || (f.SHA1 != "" && sum1 != f.SHA1) {
-		return "", "", fmt.Errorf("download %s: checksum mismatch; the file is not the one published", f.Name)
+	got := h.sums()
+	if (f.SHA256 != "" && got.SHA256 != f.SHA256) || (f.SHA512 != "" && got.SHA512 != f.SHA512) ||
+		(f.SHA1 != "" && got.SHA1 != f.SHA1) {
+		return sums{}, fmt.Errorf("download %s: checksum mismatch; the file is not the one published", f.Name)
 	}
 	report(progress, "Checksum verified")
-	return sum256, sum1, nil
+	return got, nil
+}
+
+// sums are a file's checksums, in hex.
+type sums struct{ SHA256, SHA512, SHA1 string }
+
+// hasher computes sums while a file is written through it.
+type hasher struct{ h256, h512, h1 hash.Hash }
+
+func newHasher() *hasher { return &hasher{sha256.New(), sha512.New(), sha1.New()} }
+
+func (h *hasher) Write(p []byte) (int, error) {
+	h.h256.Write(p)
+	h.h512.Write(p)
+	h.h1.Write(p)
+	return len(p), nil
+}
+
+func (h *hasher) sums() sums {
+	return sums{hex.EncodeToString(h.h256.Sum(nil)), hex.EncodeToString(h.h512.Sum(nil)),
+		hex.EncodeToString(h.h1.Sum(nil))}
 }
 
 // Updates implements backend.UpdateChecker: an app has an update when the release file the catalog offers

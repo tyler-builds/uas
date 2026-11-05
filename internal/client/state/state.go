@@ -47,7 +47,8 @@ type FileAppImage struct {
 	// or "" when it has none and can't update itself.
 	Update      string    `json:"update,omitempty"`
 	SHA256      string    `json:"sha256"`
-	SHA1        string    `json:"sha1"` // zsync files give only SHA-1
+	SHA512      string    `json:"sha512,omitempty"` // electron-updater feeds give only SHA-512
+	SHA1        string    `json:"sha1"`             // zsync files give only SHA-1
 	Path        string    `json:"path"`
 	DesktopFile string    `json:"desktop_file,omitempty"`
 	IconFile    string    `json:"icon_file,omitempty"`
