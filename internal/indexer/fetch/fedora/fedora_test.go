@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -158,10 +160,13 @@ func repomd(primary string) []byte {
 }
 
 func TestFetch(t *testing.T) {
-	icon64, icon128 := []byte("png 64"), []byte("png 128")
+	var icon64, icon128 bytes.Buffer
+	png.Encode(&icon64, image.NewGray(image.Rect(0, 0, 64, 64)))
+	png.Encode(&icon128, image.NewGray(image.Rect(0, 0, 128, 128)))
 	rpm := buildRPM(t, map[string][]byte{"./usr/share/swcatalog/xml/fedora.xml.gz": gz(appstreamXML),
-		"./usr/share/swcatalog/icons/fedora/64x64/example-editor.png":   icon64,
-		"./usr/share/swcatalog/icons/fedora/128x128/example-editor.png": icon128,
+		"./usr/share/swcatalog/icons/fedora/64x64/example-editor.png":   icon64.Bytes(),
+		"./usr/share/swcatalog/icons/fedora/128x128/example-editor.png": icon128.Bytes(),
+		"./usr/share/swcatalog/icons/fedora/64x64/oldtool.png":          {}, // empty: no icon
 		"./usr/share/swcatalog/icons/fedora/64x64/unrelated.png":        []byte("png")})
 	files := map[string][]byte{
 		"/releases/45/Everything/x86_64/os/repodata/repomd.xml": repomd("repodata/abc-primary.xml.gz"),
@@ -206,8 +211,8 @@ func TestFetch(t *testing.T) {
 	if ls[1].AppStreamID != "oldtool.desktop" || ls[1].Kind != catalog.KindDesktopApp {
 		t.Errorf("old tool = %+v", ls[1])
 	}
-	// The editor's largest cached icon is saved and published; the old tool's icon file is missing.
-	sum := sha256.Sum256(icon128)
+	// The editor's largest cached icon is saved and published; the old tool's icon file is empty.
+	sum := sha256.Sum256(icon128.Bytes())
 	name := hex.EncodeToString(sum[:]) + ".png"
 	if ed.IconURL != "https://catalog.example/icons/"+name || ls[1].IconURL != "" {
 		t.Errorf("icons = %q, %q", ed.IconURL, ls[1].IconURL)

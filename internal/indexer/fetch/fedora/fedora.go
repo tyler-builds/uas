@@ -6,12 +6,14 @@
 package fedora
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
@@ -283,8 +285,8 @@ func (f *Fetcher) addCachedIcons(rpmPath string, listings []catalog.Listing, cac
 	for i, names := range cached {
 		for _, n := range names {
 			b, ok := found[n]
-			if !ok {
-				continue
+			if _, err := png.DecodeConfig(bytes.NewReader(b)); !ok || err != nil {
+				continue // missing, or not a picture (appstream-data has a few empty files)
 			}
 			sum := sha256.Sum256(b)
 			name := hex.EncodeToString(sum[:]) + ".png"

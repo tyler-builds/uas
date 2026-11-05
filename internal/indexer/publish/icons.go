@@ -40,7 +40,11 @@ func Icons(ctx context.Context, store Store, dir string, log *slog.Logger) (int,
 	}
 	var todo []string
 	for _, e := range entries {
-		if name := e.Name(); iconName.MatchString(name) && !have["icons/"+name] {
+		name := e.Name()
+		if info, err := e.Info(); err != nil || info.Size() == 0 {
+			continue // an empty file is no icon
+		}
+		if iconName.MatchString(name) && !have["icons/"+name] {
 			todo = append(todo, name)
 		}
 	}
