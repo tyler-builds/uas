@@ -638,9 +638,22 @@ func displayName(repoName string, assets []catalog.Asset) string {
 			}
 			words = append(words, w)
 		}
-		if len(words) > 0 && squash(strings.Join(words, "")) == squash(repoName) {
+		if len(words) > 0 && (squash(strings.Join(words, "")) == squash(repoName) ||
+			squash(strings.Join(words, "")) == squash(withoutAppImage(repoName))) {
 			return strings.Join(words, " ")
 		}
+	}
+	return withoutAppImage(repoName)
+}
+
+// appImageWord matches "AppImage" at either end of a repo name, as in "ghostty-appimage", a repo that
+// repackages an app as an AppImage.
+var appImageWord = regexp.MustCompile(`(?i)(^appimage[-_.]|[-_.]appimage$)`)
+
+// withoutAppImage drops "AppImage" from either end of a repo name.
+func withoutAppImage(repoName string) string {
+	if s := appImageWord.ReplaceAllString(repoName, ""); s != "" {
+		return s
 	}
 	return repoName
 }

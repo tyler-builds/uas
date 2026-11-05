@@ -96,3 +96,16 @@ releaseDate: '2026-10-20T12:48:49.418Z'
 		t.Error("accepted a feed with no AppImage")
 	}
 }
+
+func TestNameFromFile(t *testing.T) {
+	for file, want := range map[string]string{
+		"/home/u/AppImages/ghostty.appimage":     "Ghostty",
+		"Ghostty-1.4.0-anylinux-x86_64.AppImage": "Ghostty",
+		"obs-studio_32.0-x86_64.AppImage":        "Obs Studio",
+		"CurseForge-1.325.0-41594.AppImage":      "CurseForge",
+	} {
+		if got := NameFromFile(file); got != want {
+			t.Errorf("NameFromFile(%q) = %q, want %q", file, got, want)
+		}
+	}
+}

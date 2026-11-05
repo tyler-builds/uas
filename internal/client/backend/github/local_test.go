@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"crypto/sha512"
@@ -384,5 +385,37 @@ func TestKnownFeed(t *testing.T) {
 	}
 	if err := l.Update(ctx, app, nil); err != nil {
 		t.Errorf("Update when current: %v", err)
+	}
+}
+
+// TestAddDwarFS adds an AppImage whose files are in a DwarFS image, which uas can't read: it gets its name
+// from the file name and still follows its update information.
+func TestAddDwarFS(t *testing.T) {
+	const update = "gh-releases-zsync|example|app|latest|App-*x86_64.AppImage.zsync"
+	img := buildAppImage(t, "Example App", "1.0", update)
+	off := bytes.Index(img, []byte("hsqs"))
+	img = append(img[:off:off], []byte("DWARFS\x02\x05not really dwarfs")...)
+	b := newBackend(t, files{}, catalog.Listing{})
+	l := &Local{GH: b}
+	src := filepath.Join(t.TempDir(), "Ghostty-1.4.0-x86_64.AppImage")
+	os.WriteFile(src, img, 0o755)
+	if _, err := ReadFile(src); err == nil {
+		t.Fatal("accepted a DwarFS file without the AppImage magic")
+	}
+	copy(img[8:], "AI\x02")
+	os.WriteFile(src, img, 0o755)
+	f, err := ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Unreadable == nil || f.Update.GitHubRepo() != "example/app" {
+		t.Fatalf("file = %+v", f)
+	}
+	app, err := l.Add(context.Background(), f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.Ref != "ghostty" || app.Name != "Ghostty" || app.Origin != "github.com/example/app" {
+		t.Errorf("added %+v", app)
 	}
 }

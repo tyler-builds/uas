@@ -26,6 +26,8 @@ type File struct {
 	// Update is where the AppImage says its updates come from; UpdateErr says why it has none uas can follow.
 	Update    appimage.Update
 	UpdateErr error
+	// Unreadable says why uas could not read the AppImage's own files (its launcher and icon), if it could not.
+	Unreadable error
 }
 
 // ReadFile checks that path is an AppImage uas can manage and reads its launcher, icon and update
@@ -48,10 +50,15 @@ func ReadFile(path string) (*File, error) {
 	}
 	defer f.Close()
 	info, err := appimage.InspectAt(f)
+	var unreadable error
 	if err != nil {
-		return nil, fmt.Errorf("%s is not an AppImage uas can add: %w", filepath.Base(path), err)
+		if !appimage.IsType2(f) || !errors.Is(err, appimage.ErrDwarFS) {
+			return nil, fmt.Errorf("%s is not an AppImage uas can add: %w", filepath.Base(path), err)
+		}
+		// Still manageable: the launcher gets its name from the catalog or the file name, and a generic icon.
+		info, unreadable = &appimage.Info{Desktop: map[string]string{}}, err
 	}
-	file := &File{Path: abs, Info: info}
+	file := &File{Path: abs, Info: info, Unreadable: unreadable}
 	raw, err := appimage.UpdateInfo(f)
 	if err == nil {
 		file.Update, err = appimage.ParseUpdate(raw)
@@ -195,7 +202,8 @@ var idChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 func fileID(f *File) string {
 	id := strings.Trim(idChars.ReplaceAllString(f.Info.AppID(), "-"), ".-")
 	if id == "" {
-		name := strings.TrimSuffix(filepath.Base(f.Path), filepath.Ext(f.Path))
+		// The file name without its version, so a newer download of the app replaces this one.
+		name := strings.ToLower(appimage.NameFromFile(f.Path))
 		id = strings.Trim(idChars.ReplaceAllString(name, "-"), ".-")
 	}
 	if id == "" {
@@ -271,7 +279,10 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 		return backend.InstalledApp{}, err
 	}
 	old, _ := st.FindAppImage(id)
-	name := strings.TrimSuffix(filepath.Base(f.Path), filepath.Ext(f.Path))
+	name := appimage.NameFromFile(f.Path)
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(f.Path), filepath.Ext(f.Path))
+	}
 	p, err := l.GH.place(ctx, tmp, k, name, "", "file:"+id, old.IconFile, f.Info)
 	if err != nil {
 		return backend.InstalledApp{}, err
@@ -288,6 +299,10 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 		return backend.InstalledApp{}, err
 	}
 	os.Remove(f.Path)
+	if f.Unreadable != nil {
+		report(progress, "uas couldn't read the app's own launcher and icon ("+f.Unreadable.Error()+
+			"), so it shows a generic icon.")
+	}
 	if update == "" {
 		report(progress, "Added "+p.name+". It doesn't say where its updates come from, so it won't update.")
 	} else {
@@ -402,7 +417,9 @@ func (l *Local) Update(ctx context.Context, app backend.InstalledApp, progress f
 		return err
 	}
 	info, err := appimage.Inspect(tmp)
-	if err != nil {
+	if errors.Is(err, appimage.ErrDwarFS) {
+		info = &appimage.Info{Desktop: map[string]string{}}
+	} else if err != nil {
 		return fmt.Errorf("the new %s is not an AppImage uas can read: %w", f.Name, err)
 	}
 	p, err := l.GH.place(ctx, tmp, k, a.Name, "", "file:"+a.ID, a.IconFile, info)

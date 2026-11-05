@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/CalebQ42/squashfs"
@@ -84,12 +85,55 @@ func squashfsOffset(r io.ReaderAt) (int64, error) {
 	if end == 0 || end > 1<<32 {
 		return 0, errors.New("appimage: bad ELF section header table")
 	}
-	var magic [4]byte
-	if _, err := r.ReadAt(magic[:], int64(end)); err != nil || string(magic[:]) != "hsqs" {
-		return 0, errors.New("appimage: no squashfs image after the ELF runtime (type 1 AppImages are not supported)")
+	var magic [6]byte
+	if _, err := r.ReadAt(magic[:], int64(end)); err != nil {
+		return 0, errors.New("appimage: no image after the ELF runtime")
+	}
+	switch {
+	case string(magic[:4]) == "hsqs":
+	case string(magic[:]) == "DWARFS":
+		return 0, ErrDwarFS
+	case h[8] == 'A' && h[9] == 'I' && h[10] == 1:
+		return 0, errors.New("appimage: type 1 AppImages are not supported")
+	default:
+		return 0, errors.New("appimage: no squashfs image after the ELF runtime")
 	}
 	return int64(end), nil
 }
+
+// ErrDwarFS is returned for AppImages whose files are in a DwarFS image (as pkgforge's uruntime builds them),
+// which uas cannot read yet.
+var ErrDwarFS = errors.New("appimage: the app's files are in a DwarFS image, which uas can't read yet")
+
+// IsType2 reports whether r starts like a type 2 AppImage: an ELF file with the AppImage magic "AI\x02".
+func IsType2(r io.ReaderAt) bool {
+	var h [11]byte
+	_, err := r.ReadAt(h[:], 0)
+	return err == nil && string(h[:4]) == "\x7fELF" && string(h[8:11]) == "AI\x02"
+}
+
+// NameFromFile is an app's name as its file name spells it, up to the version or architecture:
+// "Ghostty-1.4.0-x86_64.AppImage" is "Ghostty", "obs-studio.appimage" is "Obs Studio".
+func NameFromFile(file string) string {
+	base := path.Base(file)
+	if ext := path.Ext(base); strings.EqualFold(ext, ".appimage") {
+		base = strings.TrimSuffix(base, ext)
+	}
+	var words []string
+	for _, w := range strings.FieldsFunc(base, func(r rune) bool { return r == '-' || r == '_' || r == ' ' || r == '.' }) {
+		if versionOrArch.MatchString(w) {
+			break
+		}
+		if w == strings.ToLower(w) {
+			w = strings.ToUpper(w[:1]) + w[1:]
+		}
+		words = append(words, w)
+	}
+	return strings.Join(words, " ")
+}
+
+// versionOrArch matches the words in a file name that come after the app's name.
+var versionOrArch = regexp.MustCompile(`(?i)^(v?\d.*|x86|x64|amd64|arm64|aarch64|i[36]86|linux|setup|portable|appimage|anylinux|glibc|musl)$`)
 
 // linkFS is a filesystem that can say where a symlink points.
 type linkFS interface {

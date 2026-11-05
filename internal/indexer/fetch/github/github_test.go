@@ -98,6 +98,9 @@ func TestDisplayName(t *testing.T) {
 		{"cool-app", "Something.Else-1.0.AppImage", "cool-app"}, // spells another name
 		{"fluent-reader", "Fluent.Reader.1.1.4.AppImage", "Fluent Reader"},
 		{"app", "v2.0-linux.AppImage", "app"},
+		{"ghostty-appimage", "Ghostty-1.4.0-anylinux-x86_64.AppImage", "Ghostty"},
+		{"OBS-Studio-AppImage", "OBS-Studio-32.0.1-x86_64.AppImage", "OBS Studio"},
+		{"foo-appimage", "bar-1.0.AppImage", "foo"},
 	} {
 		if got := displayName(c.repo, []catalog.Asset{{Name: c.file}}); got != c.want {
 			t.Errorf("displayName(%q, %q) = %q, want %q", c.repo, c.file, got, c.want)
