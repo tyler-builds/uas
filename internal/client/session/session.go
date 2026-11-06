@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -19,7 +20,9 @@ import (
 	"github.com/tyler-builds/uas/internal/client/backend/flatpak"
 	"github.com/tyler-builds/uas/internal/client/backend/github"
 	"github.com/tyler-builds/uas/internal/client/backend/homebrew"
+	"github.com/tyler-builds/uas/internal/client/backend/pkgmgr"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
+	snapbackend "github.com/tyler-builds/uas/internal/client/backend/snap"
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/recommend"
 	"github.com/tyler-builds/uas/internal/client/refresh"
@@ -95,7 +98,12 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		s.Backends[catalog.SourceHomebrew] = &homebrew.Backend{
 			Runner: run.Exec{Env: []string{"HOMEBREW_NO_ENV_HINTS=1"}}, Path: p.Brew}
 	}
-	// Layering needs an image-based system. Package-based Fedora (dnf) is outside the Bazzite slice.
+	s.addPackageManager()
+	if p.Snap != "" {
+		s.Backends[catalog.SourceSnap] = &snapbackend.Backend{Runner: run.Exec{}, Path: p.Snap,
+			Known: s.knownPackages(catalog.SourceSnap, "")}
+	}
+	// Layering needs an image-based system. Package-based Fedora uses dnf (addPackageManager).
 	if p.Atomic && p.RPMOSTree != "" && p.FedoraRelease() > 0 {
 		ostree := rpmostree.New(ctx, run.Exec{}, p.RPMOSTree, "rpm", p.FedoraRelease())
 		s.Backends[catalog.SourceFedora] = ostree
@@ -139,6 +147,11 @@ func (s *Session) Available(l catalog.Listing) bool {
 	return b != nil && b.Supports(l)
 }
 
+// System is what recommendations need to know about this system.
+func (s *Session) System() recommend.System {
+	return recommend.System{Available: s.Available, Restart: s.NeedsRestart}
+}
+
 // NeedsRestart reports whether changes from a source take effect only after a restart.
 func (s *Session) NeedsRestart(src catalog.SourceID) bool {
 	r, ok := s.Backends[src].(backend.Restarter)
@@ -147,7 +160,7 @@ func (s *Session) NeedsRestart(src catalog.SourceID) bool {
 
 // Choose picks the listing of app to install, from want if it is set.
 func (s *Session) Choose(app *catalog.App, want catalog.SourceID) (recommend.Choice, error) {
-	return recommend.Choose(app, s.Available, want)
+	return recommend.Choose(app, s.System(), want)
 }
 
 // sources are the catalog's sources, then AppImages added from files.
@@ -402,10 +415,20 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 				notes = append(notes, "Enabling the project's repo needs your password.")
 			}
 		}
+	case catalog.SourceSnap:
+		notes = append(notes, "Installs with snap for all users. snapd may ask for your password.")
+		if l.Classic {
+			notes = append(notes, "Classic confinement: this snap runs without the snap sandbox.")
+		}
 	}
-	if l.Source == catalog.SourceFedora || l.Source == catalog.SourceCOPR {
+	switch {
+	case s.NeedsRestart(l.Source):
 		notes = append(notes, "Adds the package to your system image (layering). It takes effect after a restart.",
 			"Layered packages can hold up system updates if they conflict with a new image.")
+	case l.Source.Distribution():
+		if pm, ok := s.Backends[l.Source].(*pkgmgr.Backend); ok {
+			notes = append(notes, fmt.Sprintf("Installs with %s for all users. Asks for your password.", pm.Kind))
+		}
 	}
 	return notes
 }
@@ -545,4 +568,66 @@ func (s *Session) SelfUpdater() *selfupdate.Updater {
 	opt := RefreshOptions(s.CatalogPath)
 	return &selfupdate.Updater{BaseURL: opt.BaseURL, TrustedKeys: opt.TrustedKeys,
 		Client: &http.Client{Timeout: 10 * time.Minute}, Arch: s.Platform.Arch}
+}
+
+// addPackageManager sets up installs of the distribution's own packages on a package-based system: apt on
+// Debian and Ubuntu (and their derivatives), dnf on Fedora, pacman on Arch. They need root, through pkexec.
+func (s *Session) addPackageManager() {
+	p := s.Platform
+	distro := p.Distro()
+	if distro == "" {
+		return
+	}
+	var src catalog.SourceID
+	var kind pkgmgr.Kind
+	switch {
+	case strings.HasPrefix(distro, "ubuntu-") && p.AptGet != "":
+		src, kind = catalog.SourceUbuntu, pkgmgr.Apt
+	case strings.HasPrefix(distro, "debian-") && p.AptGet != "":
+		src, kind = catalog.SourceDebian, pkgmgr.Apt
+	case distro == "arch" && p.Pacman != "":
+		src, kind = catalog.SourceArch, pkgmgr.Pacman
+	case strings.HasPrefix(distro, "fedora-") && p.DNF != "":
+		src, kind = catalog.SourceFedora, pkgmgr.DNF
+	default:
+		return
+	}
+	var root []string
+	if os.Geteuid() != 0 {
+		if p.Pkexec == "" {
+			return // nothing to ask for the password with
+		}
+		root = []string{p.Pkexec}
+	}
+	s.Backends[src] = &pkgmgr.Backend{Kind: kind, From: src, Distro: distro, Runner: run.Exec{}, Root: root,
+		Known: s.knownPackages(src, distro)}
+}
+
+// knownPackages returns the packages the catalog lists for a source and release, read once per catalog.
+func (s *Session) knownPackages(src catalog.SourceID, distro string) func(context.Context) (map[string]bool, error) {
+	var mu sync.Mutex
+	var cached map[string]bool
+	var stamp time.Time
+	return func(ctx context.Context) (map[string]bool, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		fi, err := os.Stat(s.CatalogPath)
+		if err != nil {
+			return map[string]bool{}, nil // no catalog yet: nothing is known to be an app
+		}
+		if cached != nil && fi.ModTime().Equal(stamp) {
+			return cached, nil
+		}
+		db, err := catalog.Open(s.CatalogPath)
+		if err != nil {
+			return nil, err
+		}
+		defer db.Close()
+		pkgs, err := db.Packages(ctx, src, distro)
+		if err != nil {
+			return nil, err
+		}
+		cached, stamp = pkgs, fi.ModTime()
+		return pkgs, nil
+	}
 }

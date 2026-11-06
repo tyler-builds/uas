@@ -425,3 +425,32 @@ func (d *DB) App(ctx context.Context, id string) (*App, error) {
 	}
 	return &a, rows.Err()
 }
+
+// Packages returns the names of the packages a source lists, for one distribution release (distro, such as
+// "ubuntu-24.04") or, with distro empty, all of them. Package managers list every installed package,
+// libraries too; this tells the apps among them.
+func (d *DB) Packages(ctx context.Context, src SourceID, distro string) (map[string]bool, error) {
+	q := `SELECT ref FROM listings WHERE source = ?1`
+	args := []any{string(src)}
+	if distro != "" {
+		q += ` AND substr(ref, 1, length(?2) + 1) = ?2 || '/'`
+		args = append(args, distro)
+	}
+	rows, err := d.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return nil, err
+		}
+		if distro != "" {
+			ref = strings.TrimPrefix(ref, distro+"/")
+		}
+		out[ref] = true
+	}
+	return out, rows.Err()
+}

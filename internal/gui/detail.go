@@ -511,10 +511,10 @@ func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listin
 		panel := ui.Div().Column().Gap(6).
 			Child(toggle(icons.ChevronUp)).
 			Child(ui.Text("Installing from " + listingLabel(listing) + ":").FontSize(13).Semibold())
-		for _, tr := range recommend.Traits(listing) {
+		for _, tr := range recommend.Traits(listing, a.s.System()) {
 			panel = panel.Child(bullet(tr))
 		}
-		if alts := recommend.Alternatives(app, a.s.Available, listing); len(alts) > 0 {
+		if alts := recommend.Alternatives(app, a.s.System(), listing); len(alts) > 0 {
 			panel = panel.Child(ui.Text("Other sources:").FontSize(13).Semibold().MarginTop(6))
 			for _, alt := range alts {
 				panel = panel.Child(bullet(listingLabel(alt.Listing) + ": not picked because " + alt.Because + "."))
@@ -528,8 +528,11 @@ func (a *App) whyPanel(ctx *ui.Context, app *catalog.App, listing catalog.Listin
 func listingLabel(l catalog.Listing) string {
 	parts := []string{sourceLabel(l.Source)}
 	switch l.Source {
-	case catalog.SourceFedora:
-		parts[0] = strings.Replace(l.Distro, "fedora-", "Fedora ", 1)
+	case catalog.SourceFedora, catalog.SourceDebian, catalog.SourceUbuntu:
+		// "fedora-45" is "Fedora 45", "ubuntu-24.04" "Ubuntu 24.04".
+		if _, ver, ok := strings.Cut(l.Distro, "-"); ok {
+			parts[0] = l.Source.Name() + " " + ver
+		}
 	case catalog.SourceCOPR:
 		parts = append(parts, l.Project)
 	}
@@ -582,8 +585,11 @@ func (a *App) confirmDialog(ctx *ui.Context) ui.Element {
 		intent = ui.AlertDialogWarning
 	}
 	message := "This source is not reviewed by a distribution."
-	if l.Source == catalog.SourceFedora {
+	switch {
+	case a.s.NeedsRestart(l.Source) && l.Source == catalog.SourceFedora:
 		message = "This adds the package to your system image."
+	case l.Source.Distribution():
+		message = "This installs the package for every user of this computer."
 	}
 	return ui.AlertDialog(title, message).Intent(intent).Body(body).
 		Confirm("Install", func() {

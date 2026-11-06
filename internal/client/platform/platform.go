@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/tyler-builds/uas/internal/catalog"
 )
 
 // Info describes the running system.
@@ -31,6 +33,15 @@ type Info struct {
 	Brew      string `json:"brew,omitempty"`
 	RPMOSTree string `json:"rpm_ostree,omitempty"`
 	Pkexec    string `json:"pkexec,omitempty"`
+	// Package managers of package-based systems, and snap.
+	AptGet string `json:"apt_get,omitempty"`
+	DNF    string `json:"dnf,omitempty"`
+	Pacman string `json:"pacman,omitempty"`
+	Snap   string `json:"snap,omitempty"`
+
+	// UbuntuCodename is UBUNTU_CODENAME from os-release, which Ubuntu's derivatives (Linux Mint, Pop!_OS) set
+	// to the Ubuntu release they build on; UbuntuVersion is that release's number, when known.
+	UbuntuCodename string `json:"ubuntu_codename,omitempty"`
 
 	// LibFUSE2 is true when AppImages built for FUSE 2 can run.
 	LibFUSE2 bool `json:"libfuse2"`
@@ -49,6 +60,41 @@ func (i Info) FedoraRelease() int {
 		return 0
 	}
 	return n
+}
+
+// Is reports whether the system is the distribution id or is based on it (ID or ID_LIKE).
+func (i Info) Is(id string) bool { return i.OSID == id || contains(i.OSIDLike, id) }
+
+// ubuntuVersions are the Ubuntu releases by codename, for derivatives that name only the codename.
+var ubuntuVersions = map[string]string{"jammy": "22.04", "noble": "24.04", "resolute": "26.04",
+	"plucky": "25.04", "questing": "25.10", "focal": "20.04"}
+
+// Distro names the release whose distribution packages this system installs, as the catalog's listings do:
+// "fedora-45", "ubuntu-24.04", "debian-13", "arch". It is "" for systems uas has no packages for, and for
+// image-based Fedora, which layers packages instead (see FedoraRelease).
+func (i Info) Distro() string {
+	switch {
+	case i.Atomic:
+		return ""
+	case i.UbuntuCodename != "" && (i.Is("ubuntu") || i.Is("debian")):
+		if v, ok := ubuntuVersions[i.UbuntuCodename]; ok {
+			return "ubuntu-" + v
+		}
+		if i.OSID == "ubuntu" {
+			return "ubuntu-" + i.VersionID
+		}
+		return ""
+	case i.OSID == "debian" || (i.Is("debian") && !i.Is("ubuntu")):
+		if major, _, _ := strings.Cut(i.VersionID, "."); major != "" && i.OSID == "debian" {
+			return "debian-" + major
+		}
+		return ""
+	case i.Is("arch"):
+		return "arch"
+	case i.Is("fedora") && i.FedoraRelease() > 0:
+		return catalog.FedoraDistro(i.FedoraRelease())
+	}
+	return ""
 }
 
 // Env is what Detect reads, so tests can supply a fake system.
@@ -79,6 +125,7 @@ func Detect(env Env) Info {
 	info.VariantID = osr["VARIANT_ID"]
 	info.ImageID = osr["IMAGE_ID"]
 	info.PrettyName = osr["PRETTY_NAME"]
+	info.UbuntuCodename = osr["UBUNTU_CODENAME"]
 
 	// ostree and bootc systems both create this marker at boot.
 	info.Atomic = exists(env.Root, "run/ostree-booted")
@@ -86,6 +133,13 @@ func Detect(env Env) Info {
 	info.Flatpak = lookPath(env, "flatpak")
 	info.RPMOSTree = lookPath(env, "rpm-ostree")
 	info.Pkexec = lookPath(env, "pkexec")
+	info.AptGet = lookPath(env, "apt-get")
+	info.DNF = lookPath(env, "dnf")
+	info.Pacman = lookPath(env, "pacman")
+	// The snap command exists only where snapd is installed; it works only with snapd running.
+	if exists(env.Root, "run/snapd.socket") {
+		info.Snap = lookPath(env, "snap")
+	}
 	info.Brew = lookPath(env, "brew")
 	if info.Brew == "" && exists(env.Root, "home/linuxbrew/.linuxbrew/bin/brew") {
 		// Homebrew's default Linux prefix; it is often not on PATH for GUI sessions.

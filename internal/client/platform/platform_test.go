@@ -65,3 +65,32 @@ func TestDetectFallbackOSRelease(t *testing.T) {
 		t.Errorf("info = %+v", info)
 	}
 }
+
+func TestDistro(t *testing.T) {
+	cases := []struct {
+		osRelease string
+		atomic    bool
+		want      string
+	}{
+		{"ID=ubuntu\nID_LIKE=debian\nVERSION_ID=\"24.04\"\nUBUNTU_CODENAME=noble\n", false, "ubuntu-24.04"},
+		{"ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nVERSION_ID=\"22.2\"\nUBUNTU_CODENAME=noble\n", false, "ubuntu-24.04"},
+		{"ID=pop\nID_LIKE=\"ubuntu debian\"\nVERSION_ID=\"26.04\"\nUBUNTU_CODENAME=resolute\n", false, "ubuntu-26.04"},
+		{"ID=debian\nVERSION_ID=\"13\"\n", false, "debian-13"},
+		{"ID=arch\n", false, "arch"},
+		{"ID=endeavouros\nID_LIKE=arch\n", false, "arch"},
+		{"ID=fedora\nVERSION_ID=45\n", false, "fedora-45"},
+		{"ID=bazzite\nID_LIKE=fedora\nVERSION_ID=45\n", true, ""}, // image-based: layering, not dnf
+		{"ID=opensuse-tumbleweed\nID_LIKE=\"opensuse suse\"\n", false, ""},
+	}
+	for _, c := range cases {
+		root := fstest.MapFS{"etc/os-release": {Data: []byte(c.osRelease)}}
+		if c.atomic {
+			root["run/ostree-booted"] = &fstest.MapFile{}
+		}
+		info := Detect(Env{Root: root, LookPath: func(string) (string, error) { return "", errors.New("no") },
+			Getenv: func(string) string { return "" }, GOARCH: "amd64"})
+		if got := info.Distro(); got != c.want {
+			t.Errorf("%q: Distro() = %q, want %q", c.osRelease, got, c.want)
+		}
+	}
+}

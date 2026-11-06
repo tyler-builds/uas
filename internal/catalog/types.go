@@ -27,6 +27,13 @@ const (
 	// listing refs name the host: "gitlab.com/group/project", "codeberg.org/owner/repo".
 	SourceGitLab   SourceID = "gitlab"
 	SourceCodeberg SourceID = "codeberg"
+	// SourceDebian, SourceUbuntu and SourceArch are distribution packages, installed with apt or pacman.
+	// Like Fedora's, their listings carry a Distro ("debian-13", "ubuntu-24.04", "arch") and a Package.
+	SourceDebian SourceID = "debian"
+	SourceUbuntu SourceID = "ubuntu"
+	SourceArch   SourceID = "arch"
+	// SourceSnap is the Snap Store, installed with snap.
+	SourceSnap SourceID = "snap"
 	// SourceAppImage is AppImages the user added from files. The catalog has no listings from it.
 	SourceAppImage SourceID = "appimage"
 )
@@ -48,6 +55,14 @@ func (s SourceID) Name() string {
 		return "GitLab"
 	case SourceCodeberg:
 		return "Codeberg"
+	case SourceDebian:
+		return "Debian"
+	case SourceUbuntu:
+		return "Ubuntu"
+	case SourceArch:
+		return "Arch Linux"
+	case SourceSnap:
+		return "Snap Store"
 	case SourceAppImage:
 		return "AppImage"
 	}
@@ -56,8 +71,14 @@ func (s SourceID) Name() string {
 
 // SourcePrecedence orders sources for display: when several listings describe one app, fields such as the
 // name and screenshots come from the earliest source in this list that has them.
-var SourcePrecedence = []SourceID{SourceFlathub, SourceFedora, SourceHomebrew, SourceCOPR, SourceGitHub,
-	SourceGitLab, SourceCodeberg}
+var SourcePrecedence = []SourceID{SourceFlathub, SourceFedora, SourceDebian, SourceUbuntu, SourceArch,
+	SourceHomebrew, SourceSnap, SourceCOPR, SourceGitHub, SourceGitLab, SourceCodeberg}
+
+// Distribution reports whether the source is a Linux distribution's own packages (Fedora, Debian, Ubuntu,
+// Arch), which the distribution builds and signs.
+func (s SourceID) Distribution() bool {
+	return s == SourceFedora || s == SourceDebian || s == SourceUbuntu || s == SourceArch
+}
 
 // Releases reports whether the source is a code forge's release files (GitHub, GitLab, Codeberg), which uas
 // downloads and installs itself.
@@ -151,6 +172,9 @@ type Listing struct {
 	Distro string `json:"distro,omitempty"`
 	// Project is the COPR project ("owner/project") a COPR listing comes from.
 	Project string `json:"project,omitempty"`
+	// Classic is true for a snap with classic confinement, which runs without the snap sandbox and installs
+	// with "snap install --classic".
+	Classic bool `json:"classic,omitempty"`
 
 	// Assets are downloadable files, for sources that ship release files (GitHub), best first.
 	Assets []Asset `json:"assets,omitempty"`

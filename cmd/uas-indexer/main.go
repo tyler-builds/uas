@@ -19,12 +19,15 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
+	archlinux "github.com/tyler-builds/uas/internal/indexer/fetch/arch"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/copr"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/debian"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/fedora"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/flathub"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/forge"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/github"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/homebrew"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/snap"
 	"github.com/tyler-builds/uas/internal/indexer/publish"
 	"github.com/tyler-builds/uas/internal/manifest"
 )
@@ -41,7 +44,7 @@ func main() {
 	slowCacheFor := flag.Duration("slow-cache-for", 20*time.Hour,
 		"reuse results of slow sources (GitHub, COPR) younger than this")
 	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
-	defaultSources := "flathub,fedora,homebrew,github,copr,codeberg"
+	defaultSources := "flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap"
 	if os.Getenv("GITLAB_TOKEN") != "" {
 		defaultSources += ",gitlab"
 	}
@@ -133,6 +136,15 @@ func main() {
 	available["gitlab"] = &fetch.Cached{Fetcher: forge.NewGitLab(forgeBuilder, os.Getenv("GITLAB_TOKEN")),
 		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
 		Key: forgeKey + fmt.Sprintf(" min-stars=%d", forge.DefaultGitLabMinStars)}
+	available["debian"] = &debian.Fetcher{Distribution: catalog.SourceDebian, Client: client,
+		CacheDir: filepath.Join(*cache, "apt"), Arch: *arch, Log: log}
+	available["ubuntu"] = &debian.Fetcher{Distribution: catalog.SourceUbuntu, Client: client,
+		CacheDir: filepath.Join(*cache, "apt"), Arch: *arch, Log: log}
+	available["arch"] = &archlinux.Fetcher{Client: client, CacheDir: *cache, Arch: *arch, Log: log}
+	// The Snap Store takes a few minutes at one request a second, so it is cached like GitHub and COPR.
+	available["snap"] = &fetch.Cached{Fetcher: &snap.Fetcher{Client: client, Arch: *arch, Log: log},
+		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: fmt.Sprintf("schema=%d arch=%s v=1", catalog.SchemaVersion, *arch)}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {
 		f, ok := available[strings.TrimSpace(name)]

@@ -52,7 +52,7 @@ var (
 )
 
 func isReviewed(s catalog.SourceID) bool {
-	return s == catalog.SourceFlathub || s == catalog.SourceFedora || s == catalog.SourceHomebrew
+	return s == catalog.SourceFlathub || s == catalog.SourceHomebrew || s.Distribution()
 }
 
 func hasReviewed(ls []catalog.Listing) bool {
@@ -87,6 +87,10 @@ func sortCopies(groups map[string][]catalog.Listing, order []string) ([]string, 
 	var hidden []Hidden
 	for _, g := range order {
 		ls := groups[g]
+		if len(ls) == 1 && ls[0].Source == catalog.SourceSnap {
+			hidden = append(hidden, sortSnap(groups, byName, g)...)
+			continue
+		}
 		if len(ls) != 1 || !ls[0].Source.Releases() {
 			continue
 		}
@@ -142,6 +146,28 @@ func sortCopies(groups map[string][]catalog.Listing, order []string) ([]string, 
 		}
 	}
 	return out, hidden
+}
+
+// sortSnap merges a snap that shares a reviewed app's name into it when the Snap Store verified its
+// publisher, and hides it otherwise: anyone can publish a snap under an app's name. (Snaps that carry the
+// app's AppStream ID were merged with it already.)
+func sortSnap(groups map[string][]catalog.Listing, byName map[string][]string, g string) []Hidden {
+	l := groups[g][0]
+	target := mostInstalled(groups, byName[squashName(l.Name)])
+	if target == "" {
+		return nil
+	}
+	app := groups[target]
+	switch {
+	case l.Verified && !hasSource(app, catalog.SourceSnap):
+		groups[target] = append(app, l)
+		delete(groups, g)
+		return nil
+	case l.Verified:
+		return nil // a verified publisher's other snap of that name: keep it on its own
+	}
+	delete(groups, g)
+	return []Hidden{hide(l, app, "a snap by a publisher the Snap Store hasn't verified")}
 }
 
 // official reports whether owner (a GitHub, GitLab, Codeberg or COPR account) is the developer of the app

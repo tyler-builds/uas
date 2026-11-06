@@ -7,8 +7,10 @@ require (
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/klauspost/compress v1.20.3
 	github.com/tyler-builds/jamb v0.6.3
+	github.com/ulikunitz/xz v0.5.12
 	golang.org/x/image v0.47.0
 	golang.org/x/term v0.47.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.1
 )
 
@@ -23,7 +25,6 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/rasky/go-lzo v0.0.0-20200203143853-96a758eda86e // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/ulikunitz/xz v0.5.12 // indirect
 	github.com/yuin/goldmark v1.8.7 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect

@@ -212,6 +212,10 @@ var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
 	catalog.SourceGitLab:   {"#fc9867", "#c2410c"},
 	catalog.SourceCodeberg: {"#60a5fa", "#1d4ed8"},
+	catalog.SourceDebian:   {"#f472b6", "#be185d"},
+	catalog.SourceUbuntu:   {"#fb923c", "#c2410c"},
+	catalog.SourceArch:     {"#38bdf8", "#0369a1"},
+	catalog.SourceSnap:     {"#a3e635", "#4d7c0f"},
 	catalog.SourceAppImage: {"#5eead4", "#0f766e"},
 }
 
@@ -219,8 +223,8 @@ var sourceTints = map[catalog.SourceID]tint{
 var sourceTips = map[catalog.SourceID]string{
 	catalog.SourceFlathub: "On Flathub, the Flatpak app store. Flatpak apps run in a sandbox and install " +
 		"without a restart",
-	catalog.SourceFedora: "Packaged and signed by Fedora. Installing adds it to the system image " +
-		"(layering), which takes effect after a restart",
+	catalog.SourceFedora: "Packaged and signed by Fedora. On image-based Fedora (Bazzite, Silverblue) installing " +
+		"adds it to the system image (layering), which takes effect after a restart",
 	catalog.SourceHomebrew: "A Homebrew formula, mostly command-line tools. Installs for your user without " +
 		"a restart",
 	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +
@@ -229,6 +233,12 @@ var sourceTips = map[catalog.SourceID]string{
 		"its page shows a trust score",
 	catalog.SourceCodeberg: "Released on Codeberg by its developer, as an AppImage or Flatpak bundle. No distribution " +
 		"reviews it; its page shows a trust score",
+	catalog.SourceDebian: "Packaged and signed by Debian. Installs system-wide with apt, which asks for your password",
+	catalog.SourceUbuntu: "Packaged and signed by Ubuntu. Installs system-wide with apt, which asks for your password",
+	catalog.SourceArch: "Packaged and signed by Arch Linux. Installs system-wide with pacman, which asks for your " +
+		"password; updates come with the system's",
+	catalog.SourceSnap: "From the Snap Store. Snaps mostly run in a sandbox and update themselves; anyone can " +
+		"publish one, so check for a verified publisher",
 	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
 		"and installing layers it into the system image",
 	catalog.SourceAppImage: "An AppImage you added from a file. uas updates it from where the AppImage says, " +

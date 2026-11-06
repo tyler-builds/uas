@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/ulikunitz/xz"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 )
@@ -158,14 +159,14 @@ func PruneCache(dir string, maxAge time.Duration) (int, error) {
 	return removed, err
 }
 
-// OpenDecompressed opens a file and transparently decompresses it if it is gzip- or zstd-compressed.
+// OpenDecompressed opens a file and transparently decompresses it if it is gzip-, zstd- or xz-compressed.
 func OpenDecompressed(name string) (io.ReadCloser, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	br := bufio.NewReader(f)
-	magic, err := br.Peek(4)
+	magic, err := br.Peek(6)
 	if err != nil && err != io.EOF {
 		f.Close()
 		return nil, err
@@ -178,7 +179,14 @@ func OpenDecompressed(name string) (io.ReadCloser, error) {
 			return nil, err
 		}
 		return readCloser{Reader: zr, close: func() error { zr.Close(); return f.Close() }}, nil
-	case bytes.Equal(magic, []byte{0x28, 0xb5, 0x2f, 0xfd}):
+	case len(magic) >= 6 && bytes.Equal(magic[:6], []byte{0xfd, '7', 'z', 'X', 'Z', 0}):
+		zr, err := xz.NewReader(br)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		return readCloser{Reader: zr, close: f.Close}, nil
+	case len(magic) >= 4 && bytes.Equal(magic[:4], []byte{0x28, 0xb5, 0x2f, 0xfd}):
 		zr, err := zstd.NewReader(br, zstd.WithDecoderMaxMemory(256<<20))
 		if err != nil {
 			f.Close()

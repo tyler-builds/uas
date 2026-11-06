@@ -32,5 +32,9 @@ var sourceIcons = map[catalog.SourceID]*icons.Icon{
 	catalog.SourceGitHub:   logoIcon("github"),
 	catalog.SourceGitLab:   logoIcon("gitlab"),
 	catalog.SourceCodeberg: logoIcon("codeberg"),
+	catalog.SourceDebian:   logoIcon("debian"),
+	catalog.SourceUbuntu:   logoIcon("ubuntu"),
+	catalog.SourceArch:     logoIcon("archlinux"),
+	catalog.SourceSnap:     logoIcon("snapcraft"),
 	catalog.SourceAppImage: icons.FileBox,
 }

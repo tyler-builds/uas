@@ -298,7 +298,12 @@ func runUpdates(ctx context.Context, w io.Writer, args []string) error {
 	if n == 0 {
 		fmt.Fprintln(w, "Everything is up to date.")
 	}
-	fmt.Fprintln(w, "Packages layered onto the system image update with the system (ujust update).")
+	switch {
+	case e.Backends[catalog.SourceFedora] != nil && e.NeedsRestart(catalog.SourceFedora):
+		fmt.Fprintln(w, "Packages layered onto the system image update with the system (ujust update).")
+	case e.Backends[catalog.SourceArch] != nil:
+		fmt.Fprintln(w, "Arch packages update with the system (sudo pacman -Syu).")
+	}
 	if checkErr != nil {
 		fmt.Fprintln(w, "Some sources could not be checked:", checkErr)
 	}

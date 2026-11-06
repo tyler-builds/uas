@@ -127,6 +127,24 @@ All endpoints below need confirming during the first spike.
   are cached like GitHub's, and a failed fetch (such as a rate limit) reuses results up to a week old.
   In November 2026 Codeberg's 300+ star repos gave Tenacity, Gram and ChiPass.
 
+- **Debian and Ubuntu** (`fetch/debian`, `dep11`): the AppStream data in each release's DEP-11 YAML
+  (`dists/<codename>/<component>/dep11/Components-<arch>.yml.gz`) with versions from its Packages indexes,
+  release and -updates pockets. Debian's stable release (from `dists/stable/Release`) and Ubuntu's three newest
+  supported releases (from `changelogs.ubuntu.com/meta-release`, which also marks old releases under paid
+  support as supported) are indexed: Distro `debian-13`, `ubuntu-24.04`. Icon and screenshot paths are relative
+  to the file's `MediaBaseUrl`. DEP-11 sometimes lists a translation twice, so translated fields are read from
+  the YAML nodes, not Go maps. Files come from `deb.debian.org` and the kernel.org Ubuntu mirror (ports.ubuntu.com
+  for aarch64), with ETags. About 1,900 apps a release.
+- **Arch** (`fetch/arch`): `archlinux-appstream-data`'s version from archlinux.org's package JSON, its
+  `Components-x86_64.xml.gz` from sources.archlinux.org, and versions from the core, extra and multilib
+  databases on a mirror. Distro `arch`; x86_64 only. Arch's cached icons are JPEG XL, which Go can't decode
+  without a new dependency, so Arch-only apps have no icon. About 1,240 apps.
+- **Snap Store** (`fetch/snap`): the v1 search API with `X-Ubuntu-Series: 16`, 100 snaps a page (about 90
+  pages). No rate limit is published, so pages are read one a second and the result is cached like GitHub's.
+  A snap is kept with a title, summary and icon and either a verified or starred publisher, an AppStream ID
+  (its `common_ids`, which merge it with the app's other listings), or a store section and screenshots. An
+  unverified snap that shares a reviewed app's name is hidden as an unofficial copy; a verified one joins it.
+
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
 Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
@@ -301,6 +319,15 @@ type Backend interface {
   dock favorites point at uas's launcher instead. Every launcher has a `StartupWMClass` (the app's own, else
   its desktop entry's name), since uas renames launchers and the dock matches windows to them by it.
   Launchers carry `X-UAS-Launcher`, and older ones are rewritten when uas starts.
+- **pkgmgr** (apt, dnf, pacman): on package-based systems, `platform.Info.Distro()` names the release
+  (`ubuntu-24.04` also for Linux Mint and Pop!_OS, through `UBUNTU_CODENAME`; `arch` for its derivatives;
+  `fedora-45` only when not image-based) and the matching backend installs that release's listings. Installs,
+  updates and removals run through pkexec (directly as root, as in a container); `--` ends the options before
+  every package name. Package managers list libraries too, so Installed keeps only packages the catalog lists
+  for the release. Updates come from `apt list --upgradable` and `dnf list --upgrades`; Arch doesn't support
+  partial upgrades, so it has no per-app updates. Tested in containers for all four.
+- **snap:** `snap install` (with `--classic` for classic snaps), `refresh`, `remove`; snapd asks for the
+  password itself. Bases and runtimes are left out of Installed, since the catalog doesn't list them.
 - **gitlab, codeberg:** the github backend with `Forge` set. Installs go in the same folders and state file
   (recorded with their `source`), and files are checked against the SHA-256 the indexer recorded, since
   neither forge publishes one. Asset URLs must be under the repo's own release downloads (Codeberg) or

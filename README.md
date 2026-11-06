@@ -5,7 +5,8 @@
 # uas
 
 **One app store for every source.**<br>
-Flathub, Homebrew, GitHub, GitLab and Codeberg releases, Fedora and COPR, searched and installed from one place.
+Flathub, Homebrew, the Snap Store, GitHub, GitLab and Codeberg releases, and Fedora, Debian, Ubuntu, Arch and
+COPR packages, searched and installed from one place.
 
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-0f766e)
@@ -64,7 +65,10 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | Flathub | `flatpak` | Any distro |
 | Homebrew | `brew` | Any distro |
 | GitHub, GitLab and Codeberg releases, AppImages | — (Flatpak bundles need `flatpak`) | Any distro |
-| Fedora packages | `rpm-ostree` | Fedora Atomic (Bazzite, Silverblue, Kinoite, Bluefin, Aurora…) |
+| Fedora packages | `rpm-ostree`, or `dnf` and `pkexec` | Fedora Atomic (layered), or Fedora Workstation and other package-based Fedora |
+| Debian and Ubuntu packages | `apt-get`, `pkexec` | Debian 13; Ubuntu 22.04, 24.04 and 26.04, and systems built on them (Linux Mint, Pop!_OS…) |
+| Arch packages | `pacman`, `pkexec` | Arch and systems built on it (EndeavourOS, CachyOS…), x86_64 |
+| Snap Store | `snap` with snapd running | Any distro with snapd |
 | COPR | `rpm-ostree`, `pkexec` | Fedora Atomic |
 
 The desktop app needs a **Wayland** session. The CLI runs anywhere.
@@ -73,12 +77,17 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
 - Bazzite (Fedora 45) with GNOME, Wayland
 - Bazzite with KDE Plasma, Wayland
+- The CLI's apt, dnf and pacman installs in containers: Ubuntu 24.04, Debian 13, Fedora 45 and Arch
+  (install, list, update and remove, as root). The password prompt and the desktop app on those systems, and
+  snap, are untested.
 
 **Notes for other systems**
 
-- On package-based distros (Fedora Workstation, Ubuntu, Arch…), Fedora and COPR listings show as unavailable
-  and uas recommends another source. dnf, apt and pacman aren't supported yet.
 - On Fedora Atomic, Fedora and COPR packages are layered into the image and take effect after a restart.
+- On package-based systems, the distribution's own packages install with its package manager, after the
+  password prompt. Arch packages update with the whole system (`sudo pacman -Syu`), not one at a time. COPR
+  isn't offered with dnf yet.
+- Arch-only apps have no icon: Arch ships its app icons as JPEG XL, which uas doesn't read.
 - AppImage launchers and dock matching have only been tested on GNOME and KDE; other desktops should work
   but are untested.
 - Missing `flatpak` or `brew`? Install it and those sources turn on the next time uas starts.

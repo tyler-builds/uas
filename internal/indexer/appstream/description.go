@@ -100,3 +100,7 @@ func isTranslated(se xml.StartElement) bool {
 	}
 	return false
 }
+
+// DescriptionMarkdown converts AppStream description markup (<p>, <ul>/<ol> with <li>, <em>, <code>) to
+// Markdown, for catalogs that carry it outside AppStream XML, such as Debian's DEP-11 YAML.
+func DescriptionMarkdown(markup string) (string, error) { return descriptionMarkdown(markup) }

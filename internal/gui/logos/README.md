@@ -10,5 +10,9 @@ them. The marks themselves are trademarks of their owners and are used only to s
 - `github.svg`: GitHub (see [GitHub's logo guidelines](https://github.com/logos))
 - `gitlab.svg`: GitLab (see [GitLab's brand guidelines](https://handbook.gitlab.com/handbook/marketing/brand-and-product-marketing/brand/brand-activation/trademark-guidelines/))
 - `codeberg.svg`: Codeberg
+- `debian.svg`: Debian (see the [Debian trademark policy](https://www.debian.org/trademark))
+- `ubuntu.svg`: Ubuntu (see [Canonical's trademark policy](https://ubuntu.com/legal/trademarks))
+- `archlinux.svg`: Arch Linux (see the [Arch Linux trademark policy](https://terms.archlinux.org/docs/trademark-policy/))
+- `snapcraft.svg`: Snapcraft, for the Snap Store
 
 COPR has no logo here and keeps a Lucide icon.
