@@ -497,3 +497,40 @@ func HumanSize(n int64) string {
 	}
 	return fmt.Sprintf("%d bytes", n)
 }
+
+// permissionEditor returns the Flatpak backend, which also manages the permissions of apps installed from
+// Flatpak bundles.
+func (s *Session) permissionEditor() (backend.PermissionEditor, error) {
+	pe, ok := s.Backends[catalog.SourceFlathub].(backend.PermissionEditor)
+	if !ok {
+		return nil, errors.New("flatpak is not installed on this system")
+	}
+	return pe, nil
+}
+
+// Permissions returns what an installed Flatpak app may reach outside its sandbox.
+func (s *Session) Permissions(ctx context.Context, appID string) ([]backend.Permission, error) {
+	pe, err := s.permissionEditor()
+	if err != nil {
+		return nil, err
+	}
+	return pe.Permissions(ctx, appID)
+}
+
+// SetPermission allows or denies one permission of a Flatpak app, for this user.
+func (s *Session) SetPermission(ctx context.Context, appID, key string, allow bool) error {
+	pe, err := s.permissionEditor()
+	if err != nil {
+		return err
+	}
+	return pe.SetPermission(ctx, appID, key, allow)
+}
+
+// ResetPermissions undoes this user's permission changes for a Flatpak app.
+func (s *Session) ResetPermissions(ctx context.Context, appID string) error {
+	pe, err := s.permissionEditor()
+	if err != nil {
+		return err
+	}
+	return pe.ResetPermissions(ctx, appID)
+}

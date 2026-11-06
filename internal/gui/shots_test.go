@@ -49,6 +49,8 @@ func TestShots(t *testing.T) {
 		{"detail-github", func(a *App) {}, 1400, "github:adileo/squirreldisk", 0},
 		{"detail-darktable", func(a *App) {}, 940, "org.darktable.Darktable", 0},
 		{"detail-vscode", func(a *App) {}, 1100, "com.visualstudio.code", 0},
+		// An installed Flatpak app, with its permissions.
+		{"detail-installed", func(a *App) {}, 1600, "org.gimp.GIMP", 0},
 		// Narrow enough that the side panel goes under the main column.
 		{"detail-narrow", func(a *App) {}, 1900, "org.darktable.Darktable", 1100},
 		{"search", func(a *App) { a.query.Set("editor"); a.search.Set("editor"); a.goTo(view{page: pageSearch}) }, 1100, "", 0},

@@ -259,6 +259,13 @@ type Backend interface {
   Installs to user scope by default, so no password prompt. Bazzite ships Flathub only as a system remote, so on
   first use uas adds Flathub as a user remote (`flatpak remote-add --user --if-not-exists`, no root). A setting
   switches the default to system scope. Apps from both scopes appear under Installed and Updates.
+  **Permissions** (`permissions.go`): an installed app's page lists what it may reach outside its sandbox
+  (network, all files, home folder, Downloads, all devices, sound, Bluetooth, X11), read from
+  `flatpak info --show-permissions` (the manifest with every override applied), with the ones the user changed
+  read from `flatpak override --user --show`. A switch adds a user override (`--share`/`--unshare`,
+  `--filesystem`/`--nofilesystem` and so on), which applies in every installation and needs no password; Reset
+  runs `flatpak override --user --reset`. These are the files Flatseal edits, so the two agree. Access that
+  comes with a broader one (Downloads with the home folder) is shown on but can't be switched off alone.
 - **homebrew:** Calls `brew` and reads its JSON output.
 - **github:** Downloads the AppImage, checks its size and the SHA-256 GitHub publishes (no checksum, no
   install), and saves it as `~/.local/share/uas/appimages/<owner>__<repo>.AppImage`. The `.desktop` file and

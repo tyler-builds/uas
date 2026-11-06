@@ -34,6 +34,7 @@ commands:
   list                 list installed apps
   system               show what uas detected about this system
   settings [key value] show or change settings
+  permissions <app-id> show or change what a Flatpak app may reach (network, files, devices…)
 
 Run "uas <command> -h" for a command's flags.
 `
@@ -69,6 +70,8 @@ func main() {
 		err = runSystem(ctx, os.Stdout, args)
 	case "settings":
 		err = runSettings(os.Stdout, args)
+	case "permissions":
+		err = runPermissions(ctx, os.Stdout, args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 		return

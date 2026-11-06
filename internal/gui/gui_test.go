@@ -234,3 +234,20 @@ func TestSearchAsYouType(t *testing.T) {
 	}
 	u.WaitFor("the tool row", func() bool { return u.Has("row:github:example/tool") })
 }
+
+// Permissions implements backend.PermissionEditor, with a set that shows each kind of row.
+func (f *fakeBackend) Permissions(context.Context, string) ([]backend.Permission, error) {
+	return []backend.Permission{
+		{Key: "network", Label: "Network", Detail: "Connect to the internet and the local network", Allowed: true},
+		{Key: "host", Label: "All files", Detail: "Read and change every file you can, including system files"},
+		{Key: "home", Label: "Home folder", Detail: "Read and change the files in your home folder", Allowed: true,
+			Changed: true},
+		{Key: "downloads", Label: "Downloads folder", Detail: "Read and change the files in Downloads",
+			Allowed: true, Note: "Included in access to the home folder"},
+		{Key: "devices", Label: "All devices", Detail: "Webcams, game controllers, USB devices and the like"},
+		{Key: "audio", Label: "Sound", Detail: "Play sound and use microphones", Allowed: true},
+	}, nil
+}
+
+func (f *fakeBackend) SetPermission(context.Context, string, string, bool) error { return nil }
+func (f *fakeBackend) ResetPermissions(context.Context, string) error            { return nil }

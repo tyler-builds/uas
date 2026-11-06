@@ -107,6 +107,9 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 		if listing.Trust != nil {
 			main = main.Child(trustPanel(ctx, listing))
 		}
+		if id := a.installedFlatpak(ctx, app); id != "" {
+			main = main.Child(a.permissionsPanel(ctx, id))
+		}
 		side := a.sidePanel(ctx, app, listing, choice, chosen.Get() == listingKey(choice.Listing))
 
 		// The side panel sits beside the main column when there is room, and under it otherwise.
@@ -121,6 +124,22 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 		}
 		return scroll(page)
 	}).Key("detail:" + id)
+}
+
+// installedFlatpak returns the Flatpak app ID of the app's installed Flathub copy, or "".
+func (a *App) installedFlatpak(ctx *ui.Context, app *catalog.App) string {
+	installed := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	for _, in := range installed.Data {
+		if in.Source != catalog.SourceFlathub {
+			continue
+		}
+		for _, l := range app.Listings {
+			if in.Matches(l) {
+				return in.AppID
+			}
+		}
+	}
+	return ""
 }
 
 // detailHeader is the icon, name, summary and tags, with Install and the source picker on the right.

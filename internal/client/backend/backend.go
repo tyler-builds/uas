@@ -83,5 +83,26 @@ type Restarter interface {
 	NeedsRestart() bool
 }
 
+// Permission is one thing a sandboxed app may or may not reach, such as the network or the home folder.
+type Permission struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Detail  string `json:"detail"`
+	Allowed bool   `json:"allowed"`
+	// Changed is true when the user's overrides decide it, rather than the app's own manifest.
+	Changed bool `json:"changed"`
+	// Note explains an allowed permission that turning off won't fully take away, such as home folder access
+	// through access to all files.
+	Note string `json:"note,omitempty"`
+}
+
+// PermissionEditor is implemented by backends whose apps run in a sandbox the user can open or close
+// further (Flatpak). appID is the app's ID in the tool.
+type PermissionEditor interface {
+	Permissions(ctx context.Context, appID string) ([]Permission, error)
+	SetPermission(ctx context.Context, appID, key string, allow bool) error
+	ResetPermissions(ctx context.Context, appID string) error
+}
+
 // ErrWrongSource is returned when a backend is given a listing or app from another source.
 var ErrWrongSource = errors.New("listing is from a different source")
