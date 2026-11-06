@@ -6,6 +6,7 @@ package catalog
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,10 @@ const (
 	SourceCOPR     SourceID = "copr"
 	SourceHomebrew SourceID = "homebrew"
 	SourceGitHub   SourceID = "github"
+	// SourceGitLab and SourceCodeberg are release files on gitlab.com and codeberg.org, like GitHub's. Their
+	// listing refs name the host: "gitlab.com/group/project", "codeberg.org/owner/repo".
+	SourceGitLab   SourceID = "gitlab"
+	SourceCodeberg SourceID = "codeberg"
 	// SourceAppImage is AppImages the user added from files. The catalog has no listings from it.
 	SourceAppImage SourceID = "appimage"
 )
@@ -39,6 +44,10 @@ func (s SourceID) Name() string {
 		return "COPR"
 	case SourceGitHub:
 		return "GitHub"
+	case SourceGitLab:
+		return "GitLab"
+	case SourceCodeberg:
+		return "Codeberg"
 	case SourceAppImage:
 		return "AppImage"
 	}
@@ -47,7 +56,36 @@ func (s SourceID) Name() string {
 
 // SourcePrecedence orders sources for display: when several listings describe one app, fields such as the
 // name and screenshots come from the earliest source in this list that has them.
-var SourcePrecedence = []SourceID{SourceFlathub, SourceFedora, SourceHomebrew, SourceCOPR, SourceGitHub}
+var SourcePrecedence = []SourceID{SourceFlathub, SourceFedora, SourceHomebrew, SourceCOPR, SourceGitHub,
+	SourceGitLab, SourceCodeberg}
+
+// Releases reports whether the source is a code forge's release files (GitHub, GitLab, Codeberg), which uas
+// downloads and installs itself.
+func (s SourceID) Releases() bool {
+	return s == SourceGitHub || s == SourceGitLab || s == SourceCodeberg
+}
+
+// Host is the web host of a release source, such as "github.com".
+func (s SourceID) Host() string {
+	switch s {
+	case SourceGitHub:
+		return "github.com"
+	case SourceGitLab:
+		return "gitlab.com"
+	case SourceCodeberg:
+		return "codeberg.org"
+	}
+	return ""
+}
+
+// Repo returns a release listing's repo path on its host: "owner/repo" for GitHub, whose refs are that path,
+// and the ref without its host for GitLab and Codeberg.
+func (s SourceID) Repo(ref string) string {
+	if s == SourceGitHub {
+		return ref
+	}
+	return strings.TrimPrefix(ref, s.Host()+"/")
+}
 
 // Kind is the AppStream component type of an app.
 type Kind string

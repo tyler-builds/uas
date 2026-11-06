@@ -113,6 +113,20 @@ All endpoints below need confirming during the first spike.
   GitHub listing never takes an AppStream ID from its metainfo. Otherwise any repo could claim a Flathub
   app's ID and be merged into it as one of its sources.
 
+- **Codeberg and GitLab** (`fetch/forge`): the most starred repos, then each one's 8 newest releases, kept like
+  GitHub's (same file picking, `trust.GitHub` scoring). Listing refs name the host
+  (`codeberg.org/owner/repo`, `gitlab.com/group/sub/project`), so they never collide with GitHub's. Neither
+  forge publishes checksums, so the indexer downloads each listed file once, records its SHA-256 and size in
+  the signed catalog, and reads the AppImage for its name, icon and screenshots on the way; both are kept per
+  release file (`github/media/forge/`), so only new releases are downloaded. Rate limits shape both:
+  Codeberg allows 2,000 keyless requests per 10 minutes (its `RateLimit-Policy` header), so requests are
+  spaced half a second apart and only repos with 25+ stars are read (a few hundred requests). GitLab.com
+  limits keyless requests to about 60 an hour per IP, too few to index with, so GitLab is indexed only when
+  the `GITLAB_TOKEN` secret holds a personal access token (read_api scope; 2,000 requests a minute), and
+  left out otherwise. Projects with 50+ stars active in the past year are read, 10 requests a second. Both
+  are cached like GitHub's, and a failed fetch (such as a rate limit) reuses results up to a week old.
+  In November 2026 Codeberg's 300+ star repos gave Tenacity, Gram and ChiPass.
+
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
 Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
@@ -280,6 +294,10 @@ type Backend interface {
   dock favorites point at uas's launcher instead. Every launcher has a `StartupWMClass` (the app's own, else
   its desktop entry's name), since uas renames launchers and the dock matches windows to them by it.
   Launchers carry `X-UAS-Launcher`, and older ones are rewritten when uas starts.
+- **gitlab, codeberg:** the github backend with `Forge` set. Installs go in the same folders and state file
+  (recorded with their `source`), and files are checked against the SHA-256 the indexer recorded, since
+  neither forge publishes one. Asset URLs must be under the repo's own release downloads (Codeberg) or
+  project pages (GitLab, whose release links redirect to wherever the file is kept).
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
   New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers

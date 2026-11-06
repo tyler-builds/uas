@@ -10,7 +10,7 @@ import (
 
 // InstallOrder ranks sources for installing on an image-based system.
 var InstallOrder = []catalog.SourceID{catalog.SourceFlathub, catalog.SourceHomebrew, catalog.SourceGitHub,
-	catalog.SourceFedora, catalog.SourceCOPR}
+	catalog.SourceCodeberg, catalog.SourceGitLab, catalog.SourceFedora, catalog.SourceCOPR}
 
 // layered reports whether a source installs by layering onto the system image.
 func layered(s catalog.SourceID) bool { return s == catalog.SourceFedora || s == catalog.SourceCOPR }
@@ -79,6 +79,8 @@ var strengths = map[catalog.SourceID]string{
 	catalog.SourceFlathub:  "Flathub apps run sandboxed and install without a restart",
 	catalog.SourceHomebrew: "Homebrew installs for your user without changing the system",
 	catalog.SourceGitHub:   "it is the developer's own release",
+	catalog.SourceGitLab:   "it is the developer's own release",
+	catalog.SourceCodeberg: "it is the developer's own release",
 	catalog.SourceFedora:   "Fedora packages are reviewed and signed by Fedora",
 	catalog.SourceCOPR:     "the COPR project is the only packaged build",
 }
@@ -104,14 +106,18 @@ func Traits(l catalog.Listing) []string {
 		t = append(t, "Built by Homebrew from a formula its maintainers review",
 			"Installs for your user only, without a restart or changes to the system",
 			"Not sandboxed")
-	case catalog.SourceGitHub:
-		t = append(t, "Downloaded straight from the developer's GitHub releases; no distribution reviews it")
+	case catalog.SourceGitHub, catalog.SourceGitLab, catalog.SourceCodeberg:
+		t = append(t, "Downloaded straight from the developer's "+l.Source.Name()+" releases; no distribution reviews it")
 		if l.Trust != nil {
 			t = append(t, fmt.Sprintf("Trust score %d/100, from the project's age, stars, downloads and releases",
 				l.Trust.Score))
 		}
-		t = append(t, "Checked against the checksum GitHub publishes", "Runs as an AppImage, not sandboxed",
-			"Installs without a restart")
+		if l.Source == catalog.SourceGitHub {
+			t = append(t, "Checked against the checksum GitHub publishes")
+		} else {
+			t = append(t, "Checked against the checksum uas recorded when it built the catalog")
+		}
+		t = append(t, "Runs as an AppImage, not sandboxed", "Installs without a restart")
 	case catalog.SourceFedora:
 		t = append(t, "Packaged, reviewed and signed by Fedora",
 			"Layered into the system image: takes effect after a restart",
@@ -162,7 +168,7 @@ func because(l, chosen catalog.Listing, available bool) string {
 			what = "built by a COPR project owner without review, and layered into the system image"
 		}
 		return "it would be " + what + ", which needs a restart and can hold up system updates"
-	case l.Source == catalog.SourceGitHub:
+	case l.Source.Releases():
 		why := "it runs as an AppImage outside any sandbox, and no distribution checks its builds"
 		if chosen.Source == catalog.SourceHomebrew {
 			why = "no distribution checks its builds, while Homebrew's maintainers review their formula"

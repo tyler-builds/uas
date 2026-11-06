@@ -20,6 +20,9 @@ type Cached struct {
 	Key string
 	Log *slog.Logger
 	Now func() time.Time
+	// Stale, when set, lets a failed fetch fall back to a saved result up to this old, as for a source that
+	// rate-limits the indexer now and then.
+	Stale time.Duration
 }
 
 type cachedResult struct {
@@ -41,9 +44,13 @@ func (c *Cached) now() time.Time {
 
 // Fetch implements Fetcher.
 func (c *Cached) Fetch(ctx context.Context) ([]catalog.Listing, error) {
+	var saved *cachedResult
 	if b, err := os.ReadFile(c.path()); err == nil {
 		var r cachedResult
-		if json.Unmarshal(b, &r) == nil && r.Key == c.Key && c.now().Sub(r.Saved) <= c.For {
+		if json.Unmarshal(b, &r) == nil && r.Key == c.Key {
+			saved = &r
+		}
+		if saved != nil && c.now().Sub(r.Saved) <= c.For {
 			if c.Log != nil {
 				c.Log.Info("reusing cached results", "source", c.Fetcher.Source(), "saved", r.Saved,
 					"listings", len(r.Listings))
@@ -52,6 +59,13 @@ func (c *Cached) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 		}
 	}
 	ls, err := c.Fetcher.Fetch(ctx)
+	if err != nil && saved != nil && c.now().Sub(saved.Saved) <= c.Stale && ctx.Err() == nil {
+		if c.Log != nil {
+			c.Log.Warn("fetch failed; reusing older results", "source", c.Fetcher.Source(), "saved", saved.Saved,
+				"err", err)
+		}
+		return saved.Listings, nil
+	}
 	if err != nil {
 		return nil, err
 	}

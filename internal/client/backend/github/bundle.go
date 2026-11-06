@@ -83,7 +83,8 @@ func (b *Backend) installBundle(ctx context.Context, l catalog.Listing, a catalo
 		b.removeFiles(old)
 		b.refreshLaunchers(ctx)
 	}
-	st.Put(state.GitHubInstall{Repo: l.Ref, Kind: catalog.AssetFlatpak, FlatpakRef: ref, Name: l.Name,
+	st.Put(state.GitHubInstall{Repo: l.Ref, Source: stateSource(l.Source), Kind: catalog.AssetFlatpak,
+		FlatpakRef: ref, Name: l.Name,
 		Version: l.Version, Asset: a.Name, SHA256: a.SHA256, InstalledAt: b.now()})
 	return b.State.Save(st)
 }

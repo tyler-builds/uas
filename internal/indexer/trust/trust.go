@@ -27,6 +27,12 @@ type RepoFacts struct {
 	License             string // SPDX ID, or "" if none was detected
 	// HasChecksum is true when the asset uas would install has a published SHA-256.
 	HasChecksum bool
+	// IndexedChecksum is true when the forge publishes no checksum but the indexer downloaded the file and
+	// recorded its SHA-256 in the signed catalog (GitLab, Codeberg), so installs are still checked.
+	IndexedChecksum bool
+	// FreeHost names a forge that hosts only free software (Codeberg), for a repo whose license the API
+	// doesn't report.
+	FreeHost string
 }
 
 const day = 24 * time.Hour
@@ -108,14 +114,23 @@ func GitHub(f RepoFacts, now time.Time) catalog.Trust {
 
 	switch f.License {
 	case "", "NOASSERTION", "OTHER":
-		add("License", "no recognized license", 0, 10)
+		if f.FreeHost != "" {
+			add("License", f.FreeHost+" hosts only free and open-source projects", 10, 10)
+		} else {
+			add("License", "no recognized license", 0, 10)
+		}
 	default:
 		add("License", f.License, 10, 10)
 	}
 
-	if f.HasChecksum {
+	switch {
+	case f.HasChecksum:
 		add("Checksum", "download has a published SHA-256", 10, 10)
-	} else {
+	case f.IndexedChecksum:
+		// The file is pinned when the catalog is built, so a swapped file is caught, but nothing ties the first
+		// download to the developer's own build.
+		add("Checksum", "no published checksum; uas recorded the file's SHA-256 when it indexed the release", 5, 10)
+	default:
 		add("Checksum", "no published checksum", 0, 10)
 		t.Flags = append(t.Flags, "No published checksum: the download cannot be verified")
 	}

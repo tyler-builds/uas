@@ -625,7 +625,6 @@ var (
 	thisArchARM  = regexp.MustCompile(`(?i)(aarch64|arm64)`)
 )
 
-// kindOf classifies a release file by name.
 // displayName is the app's name as its release files spell it, when they spell the repo name: a repo
 // "t3code" whose AppImage is "T3-Code-0.1.7-x86_64.AppImage" is "T3 Code". Otherwise it is the repo name.
 func displayName(repoName string, assets []catalog.Asset) string {
@@ -672,6 +671,7 @@ func squash(s string) string {
 	return b.String()
 }
 
+// kindOf classifies a release file by name.
 func kindOf(name string) string {
 	n := strings.ToLower(name)
 	switch {
@@ -685,34 +685,52 @@ func kindOf(name string) string {
 	return ""
 }
 
-// pickAssets returns the best asset of each kind for arch: AppImage first, then Flatpak bundle, then RPM.
-// A file naming the architecture beats one that names none; a file naming another architecture is skipped.
-// Only files under the repo's own release download URL are accepted.
+// pickAssets returns the best asset of each kind in a GitHub release (see PickAssets).
 func pickAssets(repo string, rel *release, arch string) []catalog.Asset {
+	files := make([]ReleaseFile, 0, len(rel.ReleaseAssets.Nodes))
+	for _, a := range rel.ReleaseAssets.Nodes {
+		sha := ""
+		if d, ok := strings.CutPrefix(a.Digest, "sha256:"); ok && len(d) == 64 {
+			sha = strings.ToLower(d)
+		}
+		files = append(files, ReleaseFile{Name: a.Name, URL: a.DownloadURL, Size: a.Size, SHA256: sha,
+			Downloads: a.DownloadCount})
+	}
+	return PickAssets(files, "https://github.com/"+repo+"/releases/download/", arch)
+}
+
+// ReleaseFile is one file of a release, on any code forge.
+type ReleaseFile struct {
+	Name      string
+	URL       string
+	Size      int64  // 0 when the forge doesn't say
+	SHA256    string // hex; "" when the forge publishes none
+	Downloads int
+}
+
+// PickAssets returns the best file of each kind for arch: AppImage first, then Flatpak bundle, then RPM. A
+// file naming the architecture beats one that names none; a file naming another architecture is skipped.
+// Only files whose URL starts with prefix (the repo's own release downloads) are accepted.
+func PickAssets(files []ReleaseFile, prefix, arch string) []catalog.Asset {
 	other, this := otherArchX86, thisArchX86
 	if arch == "aarch64" {
 		other, this = otherArchARM, thisArchARM
 	}
-	prefix := "https://github.com/" + repo + "/releases/download/"
 	best := map[string]catalog.Asset{}
 	bestExplicit := map[string]bool{}
-	for _, a := range rel.ReleaseAssets.Nodes {
+	for _, a := range files {
 		kind := kindOf(a.Name)
 		explicit := this.MatchString(a.Name)
 		// A file that names no architecture is almost always x86_64, so only x86_64 accepts one.
 		if kind == "" || (!explicit && (other.MatchString(a.Name) || arch != "x86_64")) ||
-			!strings.HasPrefix(a.DownloadURL, prefix) {
+			!strings.HasPrefix(a.URL, prefix) {
 			continue
 		}
 		if _, ok := best[kind]; ok && (bestExplicit[kind] || !explicit) {
 			continue
 		}
-		sha := ""
-		if d, ok := strings.CutPrefix(a.Digest, "sha256:"); ok && len(d) == 64 {
-			sha = strings.ToLower(d)
-		}
-		best[kind] = catalog.Asset{Kind: kind, Name: a.Name, URL: a.DownloadURL, Size: a.Size, SHA256: sha,
-			Downloads: a.DownloadCount}
+		best[kind] = catalog.Asset{Kind: kind, Name: a.Name, URL: a.URL, Size: a.Size, SHA256: a.SHA256,
+			Downloads: a.Downloads}
 		bestExplicit[kind] = explicit
 	}
 	var out []catalog.Asset
@@ -722,4 +740,10 @@ func pickAssets(repo string, rel *release, arch string) []catalog.Asset {
 		}
 	}
 	return out
+}
+
+// DisplayName is the app's name as its release files spell it, when they spell the repo name (see
+// displayName), for other forges' listings.
+func DisplayName(repoName string, assets []catalog.Asset) string {
+	return displayName(repoName, assets)
 }

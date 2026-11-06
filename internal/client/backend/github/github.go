@@ -1,4 +1,5 @@
-// Package github installs apps from GitHub releases: AppImages, and Flatpak bundles.
+// Package github installs apps from GitHub releases: AppImages, and Flatpak bundles. The same backend
+// installs GitLab and Codeberg releases (Backend.Forge), whose checksums the indexer records in the catalog.
 //
 // An AppImage is downloaded, checked against the SHA-256 GitHub publishes for it, made executable and given
 // a launcher (desktop entry and icon) read from inside the image without running it. A Flatpak bundle is
@@ -55,7 +56,39 @@ func DefaultDirs() (Dirs, error) {
 // maxAppImage caps a download when the catalog gives no size.
 const maxAppImage = 4 << 30
 
-var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+var (
+	repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	// GitLab projects can sit in nested groups.
+	nestedRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$`)
+)
+
+// validRef reports whether ref is a well-formed listing ref of a release source.
+func validRef(src catalog.SourceID, ref string) bool {
+	if strings.Contains(ref, "..") {
+		return false
+	}
+	switch src {
+	case catalog.SourceGitHub:
+		return repoPattern.MatchString(ref)
+	case catalog.SourceCodeberg:
+		r, ok := strings.CutPrefix(ref, src.Host()+"/")
+		return ok && repoPattern.MatchString(r)
+	case catalog.SourceGitLab:
+		r, ok := strings.CutPrefix(ref, src.Host()+"/")
+		return ok && nestedRepoPattern.MatchString(r)
+	}
+	return false
+}
+
+// assetPrefix is where a release source's files for a repo must be: GitHub's and Codeberg's release
+// downloads, and GitLab's project pages (release asset links go through /-/releases/<tag>/downloads/).
+func assetPrefix(src catalog.SourceID, ref string) string {
+	repo := src.Repo(ref)
+	if src == catalog.SourceGitLab {
+		return "https://" + src.Host() + "/" + repo + "/-/"
+	}
+	return "https://" + src.Host() + "/" + repo + "/releases/download/"
+}
 
 // Backend installs AppImages.
 type Backend struct {
@@ -69,22 +102,31 @@ type Backend struct {
 	// Flatpak is the flatpak binary. Without it, Flatpak bundles aren't installable.
 	Flatpak string
 	Now     func() time.Time
+	// Forge is the release source this backend installs from: GitHub (the default), GitLab or Codeberg.
+	// Backends for each forge share one state file and one set of folders; refs never collide, because
+	// GitLab and Codeberg refs start with their host.
+	Forge catalog.SourceID
 }
 
 // Source implements backend.Backend.
-func (b *Backend) Source() catalog.SourceID { return catalog.SourceGitHub }
+func (b *Backend) Source() catalog.SourceID {
+	if b.Forge == "" {
+		return catalog.SourceGitHub
+	}
+	return b.Forge
+}
 
 // Supports implements backend.Backend: the listing needs an AppImage, or a Flatpak bundle when flatpak is
-// installed, with a published checksum.
+// installed, with a checksum.
 func (b *Backend) Supports(l catalog.Listing) bool {
 	_, ok := b.Pick(l)
-	return l.Source == catalog.SourceGitHub && ok
+	return l.Source == b.Source() && ok
 }
 
 // Pick returns the release file to install: the AppImage, else the Flatpak bundle (assets come best first).
 func (b *Backend) Pick(l catalog.Listing) (catalog.Asset, bool) {
 	for _, a := range l.Assets {
-		if a.SHA256 == "" || !validAsset(l.Ref, a) {
+		if a.SHA256 == "" || !validAsset(l.Source, l.Ref, a) {
 			continue
 		}
 		if a.Kind == catalog.AssetAppImage || (a.Kind == catalog.AssetFlatpak && b.Flatpak != "") {
@@ -94,13 +136,29 @@ func (b *Backend) Pick(l catalog.Listing) (catalog.Asset, bool) {
 	return catalog.Asset{}, false
 }
 
-func validAsset(repo string, a catalog.Asset) bool {
-	return repoPattern.MatchString(repo) && !strings.Contains(repo, "..") &&
-		strings.HasPrefix(a.URL, "https://github.com/"+repo+"/releases/download/") && len(a.SHA256) == 64
+func validAsset(src catalog.SourceID, ref string, a catalog.Asset) bool {
+	return validRef(src, ref) && strings.HasPrefix(a.URL, assetPrefix(src, ref)) && len(a.SHA256) == 64
 }
 
-// key is a file-name-safe form of "owner/repo".
+// key is a file-name-safe form of a ref: "owner__repo", "codeberg.org__owner__repo".
 func key(repo string) string { return strings.ReplaceAll(repo, "/", "__") }
+
+// sourceOf is the release source an install came from; installs recorded before GitLab and Codeberg have
+// none, and are GitHub's.
+func sourceOf(g state.GitHubInstall) catalog.SourceID {
+	if g.Source == "" {
+		return catalog.SourceGitHub
+	}
+	return catalog.SourceID(g.Source)
+}
+
+// stateSource is what the state file records for src: nothing for GitHub, as before.
+func stateSource(src catalog.SourceID) string {
+	if src == catalog.SourceGitHub {
+		return ""
+	}
+	return string(src)
+}
 
 // Installed implements backend.Backend.
 func (b *Backend) Installed(context.Context) ([]backend.InstalledApp, error) {
@@ -109,9 +167,13 @@ func (b *Backend) Installed(context.Context) ([]backend.InstalledApp, error) {
 		return nil, err
 	}
 	var apps []backend.InstalledApp
+	src := b.Source()
 	for _, g := range st.GitHub {
-		apps = append(apps, backend.InstalledApp{Source: catalog.SourceGitHub, Ref: g.Repo, AppID: g.Repo,
-			Name: g.Name, Version: g.Version, Scope: "user", Origin: "github", Icon: iconURL(g.IconFile),
+		if sourceOf(g) != src {
+			continue
+		}
+		apps = append(apps, backend.InstalledApp{Source: src, Ref: g.Repo, AppID: g.Repo,
+			Name: g.Name, Version: g.Version, Scope: "user", Origin: string(src), Icon: iconURL(g.IconFile),
 			Desktop: g.DesktopFile})
 	}
 	return apps, nil
@@ -119,12 +181,12 @@ func (b *Backend) Installed(context.Context) ([]backend.InstalledApp, error) {
 
 // Install implements backend.Backend.
 func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(backend.Progress)) error {
-	if l.Source != catalog.SourceGitHub {
+	if l.Source != b.Source() {
 		return backend.ErrWrongSource
 	}
 	a, ok := b.Pick(l)
 	if !ok {
-		return fmt.Errorf("github: %s has no AppImage or Flatpak bundle with a published checksum", l.Ref)
+		return fmt.Errorf("%s: %s has no AppImage or Flatpak bundle with a checksum", l.Source, l.Ref)
 	}
 	for _, d := range []string{b.Dirs.AppImages, b.Dirs.Icons, b.Dirs.Applications} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -154,7 +216,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		return err
 	}
 	old, _ := st.Find(l.Ref)
-	p, err := b.place(ctx, tmp, k, launcher{name: l.Name, summary: l.Summary, source: "github:" + l.Ref,
+	p, err := b.place(ctx, tmp, k, launcher{name: l.Name, summary: l.Summary, source: string(l.Source) + ":" + l.Ref,
 		oldIcon: old.IconFile, wmclass: old.WMClass, info: info})
 	if err != nil {
 		return err
@@ -162,7 +224,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	if old.Kind == catalog.AssetFlatpak { // it was installed as a bundle before
 		b.uninstallBundle(ctx, old.FlatpakRef, progress)
 	}
-	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: l.Version, Asset: a.Name, SHA256: a.SHA256,
+	st.Put(state.GitHubInstall{Repo: l.Ref, Source: stateSource(l.Source), Name: p.name, Version: l.Version, Asset: a.Name, SHA256: a.SHA256,
 		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, WMClass: old.WMClass, InstalledAt: b.now()})
 	return b.State.Save(st)
 }
@@ -279,7 +341,7 @@ func (b *Backend) RepairLaunchers(ctx context.Context) error {
 		if g.Kind == catalog.AssetFlatpak {
 			continue
 		}
-		if p, ok := repair(g.Path, g.DesktopFile, g.IconFile, key(g.Repo), g.Name, "github:"+g.Repo,
+		if p, ok := repair(g.Path, g.DesktopFile, g.IconFile, key(g.Repo), g.Name, string(sourceOf(g))+":"+g.Repo,
 			&st.GitHub[i].WMClass); ok {
 			st.GitHub[i].DesktopFile, st.GitHub[i].IconFile = p.desktopFile, p.iconFile
 		}
@@ -394,6 +456,9 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 	}
 	var ups []backend.AvailableUpdate
 	for _, g := range st.GitHub {
+		if sourceOf(g) != b.Source() {
+			continue
+		}
 		l, err := b.Latest(ctx, g.Repo)
 		if err != nil {
 			continue // no longer in the catalog: nothing to offer
@@ -407,11 +472,11 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 
 // Update implements backend.Backend: it installs the catalog's current release if it differs.
 func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress func(backend.Progress)) error {
-	if a.Source != catalog.SourceGitHub {
+	if a.Source != b.Source() {
 		return backend.ErrWrongSource
 	}
 	if b.Latest == nil {
-		return errors.New("github: no catalog to check for updates")
+		return fmt.Errorf("%s: no catalog to check for updates", a.Source)
 	}
 	st, err := b.State.Load()
 	if err != nil {
@@ -419,7 +484,7 @@ func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress f
 	}
 	cur, ok := st.Find(a.Ref)
 	if !ok {
-		return fmt.Errorf("github: %s is not installed", a.Ref)
+		return fmt.Errorf("%s: %s is not installed", a.Source, a.Ref)
 	}
 	l, err := b.Latest(ctx, a.Ref)
 	if err != nil {
@@ -436,7 +501,7 @@ func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress f
 // Remove implements backend.Backend. It deletes the AppImage, its launcher and icon, or uninstalls the
 // Flatpak bundle. App settings in the home folder are left alone.
 func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress func(backend.Progress)) error {
-	if a.Source != catalog.SourceGitHub {
+	if a.Source != b.Source() {
 		return backend.ErrWrongSource
 	}
 	st, err := b.State.Load()
@@ -445,7 +510,7 @@ func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress f
 	}
 	g, ok := st.Find(a.Ref)
 	if !ok {
-		return fmt.Errorf("github: %s is not installed", a.Ref)
+		return fmt.Errorf("%s: %s is not installed", a.Source, a.Ref)
 	}
 	if g.Kind == catalog.AssetFlatpak {
 		if err := b.uninstallBundle(ctx, g.FlatpakRef, progress); err != nil {

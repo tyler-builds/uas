@@ -210,6 +210,8 @@ var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceHomebrew: {"#fbbf4a", "#a15c00"},
 	catalog.SourceCOPR:     {"#fb7185", "#be123c"},
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
+	catalog.SourceGitLab:   {"#fc9867", "#c2410c"},
+	catalog.SourceCodeberg: {"#60a5fa", "#1d4ed8"},
 	catalog.SourceAppImage: {"#5eead4", "#0f766e"},
 }
 
@@ -223,6 +225,10 @@ var sourceTips = map[catalog.SourceID]string{
 		"a restart",
 	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +
 		"its page shows a trust score",
+	catalog.SourceGitLab: "Released on GitLab by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +
+		"its page shows a trust score",
+	catalog.SourceCodeberg: "Released on Codeberg by its developer, as an AppImage or Flatpak bundle. No distribution " +
+		"reviews it; its page shows a trust score",
 	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
 		"and installing layers it into the system image",
 	catalog.SourceAppImage: "An AppImage you added from a file. uas updates it from where the AppImage says, " +

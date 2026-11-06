@@ -22,6 +22,7 @@ import (
 	"github.com/tyler-builds/uas/internal/indexer/fetch/copr"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/fedora"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/flathub"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/forge"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/github"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/homebrew"
 	"github.com/tyler-builds/uas/internal/indexer/publish"
@@ -40,8 +41,14 @@ func main() {
 	slowCacheFor := flag.Duration("slow-cache-for", 20*time.Hour,
 		"reuse results of slow sources (GitHub, COPR) younger than this")
 	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
-	sources := flag.String("sources", "flathub,fedora,homebrew,github,copr", "comma-separated sources to index\n"+
-		"(github needs $GITHUB_TOKEN)")
+	defaultSources := "flathub,fedora,homebrew,github,copr,codeberg"
+	if os.Getenv("GITLAB_TOKEN") != "" {
+		defaultSources += ",gitlab"
+	}
+	sources := flag.String("sources", defaultSources, "comma-separated sources to index\n"+
+		"(github needs $GITHUB_TOKEN; gitlab needs $GITLAB_TOKEN and is left out without it)")
+	codebergMinStars := flag.Int("codeberg-min-stars", forge.DefaultCodebergMinStars,
+		"check Codeberg repos with at least this many stars")
 	keygen := flag.String("keygen", "", "write a new signing key to this file, print its public key, and exit")
 	flag.Parse()
 	if *keygen != "" {
@@ -115,6 +122,17 @@ func main() {
 				github.MediaVersion, github.ListingVersion, *publishURL),
 		},
 	}
+	forgeBuilder := forge.Builder{Client: client, Arch: *arch, MediaDir: mediaDir, IconBase: *publishURL, Log: log}
+	forgeKey := fmt.Sprintf("schema=%d arch=%s media=%d/%d icons=%s", catalog.SchemaVersion, *arch,
+		forge.MediaVersion, github.MediaVersion, *publishURL)
+	codeberg := forge.NewCodeberg(forgeBuilder)
+	codeberg.MinStars = *codebergMinStars
+	available["codeberg"] = &fetch.Cached{Fetcher: codeberg,
+		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: forgeKey + fmt.Sprintf(" min-stars=%d", *codebergMinStars)}
+	available["gitlab"] = &fetch.Cached{Fetcher: forge.NewGitLab(forgeBuilder, os.Getenv("GITLAB_TOKEN")),
+		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: forgeKey + fmt.Sprintf(" min-stars=%d", forge.DefaultGitLabMinStars)}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {
 		f, ok := available[strings.TrimSpace(name)]

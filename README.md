@@ -5,7 +5,7 @@
 # uas
 
 **One app store for every source.**<br>
-Flathub, Homebrew, GitHub releases, Fedora and COPR, searched and installed from one place.
+Flathub, Homebrew, GitHub, GitLab and Codeberg releases, Fedora and COPR, searched and installed from one place.
 
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-0f766e)
@@ -20,7 +20,7 @@ Flathub, Homebrew, GitHub releases, Fedora and COPR, searched and installed from
 - **One catalog.** About 7,700 apps, merged so each app appears once with every source it's on.
 - **A recommended source.** uas picks the best fit for your system and tells you why, with the other sources a
   click away.
-- **Trust scores.** GitHub releases and COPR projects are scored 0–100 from public signals, with the breakdown
+- **Trust scores.** GitHub, GitLab and Codeberg releases and COPR projects are scored 0–100 from public signals, with the breakdown
   shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
 - **One list for everything installed,** whatever its source, with updates and Update all.
 - **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
@@ -56,7 +56,7 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | --- | --- | --- |
 | Flathub | `flatpak` | Any distro |
 | Homebrew | `brew` | Any distro |
-| GitHub releases, AppImages | — (Flatpak bundles need `flatpak`) | Any distro |
+| GitHub, GitLab and Codeberg releases, AppImages | — (Flatpak bundles need `flatpak`) | Any distro |
 | Fedora packages | `rpm-ostree` | Fedora Atomic (Bazzite, Silverblue, Kinoite, Bluefin, Aurora…) |
 | COPR | `rpm-ostree`, `pkexec` | Fedora Atomic |
 
@@ -132,9 +132,10 @@ sources built for it. They work fine together.
 No. It runs them for you. Anything uas installs shows up in those tools, and anything they install shows up
 in uas.
 
-**Is installing from GitHub or COPR safe?**<br>
+**Is installing from GitHub, GitLab, Codeberg or COPR safe?**<br>
 No distribution reviews those sources, so uas asks before installing, shows a trust score with its breakdown,
-and verifies GitHub downloads against their checksums. The score measures how well kept a project is, not
+and verifies every download against a checksum: the one GitHub publishes, or for GitLab and Codeberg, which
+publish none, the one uas recorded when it built the catalog. The score measures how well kept a project is, not
 whether its code is safe.
 
 **Does uas collect data?**<br>
@@ -180,7 +181,9 @@ UAS_SHOTS=/tmp/uas-shots UAS_CATALOG=out/catalog.db go test ./internal/gui -run 
 ```
 
 **Publishing.** The `Index` workflow builds and publishes the catalog every 6 hours, or by hand from the
-Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The catalog Worker is in
+Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. GitLab is indexed only if the
+optional `GITLAB_TOKEN` secret holds a GitLab.com personal access token with the `read_api` scope, because
+GitLab allows too few keyless requests. The catalog Worker is in
 `deploy/cloudflare`; deploy it with `npx wrangler deploy`.
 
 ## Acknowledgements

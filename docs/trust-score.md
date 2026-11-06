@@ -1,6 +1,6 @@
 # Trust score
 
-GitHub releases and COPR projects are not reviewed by any distribution, so uas scores each listing from
+GitHub, GitLab and Codeberg releases and COPR projects are not reviewed by any distribution, so uas scores each listing from
 public signals and shows the breakdown next to the install button, not only the number. Code:
 `internal/indexer/trust`.
 
@@ -15,6 +15,19 @@ public signals and shows the breakdown next to the install button, not only the 
 | Latest release | 15 | within 6 months 15, a year 10, 18 months 5, older 0 |
 | License | 10 | any recognized SPDX license 10 |
 | Checksum | 10 | the AppImage has a SHA-256 published by GitHub 10 |
+
+## GitLab and Codeberg signals
+
+The same as GitHub's, with two differences:
+
+- **Checksum:** neither forge publishes checksums, so the indexer downloads each release file once and records
+  its SHA-256 in the signed catalog: 5 of 10. The client checks every download against it, so a file swapped
+  after indexing is refused, but nothing ties the first download to the developer's own build.
+- **License:** Codeberg's API doesn't report a repo's license, and Codeberg hosts only free and open-source
+  projects, so Codeberg repos get the 10 points with that as the reason. GitLab's license comes from the
+  project's own page.
+- GitLab has no prerelease flag; tags with alpha, beta, rc, preview, nightly, snapshot or dev count as
+  prereleases. GitLab doesn't count downloads, so its listings get 0 for downloads.
 
 ## COPR signals (0 to 100)
 
@@ -47,14 +60,15 @@ Shown whatever the score:
 - Archived repos and forks are left out.
 - Only the latest stable release counts; pre-releases and drafts are ignored.
 - A listing needs at least one Linux file for the architecture (AppImage, Flatpak bundle or RPM) under the
-  repo's own `releases/download/` URL.
+  repo's own `releases/download/` URL (GitLab: the project's `/-/releases/<tag>/downloads/` link). GitLab and
+  Codeberg listings leave out RPMs, which aren't installable from releases anyway.
 - Listings scoring below 35 are left out. In the first full run (November 2026) 2,010 repos were checked,
   1,389 kept and 4 dropped for a low score; the median score was 78.
 
 ## What the client enforces
 
 - uas installs a GitHub AppImage only if it has a published SHA-256, and refuses the file if the download
-  doesn't match it.
+  doesn't match it. GitLab and Codeberg files are checked against the SHA-256 the indexer recorded.
 - The launcher's `Exec` line is rebuilt to run only the AppImage. Other commands in the app's own desktop
   entry (such as extra actions) are not copied.
 

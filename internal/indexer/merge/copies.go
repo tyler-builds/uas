@@ -87,7 +87,7 @@ func sortCopies(groups map[string][]catalog.Listing, order []string) ([]string, 
 	var hidden []Hidden
 	for _, g := range order {
 		ls := groups[g]
-		if len(ls) != 1 || ls[0].Source != catalog.SourceGitHub {
+		if len(ls) != 1 || !ls[0].Source.Releases() {
 			continue
 		}
 		l := ls[0]
@@ -96,15 +96,17 @@ func sortCopies(groups map[string][]catalog.Listing, order []string) ([]string, 
 			continue
 		}
 		app := groups[target]
-		owner, _, _ := strings.Cut(l.Ref, "/")
+		repo := l.Source.Repo(l.Ref)
+		owner, _, _ := strings.Cut(repo, "/")
+		isOfficial := official(owner, l.Source.Host(), l, app)
 		switch {
-		case official(owner, l, app) && !hasSource(app, catalog.SourceGitHub):
+		case isOfficial && !hasSource(app, l.Source):
 			groups[target] = append(app, l)
 			delete(groups, g)
-		case official(owner, l, app):
-			hidden = append(hidden, hide(l, app, "another GitHub repo of the developer, who already has one listed"))
+		case isOfficial:
+			hidden = append(hidden, hide(l, app, "another "+l.Source.Name()+" repo of the developer, who already has one listed"))
 			delete(groups, g)
-		case repackagedRepo.MatchString(strings.TrimPrefix(l.Ref, owner+"/")) || repackagedText.MatchString(l.Summary):
+		case repackagedRepo.MatchString(repo[strings.LastIndex(repo, "/")+1:]) || repackagedText.MatchString(l.Summary):
 			hidden = append(hidden, hide(l, app, "a repackage by someone other than the developer"))
 			delete(groups, g)
 		case l.Stars < minStarsBesideReviewed && installs(app) >= establishedInstalls:
@@ -123,7 +125,7 @@ func sortCopies(groups map[string][]catalog.Listing, order []string) ([]string, 
 			if l.Source == catalog.SourceCOPR {
 				owner, _, _ := strings.Cut(l.Project, "/")
 				owner = strings.TrimPrefix(owner, "@")
-				if !trustedCOPROwners[owner] && !official(owner, l, ls) {
+				if !trustedCOPROwners[owner] && !official(owner, "", l, ls) {
 					hidden = append(hidden, hide(l, ls, "a COPR build by someone other than the developer"))
 					continue
 				}
@@ -142,10 +144,11 @@ func sortCopies(groups map[string][]catalog.Listing, order []string) ([]string, 
 	return out, hidden
 }
 
-// official reports whether owner (a GitHub or COPR account) is the developer of the app that listings
-// describe: it owns the app's code-forge URLs, it is named in the app's AppStream ID (io.github.<owner>.App,
-// org.<owner>.App), or the app's homepage is the owner's site (lmms.io for the LMMS account).
-func official(owner string, l catalog.Listing, app []catalog.Listing) bool {
+// official reports whether owner (a GitHub, GitLab, Codeberg or COPR account) is the developer of the app
+// that listings describe: it owns the app's code-forge URLs, it is named in the app's AppStream ID
+// (io.github.<owner>.App, org.<owner>.App), or the app's homepage is the owner's site (lmms.io for the LMMS
+// account). host, if set, is the forge the account is on, so a code-forge URL counts only on that forge.
+func official(owner, host string, l catalog.Listing, app []catalog.Listing) bool {
 	o := squashName(owner)
 	if o == "" {
 		return false
@@ -155,7 +158,7 @@ func official(owner string, l catalog.Listing, app []catalog.Listing) bool {
 			continue
 		}
 		for _, u := range []string{a.Homepage, a.VCSURL} {
-			if forgeOwner(u) == o {
+			if h, fo := forgeOwner(u); fo == o && (host == "" || h == host) {
 				return true
 			}
 		}
@@ -170,15 +173,15 @@ func official(owner string, l catalog.Listing, app []catalog.Listing) bool {
 	return false
 }
 
-// forgeOwner is the owner in a code-forge URL (github.com/<owner>/...), squashed, or "".
-func forgeOwner(raw string) string {
+// forgeOwner is the host and owner in a code-forge URL (github.com/<owner>/...), the owner squashed, or "".
+func forgeOwner(raw string) (host, owner string) {
 	u := normalizeURL(raw)
 	host, path, ok := strings.Cut(u, "/")
 	if !ok || !genericHosts[host] {
-		return ""
+		return "", ""
 	}
-	owner, _, _ := strings.Cut(path, "/")
-	return squashName(owner)
+	owner, _, _ = strings.Cut(path, "/")
+	return host, squashName(owner)
 }
 
 // idOwner is the organization an AppStream ID names: "kde" in org.kde.App, "owner" in io.github.owner.App.

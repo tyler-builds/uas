@@ -67,10 +67,15 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		CatalogPath:  catalogPath,
 	}
 	p := s.Platform
-	gh, ghErr := s.githubBackend()
+	gh, ghErr := s.releaseBackend(catalog.SourceGitHub)
 	if ghErr == nil {
 		s.Backends[catalog.SourceGitHub] = gh
 		s.Backends[catalog.SourceAppImage] = &github.Local{GH: gh}
+		for _, src := range []catalog.SourceID{catalog.SourceGitLab, catalog.SourceCodeberg} {
+			if b, err := s.releaseBackend(src); err == nil {
+				s.Backends[src] = b
+			}
+		}
 		// Launchers written by an older uas get what it has learned since; quick when there's nothing to do.
 		_ = gh.RepairLaunchers(ctx)
 	}
@@ -366,13 +371,17 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 		}
 	case catalog.SourceHomebrew:
 		notes = append(notes, "Installs with Homebrew for your user account. No restart needed.")
-	case catalog.SourceGitHub:
+	case catalog.SourceGitHub, catalog.SourceGitLab, catalog.SourceCodeberg:
 		var a catalog.Asset
-		if gh, ok := s.Backends[catalog.SourceGitHub].(*github.Backend); ok {
+		if gh, ok := s.Backends[l.Source].(*github.Backend); ok {
 			a, _ = gh.Pick(l)
 		}
-		notes = append(notes, fmt.Sprintf("Downloads %s (%s) from github.com/%s. Not reviewed by any distribution.",
-			a.Name, HumanSize(a.Size), l.Ref))
+		notes = append(notes, fmt.Sprintf("Downloads %s (%s) from %s/%s. Not reviewed by any distribution.",
+			a.Name, HumanSize(a.Size), l.Source.Host(), l.Source.Repo(l.Ref)))
+		if l.Source != catalog.SourceGitHub {
+			notes = append(notes, l.Source.Name()+" publishes no checksum; uas checks the file against the one "+
+				"recorded when the catalog was built.")
+		}
 		switch {
 		case a.Kind == catalog.AssetFlatpak:
 			notes = append(notes, "A Flatpak bundle: it installs for your user account and runs in a sandbox. "+
@@ -438,8 +447,9 @@ func RefreshOptions(catalogPath string) refresh.Options {
 	}
 }
 
-// githubBackend sets up installs from GitHub releases, looking up updates in the session's catalog.
-func (s *Session) githubBackend() (*github.Backend, error) {
+// releaseBackend sets up installs from a forge's releases (GitHub, GitLab, Codeberg), looking up updates in
+// the session's catalog.
+func (s *Session) releaseBackend(src catalog.SourceID) (*github.Backend, error) {
 	dirs, err := github.DefaultDirs()
 	if err != nil {
 		return nil, err
@@ -454,6 +464,7 @@ func (s *Session) githubBackend() (*github.Backend, error) {
 		Client:  &http.Client{Timeout: 30 * time.Minute},
 		Runner:  run.Exec{},
 		Flatpak: s.Platform.Flatpak,
+		Forge:   src,
 		Latest: func(ctx context.Context, repo string) (catalog.Listing, error) {
 			db, err := catalog.Open(s.CatalogPath)
 			if err != nil {
@@ -465,7 +476,7 @@ func (s *Session) githubBackend() (*github.Backend, error) {
 				return catalog.Listing{}, err
 			}
 			for _, l := range app.Listings {
-				if l.Source == catalog.SourceGitHub && l.Ref == repo {
+				if l.Source == src && l.Ref == repo {
 					return l, nil
 				}
 			}

@@ -13,6 +13,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -43,8 +44,8 @@ import (
 //
 // What was found is kept per release file, so an app is read again only when it ships a new version.
 
-// facts is what enrich found for one release file.
-type facts struct {
+// Facts is what enrich found for one release file.
+type Facts struct {
 	Name        string               `json:"name,omitempty"`
 	Summary     string               `json:"summary,omitempty"`
 	Description string               `json:"description,omitempty"`
@@ -63,7 +64,7 @@ const (
 	maxScreenshots = 4
 )
 
-// MediaVersion changes whenever what enrich reads changes, so cached facts and cached GitHub results made
+// MediaVersion changes whenever what enrich reads changes, so cached Facts and cached GitHub results made
 // the old way are not reused. 2: the right desktop entry when an image has several. 3: only the app's own
 // metainfo, not a bundled library's. 4: screenshots from repo files, and a size check on every screenshot.
 // 5: icons from repo files.
@@ -113,9 +114,9 @@ func (f *Fetcher) enrich(ctx context.Context, listings []catalog.Listing) {
 	}
 }
 
-// factsFor returns the facts for a listing, from the cache when they are there. fresh is true when they
+// factsFor returns the Facts for a listing, from the cache when they are there. fresh is true when they
 // were read just now.
-func (f *Fetcher) factsFor(ctx context.Context, l catalog.Listing) (fc facts, fresh bool) {
+func (f *Fetcher) factsFor(ctx context.Context, l catalog.Listing) (fc Facts, fresh bool) {
 	key := l.Ref
 	if len(l.Assets) > 0 {
 		key = l.Assets[0].URL
@@ -142,8 +143,8 @@ func (f *Fetcher) factsFor(ctx context.Context, l catalog.Listing) (fc facts, fr
 }
 
 // read looks inside a listing's AppImage, and at its README for screenshots.
-func (f *Fetcher) read(ctx context.Context, l catalog.Listing) facts {
-	var fc facts
+func (f *Fetcher) read(ctx context.Context, l catalog.Listing) Facts {
+	var fc Facts
 	for _, a := range l.Assets {
 		if a.Kind != catalog.AssetAppImage {
 			continue
@@ -155,18 +156,7 @@ func (f *Fetcher) read(ctx context.Context, l catalog.Listing) facts {
 			fc.Problem = err.Error()
 			break
 		}
-		fc.Name = info.Desktop["Name"]
-		fc.Summary = firstSentence(info.Desktop["Comment"])
-		fc.Categories = splitList(info.Desktop["Categories"])
-		fc.Keywords = splitList(info.Desktop["Keywords"])
-		if len(info.Metainfo) > 0 {
-			f.fromMetainfo(&fc, info.Metainfo)
-		}
-		if name, err := f.saveIcon(info.Icon, info.IconExt); err == nil {
-			fc.Icon = name
-		} else if len(info.Icon) > 0 && f.Log != nil {
-			f.Log.Debug("github icon skipped", "repo", l.Ref, "err", err)
-		}
+		fc = f.fromAppImage(l.Ref, info)
 		break
 	}
 	if len(fc.Screenshots) == 0 {
@@ -191,8 +181,40 @@ func (f *Fetcher) read(ctx context.Context, l catalog.Listing) facts {
 	return fc
 }
 
+// fromAppImage is what an AppImage says about its app: its desktop entry, metainfo and icon.
+func (f *Fetcher) fromAppImage(ref string, info *appimage.Info) Facts {
+	var fc Facts
+	fc.Name = info.Desktop["Name"]
+	fc.Summary = firstSentence(info.Desktop["Comment"])
+	fc.Categories = splitList(info.Desktop["Categories"])
+	fc.Keywords = splitList(info.Desktop["Keywords"])
+	if len(info.Metainfo) > 0 {
+		f.fromMetainfo(&fc, info.Metainfo)
+	}
+	if name, err := f.saveIcon(info.Icon, info.IconExt); err == nil {
+		fc.Icon = name
+	} else if len(info.Icon) > 0 && f.Log != nil {
+		f.Log.Debug("icon skipped", "ref", ref, "err", err)
+	}
+	return fc
+}
+
+// AppImageFacts reads what an AppImage of another forge's listing says about its app, the way enrich does
+// for GitHub's, saving its icon in mediaDir's icon directory.
+func AppImageFacts(ref string, info *appimage.Info, mediaDir string, log *slog.Logger) Facts {
+	f := &Fetcher{MediaDir: mediaDir, Log: log}
+	return f.fromAppImage(ref, info)
+}
+
+// ApplyFacts puts facts into another forge's listing, as enrich does for GitHub's; icons are linked under
+// iconBase.
+func ApplyFacts(l *catalog.Listing, fc Facts, iconBase string) {
+	f := &Fetcher{IconBase: iconBase}
+	f.apply(l, fc)
+}
+
 // fromMetainfo fills in what the app's AppStream metainfo says.
-func (f *Fetcher) fromMetainfo(fc *facts, raw []byte) {
+func (f *Fetcher) fromMetainfo(fc *Facts, raw []byte) {
 	appstream.Parse(bytes.NewReader(raw), func(c *appstream.Component) error {
 		if c.Name != "" {
 			fc.Name = c.Name
@@ -253,8 +275,8 @@ func (f *Fetcher) saveIcon(b []byte, ext string) (string, error) {
 	return name, os.WriteFile(filepath.Join(dir, name), b, 0o644)
 }
 
-// apply puts facts into a listing. The repo's own description wins over the app's, as it's what GitHub shows.
-func (f *Fetcher) apply(l *catalog.Listing, fc facts) {
+// apply puts Facts into a listing. The repo's own description wins over the app's, as it's what GitHub shows.
+func (f *Fetcher) apply(l *catalog.Listing, fc Facts) {
 	if n := strings.TrimSpace(fc.Name); n != "" && len(n) <= 60 {
 		l.Name = n
 	}
