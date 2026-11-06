@@ -2,6 +2,8 @@ package gui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tyler-builds/jamb/access"
@@ -75,8 +77,26 @@ func (a *App) intro(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	if system == "" {
 		system = "your system"
 	}
-	return pageHeader(ctx, "Discover", compactThousands(info.Apps)+" apps for "+system+" from Flathub, Fedora, "+
-		"Homebrew, COPR and GitHub, checked and ranked in one place.",
+	// The sources this system's catalog has, in order: "Flathub, Fedora, Homebrew and 3 more".
+	var names []string
+	for _, s := range catalog.SourcePrecedence {
+		for _, st := range info.Sources {
+			if st.Source == s && st.Listings > 0 {
+				names = append(names, s.Name())
+			}
+		}
+	}
+	from := ""
+	switch {
+	case len(names) > 4:
+		from = " from " + strings.Join(names[:3], ", ") + fmt.Sprintf(" and %d more", len(names)-3)
+	case len(names) > 1:
+		from = " from " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	case len(names) == 1:
+		from = " from " + names[0]
+	}
+	return pageHeader(ctx, "Discover", compactThousands(info.Apps)+" apps for "+system+from+
+		", checked and ranked in one place.",
 		ui.Button("Browse all").IconEnd(icons.ArrowRight).Secondary().Small().OnClick(func() {
 			a.browseOrder.Set(catalog.OrderPopular)
 			a.open(view{page: pageCategory})
@@ -137,35 +157,46 @@ func (a *App) spotlight(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResu
 		Child(shot)
 }
 
-// sourceTiles are the sources with their app counts, each opening its list.
-func (a *App) sourceTiles(ctx *ui.Context) ui.Element {
-	t := ctx.Theme()
-	counts := ui.Query(ctx, a.key("source-counts"), func(c context.Context) (map[catalog.SourceID]int, error) {
+// sourceCounts is how many apps the catalog has from each source.
+func (a *App) sourceCounts(ctx *ui.Context) ui.QueryResult[map[catalog.SourceID]int] {
+	return ui.Query(ctx, a.key("source-counts"), func(c context.Context) (map[catalog.SourceID]int, error) {
 		db, err := a.catalog(c)
 		if err != nil {
 			return nil, err
 		}
 		return db.SourceCounts(c)
 	}, ui.QueryStaleTime(time.Hour))
-	// One strip, split by hairlines, with a cell per source.
-	strip := ui.Div().Row().Align(ui.Stretch).Radius(radiusL).Border(1, t.Border).Background(t.Surface).ClipContent()
-	for i, s := range catalog.SourcePrecedence {
+}
+
+// sourceTiles are the sources with their app counts, each opening its list.
+func (a *App) sourceTiles(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	counts := a.sourceCounts(ctx)
+	// A grid of cells, one per source this catalog has apps from (catalogs differ by system), as many to a row
+	// as fit at a readable width.
+	var shown []catalog.SourceID
+	for _, s := range catalog.SourcePrecedence {
+		if counts.Data[s] > 0 {
+			shown = append(shown, s)
+		}
+	}
+	if counts.Loading {
+		return ui.Skeleton().Height(ui.Px(64))
+	}
+	grid := ui.Div().Grid(repeatFr(max(1, min(len(shown), gridColumns(ctx, homeMaxWidth, 180, 6))))...).Gap(space2)
+	for _, s := range shown {
 		s := s
 		c := sourceColor(ctx, s)
-		cell := ui.Div().Row().Align(ui.Center).Gap(space3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			PaddingX(space4).PaddingY(space3).Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
+		grid = grid.Child(ui.Div().Row().Align(ui.Center).Gap(space3).MinWidth(ui.Px(0)).
+			PaddingX(space4).PaddingY(space3).Radius(radiusL).Border(1, t.Border).Background(t.Surface).
+			Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
 			Role(access.RoleButton).Label(s.Name()).TabIndex(0).Tooltip(sourceTips[s]).
 			OnClick(func() { a.open(view{page: pageSource, arg: string(s)}) }).
 			Child(ui.Icon(sourceIcons[s]).Size(18).Color(c)).
-			Child(ui.Div().Column().Gap(1).MinWidth(ui.Px(0)).
-				Child(subhead(s.Name())).
-				Child(caption(ctx, plural(counts.Data[s], "app", "apps"))))
-		if i > 0 {
-			cell = cell.BorderEdges(ui.Edges{Left: 1}, t.Border)
-		}
-		strip = strip.Child(cell)
+			Child(ui.Div().Column().Gap(1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(subhead(s.Name()).Truncate()).
+				Child(caption(ctx, plural(counts.Data[s], "app", "apps")))))
 	}
-	grid := strip
 	return grid
 }
 

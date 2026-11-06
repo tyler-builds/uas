@@ -143,7 +143,12 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 		Child(pageHeader(ctx, "Sources", "Where uas finds apps, and how it treats each one. uas recommends the best fit for this system on every app's page.", nil)).
 		Child(a.sourceTiles(ctx))
 	list := ui.Div().Column().Gap(space3)
+	counts := a.sourceCounts(ctx)
 	for _, s := range catalog.SourcePrecedence {
+		// The catalog for this system has only the sources it can use; the rest aren't worth explaining.
+		if a.s.Backends[s] == nil && counts.Data[s] == 0 {
+			continue
+		}
 		status := statusPill(ctx, a.s.Backends[s] != nil, "Ready")
 		if a.s.Backends[s] == nil {
 			status = statusPill(ctx, false, "Not available here")
