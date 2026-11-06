@@ -18,6 +18,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/session"
+	"github.com/tyler-builds/uas/internal/version"
 )
 
 const usage = `usage: uas <command> [flags] [args]
@@ -37,6 +38,8 @@ commands:
   check-updates        refresh the catalog and list updates; -notify shows a desktop notification
   export [-o file]     save the list of installed apps, to install them elsewhere
   restore <file>       install the apps of an export that aren't installed yet
+  self-update [-check]  update uas itself to the latest release
+  version              show this uas's version
   permissions <app-id> show or change what a Flatpak app may reach (network, files, devices…)
 
 Run "uas <command> -h" for a command's flags.
@@ -79,6 +82,11 @@ func main() {
 		err = runExport(ctx, os.Stdout, args)
 	case "restore", "import":
 		err = runRestore(ctx, os.Stdout, args)
+	case "self-update":
+		err = runSelfUpdate(ctx, os.Stdout, args)
+	case "version", "-version", "--version":
+		fmt.Println("uas " + version.Version)
+		return
 	case "permissions":
 		err = runPermissions(ctx, os.Stdout, args)
 	case "help", "-h", "-help", "--help":

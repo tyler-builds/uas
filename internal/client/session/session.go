@@ -24,6 +24,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/recommend"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/run"
+	"github.com/tyler-builds/uas/internal/client/selfupdate"
 	"github.com/tyler-builds/uas/internal/client/settings"
 	"github.com/tyler-builds/uas/internal/client/state"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
@@ -537,4 +538,11 @@ func (s *Session) ResetPermissions(ctx context.Context, appID string) error {
 		return err
 	}
 	return pe.ResetPermissions(ctx, appID)
+}
+
+// SelfUpdater returns the updater for uas itself, which reads releases from where the catalog comes from.
+func (s *Session) SelfUpdater() *selfupdate.Updater {
+	opt := RefreshOptions(s.CatalogPath)
+	return &selfupdate.Updater{BaseURL: opt.BaseURL, TrustedKeys: opt.TrustedKeys,
+		Client: &http.Client{Timeout: 10 * time.Minute}, Arch: s.Platform.Arch}
 }

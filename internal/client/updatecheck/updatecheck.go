@@ -24,6 +24,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/run"
 	"github.com/tyler-builds/uas/internal/client/session"
+	"github.com/tyler-builds/uas/internal/version"
 )
 
 // Unit is the systemd user units' name, without the suffix.
@@ -43,6 +44,9 @@ type Result struct {
 	pending []string
 }
 
+// selfKey is the update key of uas itself.
+const selfKey = "uas"
+
 // Check refreshes the catalog (GitHub, GitLab and Codeberg updates come from it) and lists the installed
 // apps that have updates, noting which weren't in the last notification. Only Notify remembers them.
 func Check(ctx context.Context, s *session.Session) (Result, error) {
@@ -61,6 +65,14 @@ func Check(ctx context.Context, s *session.Session) (Result, error) {
 		if _, ok := ups[in.Key()]; ok {
 			r.Updates = append(r.Updates, in.Key())
 			r.Names[in.Key()] = in.Name
+		}
+	}
+	// uas itself, for released builds.
+	if version.Release() {
+		if a, err := s.SelfUpdater().Check(ctx); err == nil && a != nil {
+			r.Updates = append(r.Updates, selfKey)
+			r.Names[selfKey] = "uas " + a.Release.Version
+			ups[selfKey] = a.Release.Version
 		}
 	}
 	sort.Strings(r.Updates)

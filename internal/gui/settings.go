@@ -12,8 +12,10 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
+	"github.com/tyler-builds/uas/internal/client/selfupdate"
 	"github.com/tyler-builds/uas/internal/client/settings"
 	"github.com/tyler-builds/uas/internal/client/updatecheck"
+	"github.com/tyler-builds/uas/internal/version"
 )
 
 // settingsPage holds the settings, the catalog's state and what uas found about the system. Each section is
@@ -92,7 +94,8 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 			Child(section(sectionHeader(ctx, "Updates", ""), checks)).
 			Child(cat).
 			Child(system).
-			Child(section(sectionHeader(ctx, "Privacy", ""), privacy))
+			Child(section(sectionHeader(ctx, "Privacy", ""), privacy)).
+			Child(section(sectionHeader(ctx, "About", ""), a.aboutRow(ctx)))
 		return scroll(page)
 	}).Key("settings")
 }
@@ -189,4 +192,39 @@ func (a *App) updateChecksRow(ctx *ui.Context) ui.Element {
 	return settingsList(ctx, settingsRow(ctx, ui.Icon(icons.Bell).Size(18).Color(t.TextMuted),
 		"Check for updates in the background",
 		"Once a day, with a notification when updates are ready. Nothing installs without you.", sw))
+}
+
+// aboutRow shows this uas's version, with an update to the latest release when there is one.
+func (a *App) aboutRow(ctx *ui.Context) ui.Element {
+	icon := ui.Div().Size(ui.Px(18), ui.Px(18)).Child(brandMark(ctx, 18))
+	if !version.Release() {
+		return settingsList(ctx, settingsRow(ctx, icon, "uas (built from source)",
+			"Builds from source don't update themselves.", nil))
+	}
+	res := ui.Query(ctx, "self-update", func(c context.Context) (*selfupdate.Available, error) {
+		return a.s.SelfUpdater().Check(c)
+	}, ui.QueryStaleTime(time.Hour))
+	job, busy := a.running("self-update")
+	sub := "Up to date"
+	var right ui.Element
+	switch {
+	case res.Loading:
+		sub = "Checking for a newer version…"
+	case res.Err != nil:
+		sub = "Could not check for a newer version: " + errText(res.Err)
+	case res.Data != nil:
+		sub = "uas " + res.Data.Release.Version + " is available."
+		if busy {
+			sub = job.status
+		}
+		avail := res.Data
+		right = ui.Button("Update to " + avail.Release.Version).Icon(icons.Download).Primary().Small().
+			Loading(busy).OnClick(func() {
+			a.startJob(ctx, "self-update", "Updating uas", false, "Restart uas to use the new version",
+				func(c context.Context, p func(backend.Progress)) error {
+					return a.s.SelfUpdater().Install(c, avail, func(msg string) { p(backend.Progress{Message: msg}) })
+				})
+		})
+	}
+	return settingsList(ctx, settingsRow(ctx, icon, "uas "+version.Version, sub, right))
 }
