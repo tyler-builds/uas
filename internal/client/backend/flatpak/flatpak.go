@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -82,6 +83,15 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 // an installation with no remotes has nothing to update.
 func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
 	skip := b.excluded()
+	// Flatpak reads an update's version from its local copy of the remote's AppStream data, which it refreshes
+	// only now and then. Until it does, an update shows as the installed version, or an older one; such a
+	// version is left out, for the caller to fill in from a fresher source.
+	installed := map[string]string{}
+	if apps, err := b.Installed(ctx); err == nil {
+		for _, a := range apps {
+			installed[a.Scope+" "+a.Ref] = a.Version
+		}
+	}
 	var ups []backend.AvailableUpdate
 	var errs []error
 	for _, scope := range []string{string(settings.ScopeUser), string(settings.ScopeSystem)} {
@@ -100,7 +110,11 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 			if !strings.HasPrefix(ref, "app/") {
 				ref = "app/" + ref
 			}
-			ups = append(ups, backend.AvailableUpdate{Ref: ref, Scope: scope, Version: f[2]})
+			version := f[2]
+			if v, ok := installed[scope+" "+ref]; ok && notNewer(version, v) {
+				version = ""
+			}
+			ups = append(ups, backend.AvailableUpdate{Ref: ref, Scope: scope, Version: version})
 		}
 	}
 	if len(errs) == 2 {
@@ -199,4 +213,31 @@ func report(progress func(backend.Progress), msg string) {
 	if progress != nil {
 		progress(backend.Progress{Message: msg})
 	}
+}
+
+// notNewer reports whether version a is the same as b or, when both are dotted numbers such as "26.08.1",
+// older.
+func notNewer(a, b string) bool {
+	if a == b {
+		return true
+	}
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < max(len(pa), len(pb)); i++ {
+		na, nb := 0, 0
+		var err error
+		if i < len(pa) {
+			if na, err = strconv.Atoi(pa[i]); err != nil {
+				return false
+			}
+		}
+		if i < len(pb) {
+			if nb, err = strconv.Atoi(pb[i]); err != nil {
+				return false
+			}
+		}
+		if na != nb {
+			return na < nb
+		}
+	}
+	return true
 }

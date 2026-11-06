@@ -262,6 +262,7 @@ func (s *Session) Updates(ctx context.Context) (map[string]string, error) {
 	}
 	updates := map[string]string{}
 	var errs []error
+	var db *catalog.DB
 	for range checks {
 		r := <-results
 		if r.err != nil {
@@ -269,7 +270,20 @@ func (s *Session) Updates(ctx context.Context) (map[string]string, error) {
 			continue
 		}
 		for _, u := range r.ups {
-			updates[backend.UpdateKey(r.src, u.Scope, u.Ref)] = u.Version
+			v := u.Version
+			if v == "" {
+				// A source that can't tell the new version (Flatpak, until it refreshes its AppStream data):
+				// the catalog's version, which is at most a few hours old.
+				if db == nil {
+					if db, _ = catalog.Open(s.CatalogPath); db != nil {
+						defer db.Close()
+					}
+				}
+				if db != nil {
+					v, _ = db.ListingVersion(ctx, r.src, u.Ref)
+				}
+			}
+			updates[backend.UpdateKey(r.src, u.Scope, u.Ref)] = v
 		}
 	}
 	return updates, errors.Join(errs...)

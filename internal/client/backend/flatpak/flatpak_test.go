@@ -145,20 +145,43 @@ func TestRemoveAndUpdateUseAppScope(t *testing.T) {
 
 func TestUpdates(t *testing.T) {
 	r := &fakeRunner{outputs: map[string]string{
-		"remote-ls --user --updates --app --columns=application,ref,version":   "",
-		"remote-ls --system --updates --app --columns=application,ref,version": "org.example.App\tapp/org.example.App/x86_64/stable\t2.0\n",
+		"remote-ls --user --updates --app --columns=application,ref,version": "",
+		"remote-ls --system --updates --app --columns=application,ref,version": "org.example.App\tapp/org.example.App/x86_64/stable\t2.0\n" +
+			"org.example.Stale\tapp/org.example.Stale/x86_64/stable\t1.0\n",
+		// Flatpak's AppStream data is older than the update to Stale, so it shows the installed version.
+		"list --app --columns=application,ref,name,version,origin,installation": "org.example.App\torg.example.App/x86_64/stable\tApp\t1.0\tflathub\tsystem\n" +
+			"org.example.Stale\torg.example.Stale/x86_64/stable\tStale\t1.0\tflathub\tsystem\n",
 	}}
 	b := &Backend{Runner: r, Path: "flatpak", Scope: settings.ScopeUser}
 	ups, err := b.Updates(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []backend.AvailableUpdate{{Ref: "app/org.example.App/x86_64/stable", Scope: "system", Version: "2.0"}}
+	want := []backend.AvailableUpdate{{Ref: "app/org.example.App/x86_64/stable", Scope: "system", Version: "2.0"},
+		{Ref: "app/org.example.Stale/x86_64/stable", Scope: "system", Version: ""}}
 	if !reflect.DeepEqual(ups, want) {
 		t.Errorf("updates = %+v", ups)
 	}
 	key := backend.InstalledApp{Source: catalog.SourceFlathub, Ref: "app/org.example.App/x86_64/stable", Scope: "system"}.Key()
 	if key != backend.UpdateKey(catalog.SourceFlathub, ups[0].Scope, ups[0].Ref) {
 		t.Error("an installed app's key does not match its update's key")
+	}
+}
+
+func TestNotNewer(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"1.0", "1.0", true},
+		{"26.08.1", "26.08.2", true},
+		{"0.7.0", "0.6.5", false},
+		{"1.10", "1.9", false},
+		{"1.0", "1.0.1", true},
+		{"2.0-beta", "1.0", false}, // not plain numbers: only equal versions count
+	} {
+		if got := notNewer(tc.a, tc.b); got != tc.want {
+			t.Errorf("notNewer(%q, %q) = %v", tc.a, tc.b, got)
+		}
 	}
 }

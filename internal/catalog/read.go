@@ -426,6 +426,17 @@ func (d *DB) App(ctx context.Context, id string) (*App, error) {
 	return &a, rows.Err()
 }
 
+// ListingVersion returns the version of one listing, by source and ref, or "" when the catalog doesn't have it.
+func (d *DB) ListingVersion(ctx context.Context, src SourceID, ref string) (string, error) {
+	var v string
+	err := d.db.QueryRowContext(ctx, `SELECT version FROM listings WHERE source = ?1 AND ref = ?2`,
+		string(src), ref).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
 // Packages returns the names of the packages a source lists, for one distribution release (distro, such as
 // "ubuntu-24.04") or, with distro empty, all of them. Package managers list every installed package,
 // libraries too; this tells the apps among them.
