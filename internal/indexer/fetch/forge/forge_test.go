@@ -54,7 +54,7 @@ func TestCodeberg(t *testing.T) {
 				{"tag_name": "v1.4.0-beta", "published_at": "2026-10-20T00:00:00Z", "prerelease": true},
 				{"tag_name": "v1.3.5", "published_at": "2026-09-01T00:00:00Z", "assets": []any{
 					map[string]any{"name": "tenacity-1.3.5-x86_64.AppImage", "size": len(fakeFile),
-						"download_count": 500,
+						"download_count":       500,
 						"browser_download_url": "https://codeberg.org/tenacity/tenacity/releases/download/v1.3.5/tenacity-1.3.5-x86_64.AppImage"},
 					map[string]any{"name": "tenacity-1.3.5-aarch64.AppImage", "size": 10,
 						"browser_download_url": "https://codeberg.org/tenacity/tenacity/releases/download/v1.3.5/tenacity-1.3.5-aarch64.AppImage"},

@@ -86,7 +86,7 @@ func (a *App) toolRow(ctx *ui.Context, r ujust.Recipe, confirm *ui.Signal[*pendi
 			for _, o := range r.Options {
 				opts = append(opts, ui.Option[string]{Value: o, Label: o})
 			}
-			right = right.Child(ui.Select(option, opts...).Label("Action for "+r.Name).Small().Width(ui.Px(130)))
+			right = right.Child(ui.Select(option, opts...).Label("Action for " + r.Name).Small().Width(ui.Px(130)))
 		}
 		right = right.Child(ui.Button("Run").Icon(icons.Play).Secondary().Small().
 			Tooltip("ujust " + strings.TrimSpace(r.Name+" "+option.Get())).

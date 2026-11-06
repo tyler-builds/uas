@@ -105,7 +105,7 @@ type RestoreItem struct {
 	// Listing is what to install, for RestoreInstall.
 	Listing catalog.Listing
 	// Note explains the action, such as "from Flathub instead of Fedora".
-	Note string
+	Note  string
 	appID string // the catalog app it resolved to
 }
 

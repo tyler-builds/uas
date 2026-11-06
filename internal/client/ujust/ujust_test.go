@@ -9,7 +9,9 @@ import (
 
 type fakeRunner struct{ out string }
 
-func (f fakeRunner) Run(context.Context, string, []string, func(string)) (string, error) { return f.out, nil }
+func (f fakeRunner) Run(context.Context, string, []string, func(string)) (string, error) {
+	return f.out, nil
+}
 
 const sample = `{"recipes": {
  "_hidden": {"name": "_hidden", "doc": "x", "private": true, "attributes": [], "parameters": []},
