@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/tyler-builds/jamb/icons"
@@ -12,6 +13,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/settings"
+	"github.com/tyler-builds/uas/internal/client/updatecheck"
 )
 
 // settingsPage holds the settings, the catalog's state and what uas found about the system. Each section is
@@ -35,6 +37,8 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 				}
 				ctx.Toast(ui.ToastSuccess, "Settings saved")
 			})))
+
+		checks := a.updateChecksRow(ctx)
 
 		_, refreshing := a.running("catalog")
 		var catRows []ui.Element
@@ -85,6 +89,7 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		page := pageBody(listMaxWidth).Gap(space8).
 			Child(pageHeader(ctx, "Settings", "How uas installs apps, and what it found on this system.", nil)).
 			Child(section(sectionHeader(ctx, "Installing", ""), install)).
+			Child(section(sectionHeader(ctx, "Updates", ""), checks)).
 			Child(cat).
 			Child(system).
 			Child(section(sectionHeader(ctx, "Privacy", ""), privacy))
@@ -147,4 +152,41 @@ func (a *App) checkCatalog(ctx *ui.Context, loud bool) {
 			}
 		})
 	}()
+}
+
+// updateChecksRow turns the background update check on or off: a systemd user timer that runs this program
+// once a day to notify about updates. It never installs anything.
+func (a *App) updateChecksRow(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	timer, err := updatecheck.DefaultTimer()
+	if err != nil {
+		return settingsList(ctx, settingsRow(ctx, ui.Icon(icons.Bell).Size(18).Color(t.TextMuted),
+			"Check for updates in the background", errText(err), nil))
+	}
+	on := ui.Local(ctx, "update-checks", timer.Enabled())
+	busy := ui.Local(ctx, "update-checks-busy", false)
+	sw := ui.Switch("Check for updates in the background", on).Disabled(busy.Get()).OnChange(func(v bool) {
+		busy.Set(true)
+		go func() {
+			var err error
+			if v {
+				var exe string
+				if exe, err = os.Executable(); err == nil {
+					err = timer.Enable(context.Background(), []string{exe, "--check-updates"})
+				}
+			} else {
+				err = timer.Disable(context.Background())
+			}
+			ctx.Post(func() {
+				busy.Set(false)
+				if err != nil {
+					on.Set(timer.Enabled())
+					ctx.Toast(ui.ToastError, errText(err)).Title("Could not change background checks")
+				}
+			})
+		}()
+	})
+	return settingsList(ctx, settingsRow(ctx, ui.Icon(icons.Bell).Size(18).Color(t.TextMuted),
+		"Check for updates in the background",
+		"Once a day, with a notification when updates are ready. Nothing installs without you.", sw))
 }

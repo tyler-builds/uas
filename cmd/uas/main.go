@@ -34,6 +34,7 @@ commands:
   list                 list installed apps
   system               show what uas detected about this system
   settings [key value] show or change settings
+  check-updates        refresh the catalog and list updates; -notify shows a desktop notification
   export [-o file]     save the list of installed apps, to install them elsewhere
   restore <file>       install the apps of an export that aren't installed yet
   permissions <app-id> show or change what a Flatpak app may reach (network, files, devices…)
@@ -71,7 +72,9 @@ func main() {
 	case "system":
 		err = runSystem(ctx, os.Stdout, args)
 	case "settings":
-		err = runSettings(os.Stdout, args)
+		err = runSettings(ctx, os.Stdout, args)
+	case "check-updates":
+		err = runCheckUpdates(ctx, os.Stdout, args)
 	case "export":
 		err = runExport(ctx, os.Stdout, args)
 	case "restore", "import":

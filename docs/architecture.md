@@ -319,6 +319,20 @@ type Backend interface {
   file, but only if uas created it. Packages layered from COPR are listed under COPR, not Fedora. Not tested
   live yet: enabling a repo needs a password.
 
+### Background update checks
+
+`internal/client/updatecheck`, off until the user turns it on (Settings → Updates, or
+`uas settings update_checks on`). Turning it on writes a systemd user timer and service
+(`~/.config/systemd/user/uas-update-check.{timer,service}`: daily, 15 minutes after login, a random delay of
+up to an hour, catching up after the machine was off) and enables it; turning it off disables and deletes
+them, so the units are the setting. The service runs the binary that turned it on (`uas-gui --check-updates`
+or `uas check-updates -notify`), which refreshes the catalog, lists updates and, if any are new since the
+last notification (remembered with versions in `~/.local/state/uas/notified.json`), shows one notification
+through `org.freedesktop.Notifications` on the session bus. It talks D-Bus directly (`internal/client/notify`)
+because notify-send is broken on some systems (Bazzite 45's fails with a symbol lookup error). A click on
+"Show updates" within an hour opens the app on its Updates page (`uas-gui --page updates`), started through
+`systemd-run --user` so it outlives the check. Nothing is installed without the user.
+
 ### Back up and restore
 
 `session/export.go`. An export is JSON: each installed app's source, ref, app ID, package and name, the

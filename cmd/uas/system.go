@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -15,6 +16,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/settings"
+	"github.com/tyler-builds/uas/internal/client/updatecheck"
 )
 
 func runSystem(ctx context.Context, w io.Writer, args []string) error {
@@ -88,7 +90,7 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 	return nil
 }
 
-func runSettings(w io.Writer, args []string) error {
+func runSettings(ctx context.Context, w io.Writer, args []string) error {
 	path, err := settings.Path()
 	if err != nil {
 		return err
@@ -99,7 +101,12 @@ func runSettings(w io.Writer, args []string) error {
 	}
 	switch len(args) {
 	case 0:
-		fmt.Fprintf(w, "flatpak_scope  %s\ntelemetry      %s\n", s.FlatpakScope, onOff(s.Telemetry))
+		timer, err := updatecheck.DefaultTimer()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "flatpak_scope  %s\ntelemetry      %s\nupdate_checks  %s\n", s.FlatpakScope,
+			onOff(s.Telemetry), onOff(timer.Enabled()))
 		fmt.Fprintf(w, "(%s)\n", path)
 		return nil
 	case 2:
@@ -112,6 +119,32 @@ func runSettings(w io.Writer, args []string) error {
 		if !s.FlatpakScope.Valid() {
 			return fmt.Errorf("flatpak_scope must be user or system, not %q", val)
 		}
+	case "update_checks":
+		// Not in the settings file: the systemd timer is the setting.
+		timer, err := updatecheck.DefaultTimer()
+		if err != nil {
+			return err
+		}
+		switch val {
+		case "on":
+			exe, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			err = timer.Enable(ctx, []string{exe, "check-updates", "-notify"})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(w, "update_checks set to on: uas checks once a day and notifies you of updates.")
+		case "off":
+			if err := timer.Disable(ctx); err != nil {
+				return err
+			}
+			fmt.Fprintln(w, "update_checks set to off")
+		default:
+			return fmt.Errorf("update_checks must be on or off, not %q", val)
+		}
+		return nil
 	case "telemetry":
 		switch val {
 		case "on":
@@ -122,7 +155,7 @@ func runSettings(w io.Writer, args []string) error {
 			return fmt.Errorf("telemetry must be on or off, not %q", val)
 		}
 	default:
-		return fmt.Errorf("unknown setting %q (known: flatpak_scope, telemetry)", key)
+		return fmt.Errorf("unknown setting %q (known: flatpak_scope, telemetry, update_checks)", key)
 	}
 	if err := settings.Save(path, s); err != nil {
 		return err

@@ -517,3 +517,11 @@ func errText(err error) string {
 	}
 	return msg
 }
+
+// StartOn opens the app on a page by name: "updates", "installed" or "settings". Others are ignored.
+func (a *App) StartOn(page string) {
+	switch page {
+	case pageUpdates, pageInstalled, pageSettings:
+		a.goTo(view{page: page})
+	}
+}
