@@ -81,8 +81,8 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 - Bazzite (Fedora 45) with GNOME, Wayland
 - Bazzite with KDE Plasma, Wayland
 - The CLI's apt, dnf and pacman installs in containers: Ubuntu 24.04, Debian 13, Fedora 45 and Arch
-  (install, list, update and remove, as root). The password prompt and the desktop app on those systems, and
-  snap, are untested.
+  (install, list, update and remove, as root), and snap in an Ubuntu 24.04 container running systemd and
+  snapd. The password prompt and the desktop app on those systems are untested.
 
 **Notes for other systems**
 

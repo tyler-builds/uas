@@ -147,7 +147,7 @@ func main() {
 	// The Snap Store takes a few minutes at one request a second, so it is cached like GitHub and COPR.
 	available["snap"] = &fetch.Cached{Fetcher: &snap.Fetcher{Client: client, Arch: *arch, Log: log},
 		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
-		Key: fmt.Sprintf("schema=%d arch=%s v=2", catalog.SchemaVersion, *arch)}
+		Key: fmt.Sprintf("schema=%d arch=%s v=3", catalog.SchemaVersion, *arch)}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {
 		f, ok := available[strings.TrimSpace(name)]

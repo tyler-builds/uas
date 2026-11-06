@@ -18,9 +18,12 @@ func TestFetch(t *testing.T) {
 		{
 			{Name: "vlc", Title: "VLC", Summary: "The ultimate media player", Publisher: "VideoLAN", Validation: "verified",
 				Media:     append(icon, media{Type: "screenshot", URL: "https://dashboard.snapcraft.io/s.png"}),
-				CommonIDs: []string{"org.videolan.VLC"}, License: "GPL-2.0+", Version: "3.0.21", Confinement: "strict"},
+				CommonIDs: []string{"org.videolan.VLC"}, License: "GPL-2.0+", Version: "3.0.21", Confinement: "strict",
+				Apps: []string{"vlc"}},
 			{Name: "code", Title: "Code", Summary: "Code editing. Redefined.", Publisher: "Visual Studio Code",
-				Validation: "verified", Media: icon, Confinement: "classic"},
+				Validation: "verified", Media: icon, Confinement: "classic", Apps: []string{"code"}},
+			// A runtime: no apps.
+			{Name: "gnome-46-2404", Title: "GNOME 46", Summary: "Runtime", Validation: "verified", Media: icon},
 		},
 		{
 			// No icon, no section and nobody vouching: dropped.

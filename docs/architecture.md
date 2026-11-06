@@ -145,8 +145,9 @@ All endpoints below need confirming during the first spike.
 - **Snap Store** (`fetch/snap`): the v1 search API with `X-Ubuntu-Series: 16`, 100 snaps a page (about 90
   pages). No rate limit is published, so pages are read one a second and the result is cached like GitHub's.
   A snap is kept with a title, summary and icon and either a verified or starred publisher or an AppStream ID
-  (its `common_ids`, which merge it with the app's other listings): about a thousand of 8,800. Keeping snaps
-  with a store section and screenshots too let in 4,500, most of them unmaintained. An
+  (its `common_ids`, which merge it with the app's other listings), and at least one app (runtimes, bases
+  and themes have none): about 1,060 of 8,800. Keeping snaps with a store section and screenshots too let in
+  4,500, most of them unmaintained. An
   unverified snap that shares a reviewed app's name is hidden as an unofficial copy; a verified one joins it.
 
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
@@ -343,7 +344,9 @@ type Backend interface {
   for the release. Updates come from `apt list --upgradable` and `dnf list --upgrades`; Arch doesn't support
   partial upgrades, so it has no per-app updates. Tested in containers for all four.
 - **snap:** `snap install` (with `--classic` for classic snaps), `refresh`, `remove`; snapd asks for the
-  password itself. Bases and runtimes are left out of Installed, since the catalog doesn't list them.
+  password itself. Bases and runtimes are left out of Installed, since the catalog doesn't list them (the
+  indexer drops snaps with no apps). Tested in a rootless Ubuntu container running systemd as init, with
+  `/dev/fuse` so snapd mounts snaps through squashfuse.
 - **gitlab, codeberg:** the github backend with `Forge` set. Installs go in the same folders and state file
   (recorded with their `source`), and files are checked against the SHA-256 the indexer recorded, since
   neither forge publishes one. Asset URLs must be under the repo's own release downloads (Codeberg) or

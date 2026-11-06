@@ -413,7 +413,7 @@ func getJSON(ctx context.Context, c *http.Client, p *pacer, u, token string, v a
 			}
 		default:
 			return nil, &statusError{URL: u, Status: resp.Status, Code: resp.StatusCode,
-				Body: strings.TrimSpace(string(raw[:min(len(raw), 300)]))}
+				Body: strings.TrimSpace(string(raw[:min(len(raw), 800)]))}
 		}
 	}
 	return nil, lastErr

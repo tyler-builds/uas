@@ -5,7 +5,8 @@
 // sources. Most snaps are tests and abandoned experiments, so a snap is kept only with a title, a summary
 // and an icon, and either a verified or starred publisher or the AppStream ID of a known app (its common IDs,
 // which also merge it with that app's other listings). Of about 8,800 snaps that keeps about a thousand: a
-// section and screenshots alone let in over 4,000, most of them unmaintained.
+// section and screenshots alone let in over 4,000, most of them unmaintained. Snaps with no apps are runtimes,
+// bases and themes (gnome-46-2404, qogir-themes), which other snaps use, so they are left out too.
 package snap
 
 import (
@@ -33,7 +34,7 @@ const API = "https://api.snapcraft.io/api/v1/snaps/search"
 const every = time.Second
 
 const fields = "package_name,title,summary,description,developer_name,developer_validation,publisher,license," +
-	"media,version,last_updated,confinement,common_ids,website,contact,sections"
+	"media,version,last_updated,confinement,common_ids,website,contact,sections,apps"
 
 // Fetcher lists snaps.
 type Fetcher struct {
@@ -70,6 +71,7 @@ type pkg struct {
 	Updated     time.Time `json:"last_updated"`
 	Confinement string    `json:"confinement"`
 	CommonIDs   []string  `json:"common_ids"`
+	Apps        []string  `json:"apps"` // commands; none for runtimes, bases and themes
 	Website     string    `json:"website"`
 	Contact     string    `json:"contact"`
 	Sections    []struct {
@@ -202,7 +204,7 @@ func toListing(s pkg) (catalog.Listing, bool) {
 	}
 	trusted := s.Validation == "verified" || s.Validation == "starred"
 	if !snapName.MatchString(s.Name) || strings.TrimSpace(s.Title) == "" || strings.TrimSpace(s.Summary) == "" ||
-		icon == "" || (!trusted && len(s.CommonIDs) == 0) {
+		icon == "" || len(s.Apps) == 0 || (!trusted && len(s.CommonIDs) == 0) {
 		return catalog.Listing{}, false
 	}
 	var cats []string
