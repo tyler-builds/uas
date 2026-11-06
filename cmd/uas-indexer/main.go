@@ -44,12 +44,8 @@ func main() {
 	slowCacheFor := flag.Duration("slow-cache-for", 20*time.Hour,
 		"reuse results of slow sources (GitHub, COPR) younger than this")
 	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
-	defaultSources := "flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap"
-	if os.Getenv("GITLAB_TOKEN") != "" {
-		defaultSources += ",gitlab"
-	}
-	sources := flag.String("sources", defaultSources, "comma-separated sources to index\n"+
-		"(github needs $GITHUB_TOKEN; gitlab needs $GITLAB_TOKEN and is left out without it)")
+	sources := flag.String("sources", "flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap",
+		"comma-separated sources to index (github needs $GITHUB_TOKEN)")
 	codebergMinStars := flag.Int("codeberg-min-stars", forge.DefaultCodebergMinStars,
 		"check Codeberg repos with at least this many stars")
 	editionsDir := flag.String("editions-dir", "", "also write one catalog per edition (kind of system) here;\n"+
@@ -135,9 +131,6 @@ func main() {
 	available["codeberg"] = &fetch.Cached{Fetcher: codeberg,
 		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
 		Key: forgeKey + fmt.Sprintf(" min-stars=%d", *codebergMinStars)}
-	available["gitlab"] = &fetch.Cached{Fetcher: forge.NewGitLab(forgeBuilder, os.Getenv("GITLAB_TOKEN")),
-		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
-		Key: forgeKey + fmt.Sprintf(" min-stars=%d", forge.DefaultGitLabMinStars)}
 	available["debian"] = &debian.Fetcher{Distribution: catalog.SourceDebian, Client: client,
 		CacheDir: filepath.Join(*cache, "apt"), Arch: *arch, Log: log}
 	available["ubuntu"] = &debian.Fetcher{Distribution: catalog.SourceUbuntu, Client: client,

@@ -12,7 +12,7 @@ import (
 // image-based system) rank after all others, whatever their place here.
 var InstallOrder = []catalog.SourceID{catalog.SourceFlathub, catalog.SourceFedora, catalog.SourceDebian,
 	catalog.SourceUbuntu, catalog.SourceArch, catalog.SourceHomebrew, catalog.SourceSnap, catalog.SourceGitHub,
-	catalog.SourceCodeberg, catalog.SourceGitLab, catalog.SourceCOPR}
+	catalog.SourceCodeberg, catalog.SourceCOPR}
 
 // System is what the recommendation needs to know about the system.
 type System struct {
@@ -105,7 +105,6 @@ var strengths = map[catalog.SourceID]string{
 	catalog.SourceHomebrew: "Homebrew installs for your user without changing the system",
 	catalog.SourceSnap:     "snaps run sandboxed and update themselves",
 	catalog.SourceGitHub:   "it is the developer's own release",
-	catalog.SourceGitLab:   "it is the developer's own release",
 	catalog.SourceCodeberg: "it is the developer's own release",
 	catalog.SourceFedora:   "Fedora packages are reviewed and signed by Fedora",
 	catalog.SourceCOPR:     "the COPR project is the only packaged build",
@@ -145,7 +144,7 @@ func Traits(l catalog.Listing, sys System) []string {
 			t = append(t, "Runs in the snap sandbox")
 		}
 		t = append(t, "snapd keeps it updated on its own", "Installs without a restart")
-	case catalog.SourceGitHub, catalog.SourceGitLab, catalog.SourceCodeberg:
+	case catalog.SourceGitHub, catalog.SourceCodeberg:
 		t = append(t, "Downloaded straight from the developer's "+l.Source.Name()+" releases; no distribution reviews it")
 		if l.Trust != nil {
 			t = append(t, fmt.Sprintf("Trust score %d/100, from the project's age, stars, downloads and releases",

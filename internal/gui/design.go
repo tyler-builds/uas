@@ -210,7 +210,6 @@ var sourceTints = map[catalog.SourceID]tint{
 	catalog.SourceHomebrew: {"#fbbf4a", "#a15c00"},
 	catalog.SourceCOPR:     {"#fb7185", "#be123c"},
 	catalog.SourceGitHub:   {"#b4bac6", "#4b5262"},
-	catalog.SourceGitLab:   {"#fc9867", "#c2410c"},
 	catalog.SourceCodeberg: {"#60a5fa", "#1d4ed8"},
 	catalog.SourceDebian:   {"#f472b6", "#be185d"},
 	catalog.SourceUbuntu:   {"#fb923c", "#c2410c"},
@@ -228,8 +227,6 @@ var sourceTips = map[catalog.SourceID]string{
 	catalog.SourceHomebrew: "A Homebrew formula, mostly command-line tools. Installs for your user without " +
 		"a restart",
 	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +
-		"its page shows a trust score",
-	catalog.SourceGitLab: "Released on GitLab by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +
 		"its page shows a trust score",
 	catalog.SourceCodeberg: "Released on Codeberg by its developer, as an AppImage or Flatpak bundle. No distribution " +
 		"reviews it; its page shows a trust score",

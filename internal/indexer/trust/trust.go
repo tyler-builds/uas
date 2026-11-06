@@ -28,7 +28,7 @@ type RepoFacts struct {
 	// HasChecksum is true when the asset uas would install has a published SHA-256.
 	HasChecksum bool
 	// IndexedChecksum is true when the forge publishes no checksum but the indexer downloaded the file and
-	// recorded its SHA-256 in the signed catalog (GitLab, Codeberg), so installs are still checked.
+	// recorded its SHA-256 in the signed catalog (Codeberg), so installs are still checked.
 	IndexedChecksum bool
 	// FreeHost names a forge that hosts only free software (Codeberg), for a repo whose license the API
 	// doesn't report.

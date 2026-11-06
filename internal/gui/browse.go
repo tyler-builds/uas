@@ -136,7 +136,6 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 		catalog.SourceFlathub:  "uas's first choice for desktop apps: sandboxed, no restart, and many publishers are verified.",
 		catalog.SourceHomebrew: "The usual way to add command-line tools without touching the system.",
 		catalog.SourceGitHub:   "Apps released only on GitHub, each with a trust score. uas checks every download's checksum.",
-		catalog.SourceGitLab:   "Apps released on GitLab, each with a trust score. uas checks every download against the catalog.",
 		catalog.SourceCodeberg: "Apps released on Codeberg, each with a trust score. uas checks every download against the catalog.",
 		catalog.SourceDebian:   "Debian's own packages, installed with apt on Debian.",
 		catalog.SourceUbuntu:   "Ubuntu's own packages, installed with apt on Ubuntu and systems built on it.",

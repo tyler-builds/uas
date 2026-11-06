@@ -120,10 +120,8 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 	if ghErr == nil {
 		s.Backends[catalog.SourceGitHub] = gh
 		s.Backends[catalog.SourceAppImage] = &github.Local{GH: gh}
-		for _, src := range []catalog.SourceID{catalog.SourceGitLab, catalog.SourceCodeberg} {
-			if b, err := s.releaseBackend(src); err == nil {
-				s.Backends[src] = b
-			}
+		if b, err := s.releaseBackend(catalog.SourceCodeberg); err == nil {
+			s.Backends[catalog.SourceCodeberg] = b
 		}
 		// Launchers written by an older uas get what it has learned since; quick when there's nothing to do.
 		_ = gh.RepairLaunchers(ctx)
@@ -444,7 +442,7 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 		}
 	case catalog.SourceHomebrew:
 		notes = append(notes, "Installs with Homebrew for your user account. No restart needed.")
-	case catalog.SourceGitHub, catalog.SourceGitLab, catalog.SourceCodeberg:
+	case catalog.SourceGitHub, catalog.SourceCodeberg:
 		var a catalog.Asset
 		if gh, ok := s.Backends[l.Source].(*github.Backend); ok {
 			a, _ = gh.Pick(l)
@@ -531,7 +529,7 @@ func RefreshOptions(catalogPath string) refresh.Options {
 	}
 }
 
-// releaseBackend sets up installs from a forge's releases (GitHub, GitLab, Codeberg), looking up updates in
+// releaseBackend sets up installs from a forge's releases (GitHub, Codeberg), looking up updates in
 // the session's catalog.
 func (s *Session) releaseBackend(src catalog.SourceID) (*github.Backend, error) {
 	dirs, err := github.DefaultDirs()

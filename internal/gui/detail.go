@@ -613,7 +613,7 @@ func listingLabel(l catalog.Listing) string {
 // requestInstall installs at once from reviewed sources, and asks first for the others.
 func (a *App) requestInstall(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
 	switch l.Source {
-	case catalog.SourceGitHub, catalog.SourceGitLab, catalog.SourceCodeberg, catalog.SourceCOPR, catalog.SourceFedora:
+	case catalog.SourceGitHub, catalog.SourceCodeberg, catalog.SourceCOPR, catalog.SourceFedora:
 		a.confirm.Set(&pending{app: app, listing: l})
 	default:
 		a.install(ctx, app, l)

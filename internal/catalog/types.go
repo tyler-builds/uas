@@ -23,9 +23,8 @@ const (
 	SourceCOPR     SourceID = "copr"
 	SourceHomebrew SourceID = "homebrew"
 	SourceGitHub   SourceID = "github"
-	// SourceGitLab and SourceCodeberg are release files on gitlab.com and codeberg.org, like GitHub's. Their
-	// listing refs name the host: "gitlab.com/group/project", "codeberg.org/owner/repo".
-	SourceGitLab   SourceID = "gitlab"
+	// SourceCodeberg is release files on codeberg.org, like GitHub's. Its listing refs name the host:
+	// "codeberg.org/owner/repo".
 	SourceCodeberg SourceID = "codeberg"
 	// SourceDebian, SourceUbuntu and SourceArch are distribution packages, installed with apt or pacman.
 	// Like Fedora's, their listings carry a Distro ("debian-13", "ubuntu-24.04", "arch") and a Package.
@@ -51,8 +50,6 @@ func (s SourceID) Name() string {
 		return "COPR"
 	case SourceGitHub:
 		return "GitHub"
-	case SourceGitLab:
-		return "GitLab"
 	case SourceCodeberg:
 		return "Codeberg"
 	case SourceDebian:
@@ -72,7 +69,7 @@ func (s SourceID) Name() string {
 // SourcePrecedence orders sources for display: when several listings describe one app, fields such as the
 // name and screenshots come from the earliest source in this list that has them.
 var SourcePrecedence = []SourceID{SourceFlathub, SourceFedora, SourceDebian, SourceUbuntu, SourceArch,
-	SourceHomebrew, SourceSnap, SourceCOPR, SourceGitHub, SourceGitLab, SourceCodeberg}
+	SourceHomebrew, SourceSnap, SourceCOPR, SourceGitHub, SourceCodeberg}
 
 // Distribution reports whether the source is a Linux distribution's own packages (Fedora, Debian, Ubuntu,
 // Arch), which the distribution builds and signs.
@@ -80,10 +77,10 @@ func (s SourceID) Distribution() bool {
 	return s == SourceFedora || s == SourceDebian || s == SourceUbuntu || s == SourceArch
 }
 
-// Releases reports whether the source is a code forge's release files (GitHub, GitLab, Codeberg), which uas
+// Releases reports whether the source is a code forge's release files (GitHub, Codeberg), which uas
 // downloads and installs itself.
 func (s SourceID) Releases() bool {
-	return s == SourceGitHub || s == SourceGitLab || s == SourceCodeberg
+	return s == SourceGitHub || s == SourceCodeberg
 }
 
 // Host is the web host of a release source, such as "github.com".
@@ -91,8 +88,6 @@ func (s SourceID) Host() string {
 	switch s {
 	case SourceGitHub:
 		return "github.com"
-	case SourceGitLab:
-		return "gitlab.com"
 	case SourceCodeberg:
 		return "codeberg.org"
 	}
@@ -100,7 +95,7 @@ func (s SourceID) Host() string {
 }
 
 // Repo returns a release listing's repo path on its host: "owner/repo" for GitHub, whose refs are that path,
-// and the ref without its host for GitLab and Codeberg.
+// and the ref without its host for Codeberg.
 func (s SourceID) Repo(ref string) string {
 	if s == SourceGitHub {
 		return ref

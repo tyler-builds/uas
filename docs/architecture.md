@@ -113,18 +113,16 @@ All endpoints below need confirming during the first spike.
   GitHub listing never takes an AppStream ID from its metainfo. Otherwise any repo could claim a Flathub
   app's ID and be merged into it as one of its sources.
 
-- **Codeberg and GitLab** (`fetch/forge`): the most starred repos, then each one's 8 newest releases, kept like
+- **Codeberg** (`fetch/forge`): the most starred repos, then each one's 8 newest releases, kept like
   GitHub's (same file picking, `trust.GitHub` scoring). Listing refs name the host
-  (`codeberg.org/owner/repo`, `gitlab.com/group/sub/project`), so they never collide with GitHub's. Neither
-  forge publishes checksums, so the indexer downloads each listed file once, records its SHA-256 and size in
+  (`codeberg.org/owner/repo`), so they never collide with GitHub's. Codeberg publishes no checksums, so the indexer downloads each listed file once, records its SHA-256 and size in
   the signed catalog, and reads the AppImage for its name, icon and screenshots on the way; both are kept per
-  release file (`github/media/forge/`), so only new releases are downloaded. Rate limits shape both:
-  Codeberg allows 2,000 keyless requests per 10 minutes (its `RateLimit-Policy` header), so requests are
-  spaced half a second apart and only repos with 25+ stars are read (a few hundred requests). GitLab.com
-  limits keyless requests to about 60 an hour per IP, too few to index with, so GitLab is indexed only when
-  the `GITLAB_TOKEN` secret holds a personal access token (read_api scope; 2,000 requests a minute), and
-  left out otherwise. Projects with 50+ stars active in the past year are read, 10 requests a second. Both
-  are cached like GitHub's, and a failed fetch (such as a rate limit) reuses results up to a week old.
+  release file (`github/media/forge/`), so only new releases are downloaded. Codeberg allows 2,000 keyless
+  requests per 10 minutes (its `RateLimit-Policy` header), so requests are spaced half a second apart and only
+  repos with 25+ stars are read (a few hundred requests). Results are cached like GitHub's, and a failed fetch
+  (such as a rate limit) reuses results up to a week old. GitLab was indexed for a while and dropped in
+  November 2026: of 632 starred projects only one attached a Linux file to its releases, and GitLab.com's
+  star-sorted project list often failed with server errors.
   In November 2026 Codeberg's 300+ star repos gave Tenacity, Gram and ChiPass.
 
 - **Debian and Ubuntu** (`fetch/debian`, `dep11`): the AppStream data in each release's DEP-11 YAML
@@ -228,7 +226,7 @@ Icons are mirrored to R2. Screenshots link to their original URLs.
 
 **Editions.** One catalog of every source would be 16 MB compressed, most of it packages for systems the
 client isn't. So the indexer fetches once and then merges and writes one catalog per kind of system
-(`indexer/editions.go`): the sources that work everywhere (Flathub, Homebrew, GitHub, GitLab, Codeberg), plus
+(`indexer/editions.go`): the sources that work everywhere (Flathub, Homebrew, GitHub, Codeberg), plus
 `fedora-atomic` (Fedora and COPR, for layering; no snaps, since image-based Fedora has no snapd), `fedora`
 (Fedora for dnf, snaps), one per Debian and Ubuntu release (`debian-13`, `ubuntu-24.04`: that release only,
 snaps), `arch` (Arch, snaps) and `other` (snaps). Splitting by source instead would leave clients to merge
@@ -347,10 +345,9 @@ type Backend interface {
   password itself. Bases and runtimes are left out of Installed, since the catalog doesn't list them (the
   indexer drops snaps with no apps). Tested in a rootless Ubuntu container running systemd as init, with
   `/dev/fuse` so snapd mounts snaps through squashfuse.
-- **gitlab, codeberg:** the github backend with `Forge` set. Installs go in the same folders and state file
+- **codeberg:** the github backend with `Forge` set. Installs go in the same folders and state file
   (recorded with their `source`), and files are checked against the SHA-256 the indexer recorded, since
-  neither forge publishes one. Asset URLs must be under the repo's own release downloads (Codeberg) or
-  project pages (GitLab, whose release links redirect to wherever the file is kept).
+  Codeberg publishes none. Asset URLs must be under the repo's own release downloads.
 - **rpmostree:** Calls the `rpm-ostree` CLI for v1. Its D-Bus API can replace this later for finer progress.
   New layers go onto the newest deployment, which may be a staged update to the next Fedora release, so the
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers

@@ -47,7 +47,7 @@ type Result struct {
 // selfKey is the update key of uas itself.
 const selfKey = "uas"
 
-// Check refreshes the catalog (GitHub, GitLab and Codeberg updates come from it) and lists the installed
+// Check refreshes the catalog (GitHub and Codeberg updates come from it) and lists the installed
 // apps that have updates, noting which weren't in the last notification. Only Notify remembers them.
 func Check(ctx context.Context, s *session.Session) (Result, error) {
 	// A failed refresh still leaves the last catalog, which is good enough for Flathub and Homebrew.

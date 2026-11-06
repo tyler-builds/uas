@@ -12,10 +12,10 @@ import (
 )
 
 // GitHubInstall is one app installed from a GitHub release.
-// GitLab and Codeberg installs are recorded the same way, with Source set.
+// Codeberg installs are recorded the same way, with Source set.
 type GitHubInstall struct {
 	Repo string `json:"repo"` // the listing ref: "owner/repo", or "codeberg.org/owner/repo" and the like
-	// Source is the release source, "gitlab" or "codeberg"; empty for GitHub.
+	// Source is the release source, "codeberg"; empty for GitHub.
 	Source string `json:"source,omitempty"`
 	// Kind is the release file installed: an AppImage ("" or "appimage") or a Flatpak bundle ("flatpak"),
 	// which flatpak keeps as FlatpakRef.

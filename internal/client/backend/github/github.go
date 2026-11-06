@@ -1,5 +1,5 @@
 // Package github installs apps from GitHub releases: AppImages, and Flatpak bundles. The same backend
-// installs GitLab and Codeberg releases (Backend.Forge), whose checksums the indexer records in the catalog.
+// installs Codeberg releases (Backend.Forge), whose checksums the indexer records in the catalog.
 //
 // An AppImage is downloaded, checked against the SHA-256 GitHub publishes for it, made executable and given
 // a launcher (desktop entry and icon) read from inside the image without running it. A Flatpak bundle is
@@ -56,11 +56,7 @@ func DefaultDirs() (Dirs, error) {
 // maxAppImage caps a download when the catalog gives no size.
 const maxAppImage = 4 << 30
 
-var (
-	repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
-	// GitLab projects can sit in nested groups.
-	nestedRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$`)
-)
+var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 // validRef reports whether ref is a well-formed listing ref of a release source.
 func validRef(src catalog.SourceID, ref string) bool {
@@ -73,21 +69,13 @@ func validRef(src catalog.SourceID, ref string) bool {
 	case catalog.SourceCodeberg:
 		r, ok := strings.CutPrefix(ref, src.Host()+"/")
 		return ok && repoPattern.MatchString(r)
-	case catalog.SourceGitLab:
-		r, ok := strings.CutPrefix(ref, src.Host()+"/")
-		return ok && nestedRepoPattern.MatchString(r)
 	}
 	return false
 }
 
-// assetPrefix is where a release source's files for a repo must be: GitHub's and Codeberg's release
-// downloads, and GitLab's project pages (release asset links go through /-/releases/<tag>/downloads/).
+// assetPrefix is where a release source's files for a repo must be: its release downloads.
 func assetPrefix(src catalog.SourceID, ref string) string {
-	repo := src.Repo(ref)
-	if src == catalog.SourceGitLab {
-		return "https://" + src.Host() + "/" + repo + "/-/"
-	}
-	return "https://" + src.Host() + "/" + repo + "/releases/download/"
+	return "https://" + src.Host() + "/" + src.Repo(ref) + "/releases/download/"
 }
 
 // Backend installs AppImages.
@@ -102,9 +90,9 @@ type Backend struct {
 	// Flatpak is the flatpak binary. Without it, Flatpak bundles aren't installable.
 	Flatpak string
 	Now     func() time.Time
-	// Forge is the release source this backend installs from: GitHub (the default), GitLab or Codeberg.
+	// Forge is the release source this backend installs from: GitHub (the default) or Codeberg.
 	// Backends for each forge share one state file and one set of folders; refs never collide, because
-	// GitLab and Codeberg refs start with their host.
+	// Codeberg refs start with their host.
 	Forge catalog.SourceID
 }
 
@@ -143,7 +131,7 @@ func validAsset(src catalog.SourceID, ref string, a catalog.Asset) bool {
 // key is a file-name-safe form of a ref: "owner__repo", "codeberg.org__owner__repo".
 func key(repo string) string { return strings.ReplaceAll(repo, "/", "__") }
 
-// sourceOf is the release source an install came from; installs recorded before GitLab and Codeberg have
+// sourceOf is the release source an install came from; installs recorded before Codeberg have
 // none, and are GitHub's.
 func sourceOf(g state.GitHubInstall) catalog.SourceID {
 	if g.Source == "" {

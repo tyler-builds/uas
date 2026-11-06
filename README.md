@@ -5,7 +5,7 @@
 # uas
 
 **One app store for every source.**<br>
-Flathub, Homebrew, the Snap Store, GitHub, GitLab and Codeberg releases, and Fedora, Debian, Ubuntu, Arch and
+Flathub, Homebrew, the Snap Store, GitHub and Codeberg releases, and Fedora, Debian, Ubuntu, Arch and
 COPR packages, searched and installed from one place.
 
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
@@ -23,12 +23,12 @@ COPR packages, searched and installed from one place.
   release downloads everywhere, plus your distribution's packages and, where snapd runs, snaps.
 - **A recommended source.** uas picks the best fit for your system and tells you why, with the other sources a
   click away.
-- **Trust scores.** GitHub, GitLab and Codeberg releases and COPR projects are scored 0–100 from public signals, with the breakdown
+- **Trust scores.** GitHub and Codeberg releases and COPR projects are scored 0–100 from public signals, with the breakdown
   shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
 - **One list for everything installed,** whatever its source, with updates and Update all.
 - **Release notes.** An app's page shows what changed in its last few versions, and an update's What's new
-  shows what it brings since your version, where the source publishes notes (most Flathub apps, GitHub,
-  GitLab and Codeberg releases, and distribution packages' AppStream data).
+  shows what it brings since your version, where the source publishes notes (most Flathub apps, GitHub
+  and Codeberg releases, and distribution packages' AppStream data).
 - **Flatpak permissions.** Turn an app's network, file, device or sound access on or off, as Flatseal does.
 - **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
   Waydroid, audio tweaks…) are listed by group and run in a terminal window.
@@ -70,7 +70,7 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | --- | --- | --- |
 | Flathub | `flatpak` | Any distro |
 | Homebrew | `brew` | Any distro |
-| GitHub, GitLab and Codeberg releases, AppImages | — (Flatpak bundles need `flatpak`) | Any distro |
+| GitHub and Codeberg releases, AppImages | — (Flatpak bundles need `flatpak`) | Any distro |
 | Fedora packages | `rpm-ostree`, or `dnf` and `pkexec` | Fedora Atomic (layered), or Fedora Workstation and other package-based Fedora |
 | Debian and Ubuntu packages | `apt-get`, `pkexec` | Debian 13; Ubuntu 22.04, 24.04 and 26.04, and systems built on them (Linux Mint, Pop!_OS…) |
 | Arch packages | `pacman`, `pkexec` | Arch and systems built on it (EndeavourOS, CachyOS…), x86_64 |
@@ -145,7 +145,7 @@ uas install org.mozilla.firefox
 
 **Why not just use GNOME Software or KDE Discover?**<br>
 They cover Flatpak and your distro's packages (and snaps, on Ubuntu). uas covers those too, plus Homebrew,
-GitHub, GitLab and Codeberg releases, COPR and AppImages, compares the sources an app is on, and scores the ones
+GitHub and Codeberg releases, COPR and AppImages, compares the sources an app is on, and scores the ones
 no distribution reviews.
 
 **Why not just use Flathub?**<br>
@@ -164,10 +164,10 @@ sources built for it. They work fine together.
 No. It runs them for you: flatpak, brew, snap, and rpm-ostree, dnf, apt or pacman. Anything uas installs shows up in those tools, and anything they install shows up
 in uas.
 
-**Is installing from GitHub, GitLab, Codeberg or COPR safe?**<br>
+**Is installing from GitHub, Codeberg or COPR safe?**<br>
 No distribution reviews those sources, so uas asks before installing, shows a trust score with its breakdown,
-and verifies every download against a checksum: the one GitHub publishes, or for GitLab and Codeberg, which
-publish none, the one uas recorded when it built the catalog. The score measures how well kept a project is, not
+and verifies every download against a checksum: the one GitHub publishes, or for Codeberg, which
+publishes none, the one uas recorded when it built the catalog. The score measures how well kept a project is, not
 whether its code is safe.
 
 **Does uas collect data?**<br>
@@ -176,7 +176,7 @@ No. It downloads the catalog and app icons, and talks to the sources you install
 ## How it works
 
 ```
- Flathub · Homebrew · Snap · GitHub · GitLab · Codeberg
+ Flathub · Homebrew · Snap · GitHub · Codeberg
  Fedora · Debian · Ubuntu · Arch · COPR
                     │
             uas-indexer (every 6h)        merge, rank, score, sign
@@ -218,9 +218,7 @@ them with a signed `releases/latest.json` (same secrets as the catalog). Run it 
 without publishing. The catalog Worker must be deployed with release support first.
 
 **Publishing.** The `Index` workflow builds and publishes the catalog every 6 hours, or by hand from the
-Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. GitLab is indexed only if the
-optional `GITLAB_TOKEN` secret holds a GitLab.com personal access token with the `read_api` scope, because
-GitLab allows too few keyless requests. The catalog Worker is in
+Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The catalog Worker is in
 `deploy/cloudflare`; deploy it with `npx wrangler deploy`.
 
 ## Acknowledgements

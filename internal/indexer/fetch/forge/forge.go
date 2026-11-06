@@ -1,4 +1,4 @@
-// Package forge finds Linux apps released on code forges other than GitHub: Codeberg and GitLab.
+// Package forge finds Linux apps released on code forges other than GitHub: Codeberg.
 //
 // Each forge's fetcher lists popular repos and reads their recent releases. A repo whose latest stable
 // release has an AppImage or Flatpak bundle for the target architecture becomes a listing, scored like a
@@ -34,7 +34,7 @@ import (
 
 // Repo is what a forge says about one repo.
 type Repo struct {
-	Path        string // "owner/repo", or "group/subgroup/project" on GitLab
+	Path        string // "owner/repo"
 	Name        string
 	Description string
 	Homepage    string
@@ -145,12 +145,8 @@ func (b *Builder) Listings(ctx context.Context, repos []Repo) []catalog.Listing 
 
 const downloadWorkers = 4
 
-// assetPrefix is where a repo's release files must be. GitLab release links are reached through the
-// project's /-/releases/<tag>/downloads/ address, whatever they point at.
+// assetPrefix is where a repo's release files must be: its release downloads.
 func assetPrefix(src catalog.SourceID, path string) string {
-	if src == catalog.SourceGitLab {
-		return "https://" + src.Host() + "/" + path + "/-/"
-	}
 	return "https://" + src.Host() + "/" + path + "/releases/download/"
 }
 
@@ -435,7 +431,7 @@ var serverRetryWait = 3 * time.Second
 type statusError struct {
 	URL, Status string
 	Code        int
-	Body        string // the start of the response, which says why (GitLab: "insufficient_scope")
+	Body        string // the start of the response, which says why
 }
 
 func (e *statusError) Error() string {
