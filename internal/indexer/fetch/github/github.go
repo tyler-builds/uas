@@ -546,14 +546,19 @@ func (f *Fetcher) queryOnce(ctx context.Context, query string, vars map[string]a
 	var out struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []struct {
+			Type    string `json:"type"`
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return false, err
 	}
-	if len(out.Errors) > 0 {
-		return false, errors.New(out.Errors[0].Message)
+	for _, e := range out.Errors {
+		// A repo deleted or made private since it was found comes back as null with a NOT_FOUND error; the rest
+		// of the answer stands.
+		if e.Type != "NOT_FOUND" {
+			return false, errors.New(e.Message)
+		}
 	}
 	if len(out.Data) == 0 || string(out.Data) == "null" {
 		return false, errors.New("empty response")

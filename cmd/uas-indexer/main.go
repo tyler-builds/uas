@@ -114,14 +114,14 @@ func main() {
 		"copr": &fetch.Cached{
 			Fetcher: &copr.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "copr"), Arch: *arch,
 				Releases: releases, Log: log},
-			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
+			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
 			Key: fmt.Sprintf("schema=%d arch=%s releases=%s", catalog.SchemaVersion, *arch, *fedoraReleases),
 		},
 		"github": &fetch.Cached{
 			Fetcher: &github.Fetcher{Client: client, Token: os.Getenv("GITHUB_TOKEN"), Arch: *arch, Log: log,
 				SweepMinStars: github.DefaultSweepMinStars, SweepCache: filepath.Join(*cache, "github", "sweep.json"),
 				MediaDir: mediaDir, IconBase: *publishURL},
-			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Log: log,
+			Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
 			Key: fmt.Sprintf("schema=%d arch=%s queries=%s sweep=%d media=%d listing=%d icons=%s",
 				catalog.SchemaVersion, *arch, strings.Join(github.DefaultQueries, "|"), github.DefaultSweepMinStars,
 				github.MediaVersion, github.ListingVersion, *publishURL),

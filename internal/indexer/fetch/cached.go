@@ -12,7 +12,8 @@ import (
 )
 
 // Cached wraps a slow fetcher (GitHub, COPR) and reuses its last result while it is younger than For. Key
-// describes the fetcher's settings; a result saved under a different key is not reused.
+// describes the fetcher's settings; a result saved under a different key is not reused, except as the
+// fallback for a failed fetch (see Stale).
 type Cached struct {
 	Fetcher
 	Dir string
@@ -21,7 +22,8 @@ type Cached struct {
 	Log *slog.Logger
 	Now func() time.Time
 	// Stale, when set, lets a failed fetch fall back to a saved result up to this old, as for a source that
-	// rate-limits the indexer now and then.
+	// rate-limits the indexer now and then. A result saved under another key counts: listings built the old
+	// way beat a catalog without the source.
 	Stale time.Duration
 }
 
@@ -47,10 +49,10 @@ func (c *Cached) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	var saved *cachedResult
 	if b, err := os.ReadFile(c.path()); err == nil {
 		var r cachedResult
-		if json.Unmarshal(b, &r) == nil && r.Key == c.Key {
+		if json.Unmarshal(b, &r) == nil {
 			saved = &r
 		}
-		if saved != nil && c.now().Sub(r.Saved) <= c.For {
+		if saved != nil && r.Key == c.Key && c.now().Sub(r.Saved) <= c.For {
 			if c.Log != nil {
 				c.Log.Info("reusing cached results", "source", c.Fetcher.Source(), "saved", r.Saved,
 					"listings", len(r.Listings))
@@ -62,7 +64,7 @@ func (c *Cached) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	if err != nil && saved != nil && c.now().Sub(saved.Saved) <= c.Stale && ctx.Err() == nil {
 		if c.Log != nil {
 			c.Log.Warn("fetch failed; reusing older results", "source", c.Fetcher.Source(), "saved", saved.Saved,
-				"err", err)
+				"same_settings", saved.Key == c.Key, "err", err)
 		}
 		return saved.Listings, nil
 	}

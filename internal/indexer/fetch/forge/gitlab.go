@@ -122,6 +122,15 @@ list:
 		u := fmt.Sprintf("%s/projects?order_by=star_count&sort=desc&per_page=100&page=%d&visibility=public"+
 			"&archived=false&last_activity_after=%s", api, page, url.QueryEscape(active))
 		if _, err := getJSON(ctx, client, &f.pace, u, f.Token, &res); err != nil {
+			var se *statusError
+			if page > 1 && errors.As(err, &se) && se.Code >= 500 && ctx.Err() == nil {
+				// GitLab.com times out on deep pages of this list now and then; the most-starred projects
+				// are on the first pages, so index those rather than nothing.
+				if f.Log != nil {
+					f.Log.Warn("gitlab project list cut short", "page", page, "err", err)
+				}
+				break
+			}
 			return nil, fmt.Errorf("gitlab: list projects: %w", err)
 		}
 		if len(res) == 0 {
@@ -145,8 +154,8 @@ list:
 		u := fmt.Sprintf("%s/projects/%d/releases?per_page=%d", api, p.ID, recentReleases)
 		if _, err := getJSON(ctx, client, &f.pace, u, f.Token, &rels); err != nil {
 			var se *statusError
-			if errors.As(err, &se) && (se.Code == http.StatusNotFound || se.Code == http.StatusForbidden) {
-				continue // releases turned off, or hidden
+			if errors.As(err, &se) && (se.Code == http.StatusNotFound || se.Code == http.StatusForbidden || se.Code >= 500) {
+				continue // releases turned off or hidden, or GitLab failing on this project
 			}
 			return nil, fmt.Errorf("gitlab: releases of %s: %w", p.Path, err)
 		}

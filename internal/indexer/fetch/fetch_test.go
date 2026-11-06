@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -57,11 +58,17 @@ func TestGetUsesETag(t *testing.T) {
 	}
 }
 
-type countingFetcher struct{ calls int }
+type countingFetcher struct {
+	calls int
+	fail  error
+}
 
 func (c *countingFetcher) Source() catalog.SourceID { return catalog.SourceGitHub }
 func (c *countingFetcher) Fetch(context.Context) ([]catalog.Listing, error) {
 	c.calls++
+	if c.fail != nil {
+		return nil, c.fail
+	}
 	return []catalog.Listing{{Source: catalog.SourceGitHub, Ref: "o/r"}}, nil
 }
 
@@ -84,5 +91,27 @@ func TestCached(t *testing.T) {
 	c.Fetch(ctx)
 	if inner.calls != 3 {
 		t.Errorf("calls = %d, want 3 (new key, then expired)", inner.calls)
+	}
+}
+
+// A failed fetch falls back to the last result while it is younger than Stale, even one saved with other
+// settings: the old listings beat a catalog without the source.
+func TestCachedStale(t *testing.T) {
+	inner := &countingFetcher{}
+	now := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	c := &Cached{Fetcher: inner, Dir: t.TempDir(), For: time.Hour, Stale: 24 * time.Hour, Key: "k1",
+		Now: func() time.Time { return now }}
+	ctx := context.Background()
+	if _, err := c.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inner.fail = errors.New("server error")
+	c.Key = "k2"
+	if ls, err := c.Fetch(ctx); err != nil || len(ls) != 1 {
+		t.Fatalf("fallback across keys = %v, %v", ls, err)
+	}
+	now = now.Add(25 * time.Hour)
+	if _, err := c.Fetch(ctx); err == nil {
+		t.Error("a result older than Stale was reused")
 	}
 }

@@ -164,3 +164,26 @@ func TestSweep(t *testing.T) {
 		}
 	}
 }
+
+// A repo deleted since the sweep found it comes back as null with a NOT_FOUND error; the others are read.
+func TestReposByIDSkipsDeleted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":{"nodes":[null,{"id":"R_2","nameWithOwner":"o/kept"}]},` +
+			`"errors":[{"type":"NOT_FOUND","path":["nodes",0],"message":"Could not resolve to a node with the global id of 'R_1'"}]}`))
+	}))
+	defer srv.Close()
+	f := &Fetcher{Client: srv.Client(), Token: "test-token", Arch: "x86_64", Endpoint: srv.URL}
+	got, err := f.reposByID(context.Background(), []string{"R_1", "R_2"})
+	if err != nil || len(got) != 1 || got[0].NameWithOwner != "o/kept" {
+		t.Fatalf("reposByID = %+v, %v", got, err)
+	}
+
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":null,"errors":[{"type":"FORBIDDEN","message":"no"}]}`))
+	}))
+	defer other.Close()
+	f.Endpoint = other.URL
+	if _, err := f.reposByID(context.Background(), []string{"R_1"}); err == nil {
+		t.Error("other errors should fail the read")
+	}
+}

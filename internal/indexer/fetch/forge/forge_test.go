@@ -140,14 +140,17 @@ func TestGitLab(t *testing.T) {
 				{"id": 2, "path_with_namespace": "fork/app", "star_count": 300, "forked_from_project": map[string]any{"id": 1}},
 			})
 		case r.URL.Path == "/api/v4/projects":
-			json.NewEncoder(w).Encode([]any{})
+			// GitLab.com times out on deep pages now and then: the first page is still indexed.
+			http.Error(w, "timeout", http.StatusInternalServerError)
 		case r.URL.Path == "/api/v4/projects/1/releases":
 			json.NewEncoder(w).Encode([]map[string]any{
 				{"tag_name": "v2.0-rc1", "released_at": "2026-10-01T00:00:00Z"},
-				{"tag_name": "v1.9", "released_at": "2026-08-01T00:00:00Z", "assets": map[string]any{"links": []any{
-					map[string]any{"name": "App-x86_64.AppImage", "url": "https://example.org/App-x86_64.AppImage",
-						"direct_asset_url": "https://gitlab.com/group/sub/app/-/releases/v1.9/downloads/App-x86_64.AppImage"},
-				}}},
+				{"tag_name": "v1.9", "released_at": "2026-08-01T00:00:00Z", "description": "## Fixes\n- Faster",
+					"_links": map[string]any{"self": "https://gitlab.com/group/sub/app/-/releases/v1.9"},
+					"assets": map[string]any{"links": []any{
+						map[string]any{"name": "App-x86_64.AppImage", "url": "https://example.org/App-x86_64.AppImage",
+							"direct_asset_url": "https://gitlab.com/group/sub/app/-/releases/v1.9/downloads/App-x86_64.AppImage"},
+					}}},
 			})
 		case r.URL.Path == "/api/v4/projects/1":
 			json.NewEncoder(w).Encode(map[string]any{"license": map[string]any{"key": "gpl-3.0"}})
@@ -162,6 +165,8 @@ func TestGitLab(t *testing.T) {
 	f := NewGitLab(Builder{Client: client, Arch: "x86_64", MediaDir: t.TempDir(), Now: func() time.Time { return now }}, "tok")
 	f.API = srv.URL + "/api/v4"
 	f.pace.every = 0
+	defer func(w time.Duration) { serverRetryWait = w }(serverRetryWait)
+	serverRetryWait = time.Millisecond
 	ls, err := f.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +178,10 @@ func TestGitLab(t *testing.T) {
 	if l.Ref != "gitlab.com/group/sub/app" || l.Version != "1.9" || l.License != "GPL-3.0" || l.Developer != "Group" ||
 		len(l.Assets) != 1 || l.Assets[0].SHA256 != fakeSum() {
 		t.Errorf("listing = %+v", l)
+	}
+	if len(l.Changelog) != 1 || l.Changelog[0].Version != "1.9" || l.Changelog[0].Notes != "**Fixes**\n- Faster" ||
+		l.Changelog[0].URL != "https://gitlab.com/group/sub/app/-/releases/v1.9" {
+		t.Errorf("changelog = %+v", l.Changelog)
 	}
 }
 

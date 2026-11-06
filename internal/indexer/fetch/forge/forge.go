@@ -414,11 +414,11 @@ func getJSON(ctx context.Context, c *http.Client, p *pacer, u, token string, v a
 			}
 			lastErr = errRateLimited
 		case resp.StatusCode >= 500:
-			lastErr = fmt.Errorf("GET %s: %s", u, resp.Status)
+			lastErr = &statusError{URL: u, Status: resp.Status, Code: resp.StatusCode}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * 3 * time.Second):
+			case <-time.After(time.Duration(attempt+1) * serverRetryWait):
 			}
 		default:
 			return nil, &statusError{URL: u, Status: resp.Status, Code: resp.StatusCode,
@@ -429,6 +429,9 @@ func getJSON(ctx context.Context, c *http.Client, p *pacer, u, token string, v a
 }
 
 // statusError is a response that retrying won't fix, such as 404 Not Found.
+// serverRetryWait is how long to wait before the first retry of a server error; later ones wait longer.
+var serverRetryWait = 3 * time.Second
+
 type statusError struct {
 	URL, Status string
 	Code        int
