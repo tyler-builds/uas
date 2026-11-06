@@ -8,6 +8,7 @@ import (
 	"github.com/tyler-builds/jamb/ui"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/backend"
 )
 
 // whatsNew is an open "What's new" dialog: the notes of the releases an update brings.
@@ -32,6 +33,31 @@ func changelogFor(app *catalog.App, l catalog.Listing) ([]catalog.Change, catalo
 		}
 	}
 	return nil, ""
+}
+
+// updateNotes is the "What's new" of an update of the installed copy in to version: the notes of the releases
+// since the installed one, from the installed copy's listing when it has any. It is nil when there are none,
+// as for a rebuild of the installed version. The caller sets update.
+func updateNotes(app *catalog.App, in backend.InstalledApp, version string) *whatsNew {
+	if version != "" && version == in.Version {
+		return nil
+	}
+	var mine catalog.Listing
+	for _, l := range app.Listings {
+		if in.Matches(l) {
+			mine = l
+			break
+		}
+	}
+	cs, from := changelogFor(app, mine)
+	newer := newerChanges(cs, in.Version)
+	if len(newer) == 0 {
+		return nil
+	}
+	if from == in.Source {
+		from = ""
+	}
+	return &whatsNew{name: app.Name, changes: newer, from: from, version: version, installed: in.Version}
 }
 
 // newerChanges returns the changes after the installed version, newest first: those above the entry for the

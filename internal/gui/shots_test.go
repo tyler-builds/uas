@@ -36,7 +36,7 @@ func TestShots(t *testing.T) {
 	light, dark := Themes()
 	fp := &fakeBackend{src: catalog.SourceFlathub, installed: []backend.InstalledApp{
 		{Source: catalog.SourceFlathub, Ref: "app/org.mozilla.firefox/x86_64/stable", AppID: "org.mozilla.firefox", Name: "Firefox", Version: "159.0.1", Scope: "system"},
-		{Source: catalog.SourceFlathub, Ref: "app/org.gimp.GIMP/x86_64/stable", AppID: "org.gimp.GIMP", Name: "GIMP", Version: "3.2.8", Scope: "user"},
+		{Source: catalog.SourceFlathub, Ref: "app/org.gimp.GIMP/x86_64/stable", AppID: "org.gimp.GIMP", Name: "GIMP", Version: "3.2.6", Scope: "user"},
 	}, available: []backend.AvailableUpdate{{Ref: "app/org.gimp.GIMP/x86_64/stable", Scope: "user", Version: "3.2.9"},
 		// A rebuild of the installed version.
 		{Ref: "app/org.mozilla.firefox/x86_64/stable", Scope: "system", Version: "159.0.1"}}}

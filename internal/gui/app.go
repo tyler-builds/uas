@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tyler-builds/jamb/icons"
@@ -82,6 +83,8 @@ type App struct {
 	icons      *iconLoader
 
 	startup sync.Once // the background catalog check at start
+	// checkedAt is when updates were last checked, in Unix nanoseconds.
+	checkedAt atomic.Int64
 }
 
 // New creates the app for a session.
@@ -500,6 +503,7 @@ func (a *App) updates(ctx *ui.Context) ui.QueryResult[map[string]string] {
 	return ui.Query(ctx, "updates", func(c context.Context) (map[string]string, error) {
 		ups, err := a.s.Updates(c)
 		if len(ups) > 0 || err == nil {
+			a.checkedAt.Store(time.Now().UnixNano())
 			// Partial results are still useful when one source can't be reached.
 			return ups, nil
 		}

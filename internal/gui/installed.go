@@ -51,7 +51,8 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 			with = append(with, in)
 		}
 	}
-	actions := ui.Div().Row().Gap(space2).
+	actions := ui.Div().Row().Align(ui.Center).Gap(space2).
+		Child(checkedLabel(a.lastChecked(), ups.Fetching)).
 		Child(ui.If(len(with) > 0, ui.Button(updatesLabel(len(with))).Icon(icons.Download).Primary().Small().
 			OnClick(func() { a.updateAll(ctx, with) }))).
 		Child(a.refreshButton(ctx, res, ups))
@@ -180,6 +181,42 @@ func (a *App) refreshButton(ctx *ui.Context, res ui.QueryResult[[]backend.Instal
 		})
 }
 
+// checkedLabel says when updates were last checked, "Checked 5 minutes ago", and keeps it current while it's
+// on screen.
+func checkedLabel(at time.Time, fetching bool) ui.Element {
+	return ui.Component(func(ctx *ui.Context) ui.Element {
+		tick := ui.Local(ctx, "tick", 0)
+		_ = tick.Get() // re-render when it ticks
+		timer := ui.Local(ctx, "timer", &pendingTimer{})
+		if p := timer.Peek(); !p.on {
+			p.on = true
+			ctx.After(30*time.Second, func() { p.on = false; tick.Set(tick.Peek() + 1) })
+		}
+		text := ""
+		switch {
+		case fetching:
+			text = "Checking…"
+		case at.IsZero():
+		case time.Since(at) < time.Minute:
+			text = "Checked just now"
+		default:
+			text = "Checked " + ui.FormatRelative(at, time.Now())
+		}
+		return ui.Div().Tooltip("uas checks for updates every ten minutes while it runs").Child(caption(ctx, text))
+	}).Key("checked-label")
+}
+
+// lastChecked is when updates were last checked, or the zero time.
+func (a *App) lastChecked() time.Time {
+	if n := a.checkedAt.Load(); n != 0 {
+		return time.Unix(0, n)
+	}
+	return time.Time{}
+}
+
+// pendingTimer is whether a component's refresh timer is set, so renders don't stack timers.
+type pendingTimer struct{ on bool }
+
 func updatesLabel(n int) string {
 	if n == 1 {
 		return "Update 1 app"
@@ -245,14 +282,32 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 			meta = append(meta, "installed from a file")
 		}
 
+		update := func() {
+			a.startJob(ctx, appID, "Updating "+name, false, name+" is up to date",
+				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
+		}
+		parts := []ui.Element{ui.Div().Tooltip(in.Source.Name() + ": " + sourceTips[in.Source]).
+			Shrink(0).Child(ui.Text(in.Source.Name()).FontSize(12).TextColor(t.TextSubtle)),
+			ui.Text(strings.Join(meta, " · ")).FontSize(12).TextColor(t.TextSubtle).Truncate()}
+		// An update's notes open from a link in the line, rather than a third button on every row.
+		if version, ok := ups[in.Key()]; ok && match.Data != nil {
+			if w := updateNotes(match.Data, in, version); w != nil {
+				if !busy {
+					w.update = update
+				}
+				parts = append(parts, ui.Div().Shrink(0).Cursor(ui.CursorPointer).Role(access.RoleLink).
+					Label("What's new in "+name).TabIndex(0).Tooltip("What changed since your version").
+					OnClick(func() { a.whatsNew.Set(w) }).
+					Child(ui.Text("What's new").FontSize(12).TextColor(t.Link)))
+			}
+		}
+
 		// The row opens the app's page when the catalog has it.
 		text := ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Div().Row().Align(ui.Center).Gap(space2).MinWidth(ui.Px(0)).
 				Child(ui.Text(name).FontSize(14).Medium().Truncate().Shrink(0)).
 				Child(ui.If(summary != "", ui.Text(summary).FontSize(13).TextColor(t.TextMuted).Truncate()))).
-			Child(metaLine(ctx, append([]ui.Element{ui.Div().Tooltip(in.Source.Name() + ": " + sourceTips[in.Source]).
-				Shrink(0).Child(ui.Text(in.Source.Name()).FontSize(12).TextColor(t.TextSubtle))},
-				ui.Text(strings.Join(meta, " · ")).FontSize(12).TextColor(t.TextSubtle).Truncate())...))
+			Child(metaLine(ctx, parts...))
 		if match.Data != nil {
 			text = text.Cursor(ui.CursorPointer).OnClick(func() { a.openApp(appID) }).
 				Role(access.RoleLink).Label(name + " details").TabIndex(0)
@@ -266,10 +321,7 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 		if version, ok := ups[in.Key()]; ok {
 			label, tip := updateLabel(in.Version, version)
 			actions = actions.Child(ui.Button(label).Icon(icons.Download).Secondary().Small().Loading(busy).Tooltip(tip).
-				Styles(ui.ButtonStyle{Icon: ui.Style{TextColor: t.Link}}).OnClick(func() {
-				a.startJob(ctx, appID, "Updating "+name, false, name+" is up to date",
-					func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
-			}))
+				Styles(ui.ButtonStyle{Icon: ui.Style{TextColor: t.Link}}).OnClick(update))
 		}
 		if in.Origin != "local file" {
 			actions = actions.Child(ui.Button("Remove").Secondary().Small().Disabled(busy).OnClick(func() {

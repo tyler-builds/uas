@@ -443,21 +443,7 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 		}
 		main = ui.Button(label).Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
 			Tooltip(tip).Loading(busy).OnClick(update)
-		// The notes of the releases the update brings, from the installed copy's listing when it has any.
-		var mine catalog.Listing
-		for _, l := range app.Listings {
-			if in.Matches(l) {
-				mine = l
-				break
-			}
-		}
-		// A rebuild of the installed version brings no new notes.
-		if cs, from := changelogFor(app, mine); len(cs) > 0 && len(newerChanges(cs, in.Version)) > 0 {
-			if from == in.Source {
-				from = ""
-			}
-			w := &whatsNew{name: app.Name, changes: newerChanges(cs, in.Version), from: from, version: version,
-				installed: in.Version}
+		if w := updateNotes(app, in, version); w != nil {
 			if !busy {
 				w.update = update
 			}
