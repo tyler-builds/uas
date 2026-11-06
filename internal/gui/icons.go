@@ -117,7 +117,7 @@ func (a *App) appIcon(ctx *ui.Context, url string, size float32, name string) ui
 				return picture{}, err
 			}
 			return decodePicture(b)
-		}, ui.QueryStaleTime(24*time.Hour), ui.QueryCacheTime(30*time.Minute))
+		}, ui.QueryStaleTime(24*time.Hour), ui.QueryCacheTime(2*time.Minute))
 		switch {
 		case res.Data.img != nil:
 			return ui.Image(res.Data.img).Size(ui.Px(size), ui.Px(size)).Fit(ui.FitContain).Alt(name + " icon")
