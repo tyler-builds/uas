@@ -16,10 +16,10 @@ import (
 )
 
 // Releases is how many of a listing's newest releases keep their notes.
-const Releases = 5
+const Releases = 3
 
 // MaxChars is about how long one release's notes can be. Longer notes are cut at a line before it.
-const MaxChars = 1500
+const MaxChars = 1000
 
 var (
 	comments  = regexp.MustCompile(`(?s)<!--.*?-->`)

@@ -65,7 +65,7 @@ func TestFromAppStream(t *testing.T) {
 	for _, c := range l.Changelog {
 		got = append(got, c.Version)
 	}
-	if strings.Join(got, " ") != "1.5 1.4 1.3 1.2" {
+	if strings.Join(got, " ") != "1.5 1.4" { // 1.6, the newest, has no notes
 		t.Errorf("versions = %v", got)
 	}
 	if l.Changelog[0].URL != "https://example.com/1.5" || !l.Changelog[0].Date.Equal(day(7)) {

@@ -72,8 +72,8 @@ const MediaVersion = 5
 
 // ListingVersion changes whenever how listings are built from what was fetched changes (such as their names),
 // so cached GitHub results are rebuilt without fetching each repo's media again. 2: names without "AppImage".
-// 3: release notes.
-const ListingVersion = 3
+// 3: release notes. 4: shorter release notes.
+const ListingVersion = 4
 
 // IconDir is where enrich keeps icons, under MediaDir. The publisher uploads them from here.
 func IconDir(mediaDir string) string { return filepath.Join(mediaDir, "icons") }

@@ -128,7 +128,7 @@ func main() {
 		},
 	}
 	forgeBuilder := forge.Builder{Client: client, Arch: *arch, MediaDir: mediaDir, IconBase: *publishURL, Log: log}
-	forgeKey := fmt.Sprintf("schema=%d arch=%s media=%d/%d icons=%s notes=1", catalog.SchemaVersion, *arch,
+	forgeKey := fmt.Sprintf("schema=%d arch=%s media=%d/%d icons=%s notes=2", catalog.SchemaVersion, *arch,
 		forge.MediaVersion, github.MediaVersion, *publishURL)
 	codeberg := forge.NewCodeberg(forgeBuilder)
 	codeberg.MinStars = *codebergMinStars
