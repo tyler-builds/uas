@@ -52,6 +52,8 @@ func main() {
 		"(github needs $GITHUB_TOKEN; gitlab needs $GITLAB_TOKEN and is left out without it)")
 	codebergMinStars := flag.Int("codeberg-min-stars", forge.DefaultCodebergMinStars,
 		"check Codeberg repos with at least this many stars")
+	editionsDir := flag.String("editions-dir", "", "also write one catalog per edition (kind of system) here;\n"+
+		"publishing writes them next to -out when this is empty")
 	keygen := flag.String("keygen", "", "write a new signing key to this file, print its public key, and exit")
 	flag.Parse()
 	if *keygen != "" {
@@ -140,11 +142,12 @@ func main() {
 		CacheDir: filepath.Join(*cache, "apt"), Arch: *arch, Log: log}
 	available["ubuntu"] = &debian.Fetcher{Distribution: catalog.SourceUbuntu, Client: client,
 		CacheDir: filepath.Join(*cache, "apt"), Arch: *arch, Log: log}
-	available["arch"] = &archlinux.Fetcher{Client: client, CacheDir: *cache, Arch: *arch, Log: log}
+	available["arch"] = &archlinux.Fetcher{Client: client, CacheDir: *cache, Arch: *arch, Log: log,
+		IconDir: github.IconDir(mediaDir), IconBase: *publishURL}
 	// The Snap Store takes a few minutes at one request a second, so it is cached like GitHub and COPR.
 	available["snap"] = &fetch.Cached{Fetcher: &snap.Fetcher{Client: client, Arch: *arch, Log: log},
 		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
-		Key: fmt.Sprintf("schema=%d arch=%s v=1", catalog.SchemaVersion, *arch)}
+		Key: fmt.Sprintf("schema=%d arch=%s v=2", catalog.SchemaVersion, *arch)}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {
 		f, ok := available[strings.TrimSpace(name)]
@@ -156,12 +159,33 @@ func main() {
 	}
 
 	start := time.Now()
-	info, err := indexer.Build(ctx, fetchers, *out, log)
+	fetched, err := indexer.Fetch(ctx, fetchers, log)
+	if err != nil {
+		log.Error("build failed", "err", err)
+		os.Exit(1)
+	}
+	// Every source in one catalog, for local use; editions (one per kind of system) when publishing or asked.
+	info, err := fetched.Write(ctx, *out, func(catalog.Listing) bool { return true }, log)
 	if err != nil {
 		log.Error("build failed", "err", err)
 		os.Exit(1)
 	}
 	log.Info("catalog written", "path", *out, "apps", info.Apps, "took", time.Since(start).Round(time.Millisecond))
+	var editions map[string]indexer.Built
+	if store != nil || *editionsDir != "" {
+		dir := *editionsDir
+		if dir == "" {
+			dir = *out + ".editions"
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Error("build failed", "err", err)
+			os.Exit(1)
+		}
+		if editions, err = fetched.WriteEditions(ctx, dir, log); err != nil {
+			log.Error("build failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	if n, err := fetch.PruneCache(*cache, 3*24*time.Hour); err != nil {
 		log.Warn("pruning the download cache failed", "err", err)
 	} else if n > 0 {
@@ -169,18 +193,24 @@ func main() {
 	}
 
 	if store != nil {
-		// Icons first: the catalog points at them.
+		// Icons first: the catalogs point at them.
 		if _, err := publish.Icons(ctx, store, github.IconDir(mediaDir), log); err != nil {
 			// Not fatal: apps show a placeholder until a later run uploads their icons.
 			log.Warn("icon upload failed", "err", err)
 		}
-		m, err := publish.Publish(ctx, store, *out, info, publish.Options{Key: signingKey, Keep: *keep, Log: log})
+		eds := map[string]publish.Edition{}
+		for name, b := range editions {
+			eds[name] = publish.Edition{Path: b.Path, Info: b.Info}
+		}
+		m, err := publish.PublishEditions(ctx, store, eds, fetched.BuiltAt, info.Sources,
+			publish.Options{Key: signingKey, Keep: *keep, Log: log})
 		if err != nil {
 			log.Error("publish failed", "err", err)
 			os.Exit(1)
 		}
-		log.Info("published", "catalog", m.Catalog.Path, "size", m.Catalog.Size,
-			"uncompressed", m.Catalog.UncompressedSize)
+		for name, f := range m.Editions {
+			log.Info("published", "edition", name, "size", f.Size, "uncompressed", f.UncompressedSize)
+		}
 	}
 }
 

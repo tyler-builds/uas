@@ -137,12 +137,16 @@ All endpoints below need confirming during the first spike.
   for aarch64), with ETags. About 1,900 apps a release.
 - **Arch** (`fetch/arch`): `archlinux-appstream-data`'s version from archlinux.org's package JSON, its
   `Components-x86_64.xml.gz` from sources.archlinux.org, and versions from the core, extra and multilib
-  databases on a mirror. Distro `arch`; x86_64 only. Arch's cached icons are JPEG XL, which Go can't decode
-  without a new dependency, so Arch-only apps have no icon. About 1,240 apps.
+  databases on a mirror. Distro `arch`; x86_64 only. Arch's icons come only as JPEG XL files in
+  `icons-128x128.tar.gz`; the indexer decodes them with a pure-Go decoder (`kpfaulkner/jxl-go`, used only by the
+  indexer), publishes them as PNG with the other icons, and remembers each decode by the file's hash, so a run
+  takes 2 seconds once the first has decoded them (15). About 1,240 apps, 1,030 with icons; the rest name no
+  128 px icon or use JPEG XL features the decoder lacks.
 - **Snap Store** (`fetch/snap`): the v1 search API with `X-Ubuntu-Series: 16`, 100 snaps a page (about 90
   pages). No rate limit is published, so pages are read one a second and the result is cached like GitHub's.
-  A snap is kept with a title, summary and icon and either a verified or starred publisher, an AppStream ID
-  (its `common_ids`, which merge it with the app's other listings), or a store section and screenshots. An
+  A snap is kept with a title, summary and icon and either a verified or starred publisher or an AppStream ID
+  (its `common_ids`, which merge it with the app's other listings): about a thousand of 8,800. Keeping snaps
+  with a store section and screenshots too let in 4,500, most of them unmaintained. An
   unverified snap that shares a reviewed app's name is hidden as an unofficial copy; a verified one joins it.
 
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
@@ -220,6 +224,18 @@ signing key, add the new public key to `internal/client/refresh/keys.go`, ship a
 secret.
 
 Icons are mirrored to R2. Screenshots link to their original URLs.
+
+**Editions.** One catalog of every source would be 16 MB compressed, most of it packages for systems the
+client isn't. So the indexer fetches once and then merges and writes one catalog per kind of system
+(`indexer/editions.go`): the sources that work everywhere (Flathub, Homebrew, GitHub, GitLab, Codeberg), plus
+`fedora-atomic` (Fedora and COPR, for layering; no snaps, since image-based Fedora has no snapd), `fedora`
+(Fedora for dnf, snaps), one per Debian and Ubuntu release (`debian-13`, `ubuntu-24.04`: that release only,
+snaps), `arch` (Arch, snaps) and `other` (snaps). Splitting by source instead would leave clients to merge
+apps across sources themselves. The signed manifest names every edition's file (`editions`), and its single
+`catalog` is fedora-atomic's, for clients from before editions. A client asks for `platform.Info.Edition()`
+and falls back to `other` when there is none for its release (a new Debian, say). The hash of the installed
+file is kept beside it (`catalog.db.sha256`), so a client whose system changes edition downloads the new
+one. Catalogs of the last few runs are kept for clients mid-download.
 
 **Free-tier fit:** R2's free tier (10 GB, no egress fees) holds this easily: the Flathub-only catalog is
 5.4 MB compressed (27 MB uncompressed). The Worker's free tier allows 100,000 requests a day, and each client

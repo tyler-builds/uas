@@ -31,13 +31,38 @@ const signingContext = "uas-manifest-v1\n"
 // catalogPath matches the only object names a manifest may point at.
 var catalogPath = regexp.MustCompile(`^catalog-[0-9a-f]{64}\.db\.zst$`)
 
-// Manifest says which catalog file is current.
+// Manifest says which catalog files are current.
+//
+// The catalog is published in editions, one for each kind of system (see Edition), so a client downloads only
+// the sources it can install from. Catalog is the fedora-atomic edition, for clients from before editions.
 type Manifest struct {
 	SchemaVersion int                    `json:"schema_version"`
 	BuiltAt       time.Time              `json:"built_at"`
 	Apps          int                    `json:"apps"`
 	Sources       []catalog.SourceStatus `json:"sources"`
 	Catalog       File                   `json:"catalog"`
+	// Editions are the catalog files by edition name, such as "ubuntu-24.04".
+	Editions map[string]File `json:"editions,omitempty"`
+}
+
+// Edition names. Distribution releases have editions named like their listings' Distro ("ubuntu-24.04",
+// "debian-13"); these are the others.
+const (
+	EditionFedoraAtomic = "fedora-atomic" // image-based Fedora (Bazzite, Silverblue): layering and COPR
+	EditionFedora       = "fedora"        // package-based Fedora: dnf
+	EditionArch         = "arch"
+	EditionOther        = "other" // any other system: the sources that work everywhere
+)
+
+// For returns the catalog file for an edition, falling back to the "other" edition, then to Catalog.
+func (m *Manifest) For(edition string) File {
+	if f, ok := m.Editions[edition]; ok {
+		return f
+	}
+	if f, ok := m.Editions[EditionOther]; ok {
+		return f
+	}
+	return m.Catalog
 }
 
 // File is a published, zstd-compressed catalog database.
@@ -50,19 +75,36 @@ type File struct {
 	UncompressedSize int64  `json:"uncompressed_size"`
 }
 
+var editionName = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,30}$`)
+
+func (f File) validate() error {
+	if !catalogPath.MatchString(f.Path) {
+		return fmt.Errorf("manifest: bad catalog path %q", f.Path)
+	}
+	if f.Path != CatalogPath(f.SHA256) {
+		return errors.New("manifest: catalog path does not match its hash")
+	}
+	if f.Size <= 0 || f.UncompressedSize <= 0 {
+		return errors.New("manifest: missing catalog size")
+	}
+	return nil
+}
+
 // CatalogPath returns the object name for a compressed catalog with the given hex SHA-256.
 func CatalogPath(sha256Hex string) string { return "catalog-" + sha256Hex + ".db.zst" }
 
 // Validate checks the fields a client relies on.
 func (m *Manifest) Validate() error {
-	if !catalogPath.MatchString(m.Catalog.Path) {
-		return fmt.Errorf("manifest: bad catalog path %q", m.Catalog.Path)
+	if err := m.Catalog.validate(); err != nil {
+		return err
 	}
-	if m.Catalog.Path != CatalogPath(m.Catalog.SHA256) {
-		return errors.New("manifest: catalog path does not match its hash")
-	}
-	if m.Catalog.Size <= 0 || m.Catalog.UncompressedSize <= 0 {
-		return errors.New("manifest: missing catalog size")
+	for name, f := range m.Editions {
+		if !editionName.MatchString(name) {
+			return fmt.Errorf("manifest: bad edition name %q", name)
+		}
+		if err := f.validate(); err != nil {
+			return fmt.Errorf("manifest: edition %s: %w", name, err)
+		}
 	}
 	if m.BuiltAt.IsZero() {
 		return errors.New("manifest: missing build time")

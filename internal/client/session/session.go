@@ -472,6 +472,7 @@ func RefreshOptions(catalogPath string) refresh.Options {
 		CatalogPath: catalogPath,
 		Client:      &http.Client{Timeout: 5 * time.Minute},
 		UserAgent:   "uas",
+		Edition:     platform.Detect(platform.System()).Edition(),
 	}
 }
 

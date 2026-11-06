@@ -179,3 +179,62 @@ func TestOpenCatalogReplacesOldFormat(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 }
+
+// publishEditions publishes one single-app catalog per edition, each app named after its edition.
+func (f *fixture) publishEditions(builtAt time.Time, names ...string) {
+	f.t.Helper()
+	ctx := context.Background()
+	eds := map[string]publish.Edition{}
+	for _, name := range names {
+		db := filepath.Join(f.t.TempDir(), name+".db")
+		app := strings.ReplaceAll(name, ".", "")
+		apps := []catalog.App{{ID: "org.example." + app, Kind: catalog.KindDesktopApp, Name: app,
+			Listings: []catalog.Listing{{Source: catalog.SourceFlathub, Ref: "app/org.example." + app + "/x86_64/stable",
+				Name: app}}}}
+		info := catalog.BuildInfo{BuiltAt: builtAt, Apps: 1}
+		if err := catalog.Write(ctx, db, apps, info); err != nil {
+			f.t.Fatal(err)
+		}
+		eds[name] = publish.Edition{Path: db, Info: info}
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if _, err := publish.PublishEditions(ctx, f.store, eds, builtAt, nil,
+		publish.Options{Key: f.key, Keep: 2, Log: log}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestRefreshEditions(t *testing.T) {
+	f := newFixture(t)
+	f.publishEditions(time.Now(), "fedora-atomic", "ubuntu-24.04", "other")
+	cases := []struct {
+		edition, want string
+		download      bool
+	}{
+		{"ubuntu-24.04", "ubuntu-2404", true},
+		{"debian-14", "other", true}, // no edition yet: the one for any system
+		{"", "other", false},         // the same catalog again
+	}
+	for _, c := range cases {
+		f.options.Edition = c.edition
+		res, err := Refresh(context.Background(), f.options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Updated != c.download {
+			t.Errorf("%q: downloaded %v, want %v", c.edition, res.Updated, c.download)
+		}
+		db, err := catalog.Open(f.options.CatalogPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.App(context.Background(), "org.example."+c.want); err != nil {
+			t.Errorf("%q: catalog doesn't have %s: %v", c.edition, c.want, err)
+		}
+		db.Close()
+	}
+	// Same manifest, same edition: nothing to download.
+	if res, err := Refresh(context.Background(), f.options); err != nil || res.Updated {
+		t.Errorf("second refresh: %+v, %v", res, err)
+	}
+}

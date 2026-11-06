@@ -3,8 +3,9 @@
 // The store's v1 search API lists every stable snap for an architecture, 100 a page (about 90 pages). Its
 // rate limits aren't published, so pages are read one a second, and the result is cached like the other slow
 // sources. Most snaps are tests and abandoned experiments, so a snap is kept only with a title, a summary
-// and an icon, and either a verified or starred publisher, the AppStream ID of a known app (its common IDs,
-// which also merge it with that app's other listings), or both a section of the store and screenshots.
+// and an icon, and either a verified or starred publisher or the AppStream ID of a known app (its common IDs,
+// which also merge it with that app's other listings). Of about 8,800 snaps that keeps about a thousand: a
+// section and screenshots alone let in over 4,000, most of them unmaintained.
 package snap
 
 import (
@@ -201,7 +202,7 @@ func toListing(s pkg) (catalog.Listing, bool) {
 	}
 	trusted := s.Validation == "verified" || s.Validation == "starred"
 	if !snapName.MatchString(s.Name) || strings.TrimSpace(s.Title) == "" || strings.TrimSpace(s.Summary) == "" ||
-		icon == "" || (!trusted && len(s.CommonIDs) == 0 && (len(s.Sections) == 0 || len(shots) == 0)) {
+		icon == "" || (!trusted && len(s.CommonIDs) == 0) {
 		return catalog.Listing{}, false
 	}
 	var cats []string

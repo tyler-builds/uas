@@ -39,6 +39,8 @@ type Options struct {
 	CatalogPath string
 	Client      *http.Client
 	UserAgent   string
+	// Edition is the catalog edition to download (platform.Info.Edition); the manifest's fallback when empty.
+	Edition string
 }
 
 // Result reports what a refresh did.
@@ -71,9 +73,10 @@ func Refresh(ctx context.Context, opt Options) (Result, error) {
 			m.SchemaVersion, catalog.SchemaVersion)
 	}
 
+	file := m.For(opt.Edition)
 	manifestPath := ManifestPath(opt.CatalogPath)
 	if local, err := loadLocal(manifestPath, opt.TrustedKeys); err == nil {
-		if local.Catalog.SHA256 == m.Catalog.SHA256 && fileExists(opt.CatalogPath) {
+		if installedHash(opt.CatalogPath, local) == file.SHA256 && fileExists(opt.CatalogPath) {
 			return Result{Manifest: m}, nil
 		}
 		if m.BuiltAt.Before(local.BuiltAt) {
@@ -81,7 +84,7 @@ func Refresh(ctx context.Context, opt Options) (Result, error) {
 				"keeping the local one", m.BuiltAt.Format("2006-01-02 15:04"), local.BuiltAt.Format("2006-01-02 15:04"))
 		}
 	}
-	if m.Catalog.Size > maxCatalog || m.Catalog.UncompressedSize > maxDB {
+	if file.Size > maxCatalog || file.UncompressedSize > maxDB {
 		return Result{}, errors.New("the published catalog is larger than uas allows")
 	}
 
@@ -90,7 +93,7 @@ func Refresh(ctx context.Context, opt Options) (Result, error) {
 	}
 	tmp := opt.CatalogPath + ".download"
 	defer os.Remove(tmp)
-	if err := download(ctx, opt, base+"/"+m.Catalog.Path, m.Catalog, tmp); err != nil {
+	if err := download(ctx, opt, base+"/"+file.Path, file, tmp); err != nil {
 		return Result{}, err
 	}
 	// Open the new catalog before switching to it, to catch a broken file early.
@@ -106,7 +109,22 @@ func Refresh(ctx context.Context, opt Options) (Result, error) {
 	if err := writeFile(manifestPath, raw); err != nil {
 		return Result{}, err
 	}
+	if err := writeFile(hashPath(opt.CatalogPath), []byte(file.SHA256+"\n")); err != nil {
+		return Result{}, err
+	}
 	return Result{Updated: true, Manifest: m}, nil
+}
+
+// hashPath is where the hash of the installed catalog file is kept, since the manifest names one per edition.
+func hashPath(catalogPath string) string { return catalogPath + ".sha256" }
+
+// installedHash returns the hash of the catalog file installed at catalogPath: the one recorded beside it, or
+// for a catalog installed before editions, the manifest's single catalog.
+func installedHash(catalogPath string, local manifest.Manifest) string {
+	if b, err := os.ReadFile(hashPath(catalogPath)); err == nil {
+		return strings.TrimSpace(string(b))
+	}
+	return local.Catalog.SHA256
 }
 
 // LocalManifest returns the verified manifest of the installed catalog.

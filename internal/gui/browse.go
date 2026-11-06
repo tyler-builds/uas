@@ -128,7 +128,7 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 	t := ctx.Theme()
 	notes := map[catalog.SourceID]string{
 		catalog.SourceFlathub:  "uas's first choice for desktop apps: sandboxed, no restart, and many publishers are verified.",
-		catalog.SourceHomebrew: "The usual way to add command-line tools on Bazzite, without touching the system image.",
+		catalog.SourceHomebrew: "The usual way to add command-line tools without touching the system.",
 		catalog.SourceGitHub:   "Apps released only on GitHub, each with a trust score. uas checks every download's checksum.",
 		catalog.SourceGitLab:   "Apps released on GitLab, each with a trust score. uas checks every download against the catalog.",
 		catalog.SourceCodeberg: "Apps released on Codeberg, each with a trust score. uas checks every download against the catalog.",
@@ -136,7 +136,7 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 		catalog.SourceUbuntu:   "Ubuntu's own packages, installed with apt on Ubuntu and systems built on it.",
 		catalog.SourceArch:     "Arch Linux's own packages, installed with pacman on Arch and systems built on it.",
 		catalog.SourceSnap:     "Snaps from the Snap Store, with the store's verified publishers marked.",
-		catalog.SourceFedora:   "Fedora's own packages. Layering changes the system image, so uas uses it when nothing else fits.",
+		catalog.SourceFedora:   "Fedora's own packages. On image-based Fedora, layering changes the system image, so uas uses it when nothing else fits.",
 		catalog.SourceCOPR:     "Community builds from Fedora COPR, each with a trust score from its build history.",
 	}
 	page := pageBody(listMaxWidth).

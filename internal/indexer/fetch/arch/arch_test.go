@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 func gzipped(b []byte) []byte {
@@ -81,9 +82,22 @@ func TestLive(t *testing.T) {
 	if os.Getenv("UAS_LIVE") == "" {
 		t.Skip("set UAS_LIVE=1")
 	}
-	ls, err := (&Fetcher{Client: http.DefaultClient, CacheDir: t.TempDir(), Arch: "x86_64"}).Fetch(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	cache := t.TempDir()
+	f := &Fetcher{Client: http.DefaultClient, CacheDir: cache, Arch: "x86_64", IconDir: t.TempDir(),
+		IconBase: "https://example.org"}
+	for run := 1; run <= 2; run++ { // the second run reuses the decoded icons
+		start := time.Now()
+		ls, err := f.Fetch(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		icons := 0
+		for _, l := range ls {
+			if l.IconURL != "" {
+				icons++
+			}
+		}
+		t.Logf("run %d: %d listings, %d with icons, %v; e.g. %s %s %s", run, len(ls), icons, time.Since(start),
+			ls[0].Ref, ls[0].Name, ls[0].Version)
 	}
-	t.Logf("%d listings; e.g. %s %s %s", len(ls), ls[0].Ref, ls[0].Name, ls[0].Version)
 }

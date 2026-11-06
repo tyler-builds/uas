@@ -154,3 +154,92 @@ func prune(ctx context.Context, store Store, current string, keep int, log *slog
 	}
 	return nil
 }
+
+// Edition is one edition's built catalog, for PublishEditions.
+type Edition struct {
+	Path string
+	Info catalog.BuildInfo
+}
+
+// PublishEditions uploads every edition's catalog, then one signed manifest that names them all. The
+// fedora-atomic edition is also the manifest's Catalog, for clients from before editions. Catalogs of the
+// last opt.Keep runs are kept.
+func PublishEditions(ctx context.Context, store Store, eds map[string]Edition, builtAt time.Time,
+	sources []catalog.SourceStatus, opt Options) (manifest.Manifest, error) {
+	if opt.Keep < 2 {
+		opt.Keep = 2
+	}
+	main, ok := eds[manifest.EditionFedoraAtomic]
+	if !ok {
+		return manifest.Manifest{}, fmt.Errorf("no %s edition", manifest.EditionFedoraAtomic)
+	}
+	m := manifest.Manifest{SchemaVersion: catalog.SchemaVersion, BuiltAt: builtAt, Apps: main.Info.Apps,
+		Sources: sources, Editions: map[string]manifest.File{}}
+	names := make([]string, 0, len(eds))
+	for name := range eds {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	current := map[string]bool{}
+	for _, name := range names {
+		zpath, file, err := compress(eds[name].Path)
+		if err != nil {
+			return m, fmt.Errorf("compress %s: %w", name, err)
+		}
+		err = upload(ctx, store, zpath, file)
+		os.Remove(zpath)
+		if err != nil {
+			return m, fmt.Errorf("upload %s: %w", name, err)
+		}
+		opt.Log.Info("uploaded catalog", "edition", name, "path", file.Path, "size", file.Size)
+		m.Editions[name] = file
+		current[file.Path] = true
+	}
+	m.Catalog = m.Editions[manifest.EditionFedoraAtomic]
+	env, err := manifest.Sign(m, opt.Key)
+	if err != nil {
+		return m, err
+	}
+	if err := store.Put(ctx, manifest.Name, strings.NewReader(string(env)), int64(len(env)),
+		"application/json"); err != nil {
+		return m, fmt.Errorf("upload manifest: %w", err)
+	}
+	opt.Log.Info("uploaded manifest", "built_at", m.BuiltAt, "editions", len(m.Editions))
+	if err := pruneAll(ctx, store, current, opt.Keep*len(current), opt.Log); err != nil {
+		opt.Log.Warn("pruning old catalogs failed", "err", err)
+	}
+	return m, nil
+}
+
+func upload(ctx context.Context, store Store, zpath string, file manifest.File) error {
+	f, err := os.Open(zpath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return store.Put(ctx, file.Path, f, file.Size, "application/zstd")
+}
+
+// pruneAll deletes all but the newest keep catalogs, never one in current.
+func pruneAll(ctx context.Context, store Store, current map[string]bool, keep int, log *slog.Logger) error {
+	objs, err := store.ListCatalogs(ctx)
+	if err != nil {
+		return err
+	}
+	sort.Slice(objs, func(i, j int) bool { return objs[i].Uploaded.After(objs[j].Uploaded) })
+	kept := len(current)
+	for _, o := range objs {
+		if current[o.Key] {
+			continue
+		}
+		if kept < keep {
+			kept++
+			continue
+		}
+		if err := store.Delete(ctx, o.Key); err != nil {
+			return err
+		}
+		log.Info("deleted old catalog", "path", o.Key)
+	}
+	return nil
+}

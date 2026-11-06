@@ -19,13 +19,16 @@ require (
 	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/kpfaulkner/jxl-go v0.0.0-20260623205201-d6826b04db87 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mikelolasagasti/xz v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/rasky/go-lzo v0.0.0-20200203143853-96a758eda86e // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/yuin/goldmark v1.8.7 // indirect
+	golang.org/x/exp v0.0.0-20241004190924-225e2abe05e6 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	modernc.org/libc v1.79.0 // indirect

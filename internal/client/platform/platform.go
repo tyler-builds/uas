@@ -97,6 +97,26 @@ func (i Info) Distro() string {
 	return ""
 }
 
+// Edition names the catalog edition for this system (see manifest.Manifest): "fedora-atomic" for image-based
+// Fedora, the release for other distributions uas has packages for ("ubuntu-24.04", "arch"), "fedora" for
+// package-based Fedora, and "other" for the rest.
+func (i Info) Edition() string {
+	if i.Atomic {
+		if i.FedoraRelease() > 0 {
+			return "fedora-atomic"
+		}
+		return "other"
+	}
+	d := i.Distro()
+	switch {
+	case d == "":
+		return "other"
+	case strings.HasPrefix(d, "fedora-"):
+		return "fedora"
+	}
+	return d
+}
+
 // Env is what Detect reads, so tests can supply a fake system.
 type Env struct {
 	Root     fs.FS                             // the filesystem root, "/" on a real system

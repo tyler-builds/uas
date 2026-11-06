@@ -6,17 +6,22 @@
 // from the repository database (extra.db) on a mirror: three files a run. Arch is a rolling release, so
 // listings carry the Distro "arch". Only x86_64 is indexed: Arch Linux ARM is a separate project.
 //
-// Arch's cached icons are JPEG XL, which uas doesn't decode, so Arch-only apps have no icon; apps also on
-// Flathub get Flathub's.
+// Arch's icons come only as files beside the catalog (icons-128x128.tar.gz), in JPEG XL, which clients
+// can't show. For apps with no other icon, the indexer decodes them (with a pure-Go decoder, about 96% of
+// them; the rest use JPEG XL features it lacks) and publishes them as PNG with the other icons.
 package arch
 
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,6 +32,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kpfaulkner/jxl-go/core"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer/appstream"
@@ -46,7 +53,11 @@ type Fetcher struct {
 	PackageJSON string // archlinux.org's JSON for archlinux-appstream-data
 	Sources     string // sources.archlinux.org/other/packages/archlinux-appstream-data
 	Mirror      string // a mirror's base, such as https://geo.mirror.pkgbuild.com
-	Log         *slog.Logger
+	// IconDir is where decoded icons are saved, named by their SHA-256, and IconBase the address they are
+	// published under (IconBase/icons/<file>). Without both, Arch listings have no icons.
+	IconDir  string
+	IconBase string
+	Log      *slog.Logger
 }
 
 // Source implements fetch.Fetcher.
@@ -94,6 +105,7 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	}
 	var listings []catalog.Listing
 	seen := map[string]bool{}
+	cached := map[int]string{} // listing index to the file name of its 128px icon
 	for _, repo := range repos {
 		path, err := fetch.Get(ctx, f.Client, fmt.Sprintf("%s/%s/%s/Components-x86_64.xml.gz", sources, ver, repo),
 			cache)
@@ -107,6 +119,9 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 		err = appstream.Parse(rc, func(c *appstream.Component) error {
 			if l, ok := distro.Listing(c, catalog.SourceArch, Distro, pkgs); ok && !seen[l.Ref] {
 				seen[l.Ref] = true
+				if ic, ok := c.BestCachedIcon(); ok && l.IconURL == "" && ic.Width == 128 && iconName.MatchString(ic.Value) {
+					cached[len(listings)] = ic.Value
+				}
 				listings = append(listings, l)
 			}
 			return nil
@@ -114,6 +129,12 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 		rc.Close()
 		if err != nil {
 			return nil, err
+		}
+	}
+	if f.IconDir != "" && f.IconBase != "" && len(cached) > 0 {
+		u := fmt.Sprintf("%s/%s/extra/icons-128x128.tar.gz", sources, ver)
+		if err := f.addIcons(ctx, u, cache, listings, cached); err != nil && f.Log != nil {
+			f.Log.Warn("arch icons skipped", "err", err)
 		}
 	}
 	if f.Log != nil {
@@ -205,4 +226,116 @@ func parseDesc(r io.Reader) (distro.Package, error) {
 		}
 	}
 	return p, sc.Err()
+}
+
+// iconName matches the icon files Arch's catalog names: "<package>_<app id>.jxl".
+var iconName = regexp.MustCompile(`^[A-Za-z0-9._+-]+\.jxl$`)
+
+// addIcons decodes the JPEG XL icons that listings name from Arch's icon archive, saves them as PNG in
+// IconDir and points the listings at their published address.
+func (f *Fetcher) addIcons(ctx context.Context, u, cache string, listings []catalog.Listing, cached map[int]string) error {
+	path, err := fetch.Get(ctx, f.Client, u, cache)
+	if err != nil {
+		return err
+	}
+	want := map[string][]int{}
+	for i, name := range cached {
+		want[name] = append(want[name], i)
+	}
+	rc, err := fetch.OpenDecompressed(path)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	if err := os.MkdirAll(f.IconDir, 0o755); err != nil {
+		return err
+	}
+	base := strings.TrimSuffix(f.IconBase, "/") + "/icons/"
+	tr := tar.NewReader(rc)
+	added, failed := 0, 0
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		idx := want[filepath.Base(h.Name)]
+		if h.Typeflag != tar.TypeReg || len(idx) == 0 {
+			continue
+		}
+		b, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+		if err != nil {
+			return err
+		}
+		name, err := f.decoded(b, cache)
+		if err != nil {
+			failed++
+			continue
+		}
+		for _, i := range idx {
+			listings[i].IconURL = base + name
+		}
+		added++
+	}
+	if f.Log != nil {
+		f.Log.Info("arch icons decoded", "icons", added, "undecodable", failed)
+	}
+	return nil
+}
+
+// decoded returns the published file name of a JPEG XL icon as PNG, decoding it only the first time: the
+// name is remembered by the JPEG XL file's hash (an empty file marks one that can't be decoded).
+func (f *Fetcher) decoded(jxl []byte, cache string) (string, error) {
+	sum := sha256.Sum256(jxl)
+	memo := filepath.Join(cache, "icons", hex.EncodeToString(sum[:]))
+	if b, err := os.ReadFile(memo); err == nil {
+		name := string(b)
+		if name == "" {
+			return "", errors.New("undecodable")
+		}
+		if _, err := os.Stat(filepath.Join(f.IconDir, name)); err == nil {
+			now := time.Now()
+			os.Chtimes(memo, now, now) // in use: keep both from cache pruning
+			os.Chtimes(filepath.Join(f.IconDir, name), now, now)
+			return name, nil
+		}
+	}
+	os.MkdirAll(filepath.Dir(memo), 0o755)
+	png, err := jxlToPNG(jxl)
+	if err != nil {
+		os.WriteFile(memo, nil, 0o644)
+		return "", err
+	}
+	psum := sha256.Sum256(png)
+	name := hex.EncodeToString(psum[:]) + ".png"
+	if err := os.WriteFile(filepath.Join(f.IconDir, name), png, 0o644); err != nil {
+		return "", err
+	}
+	os.WriteFile(memo, []byte(name), 0o644)
+	return name, nil
+}
+
+// jxlToPNG decodes a JPEG XL picture and encodes it as PNG. The decoder can panic on input it doesn't
+// support, which costs only that icon.
+func jxlToPNG(b []byte) (out []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("jxl: %v", r)
+		}
+	}()
+	img, err := core.NewJXLDecoder(bytes.NewReader(b), nil).Decode()
+	if err != nil {
+		return nil, err
+	}
+	im, err := img.ToImage()
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, im); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

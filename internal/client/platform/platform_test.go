@@ -92,5 +92,17 @@ func TestDistro(t *testing.T) {
 		if got := info.Distro(); got != c.want {
 			t.Errorf("%q: Distro() = %q, want %q", c.osRelease, got, c.want)
 		}
+		wantEdition := c.want
+		switch {
+		case c.atomic:
+			wantEdition = "fedora-atomic"
+		case c.want == "":
+			wantEdition = "other"
+		case c.want == "fedora-45":
+			wantEdition = "fedora"
+		}
+		if got := info.Edition(); got != wantEdition {
+			t.Errorf("%q: Edition() = %q, want %q", c.osRelease, got, wantEdition)
+		}
 	}
 }

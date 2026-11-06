@@ -18,7 +18,9 @@ COPR packages, searched and installed from one place.
 
 ## Features
 
-- **One catalog.** About 7,700 apps, merged so each app appears once with every source it's on.
+- **One catalog for your system.** 6,000 to 8,000 apps, depending on the system, merged so each app appears
+  once with every source it's on. You download only what your system can install: Flathub, Homebrew and
+  release downloads everywhere, plus your distribution's packages and, where snapd runs, snaps.
 - **A recommended source.** uas picks the best fit for your system and tells you why, with the other sources a
   click away.
 - **Trust scores.** GitHub, GitLab and Codeberg releases and COPR projects are scored 0–100 from public signals, with the breakdown
@@ -33,6 +35,7 @@ COPR packages, searched and installed from one place.
   whatever source fits it, with your Flatpak permission changes.
 - **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
 - **A signed catalog,** rebuilt every 6 hours and verified before use.
+- **Updates itself** from signed releases.
 - **Native tools underneath.** uas installs through flatpak, brew and rpm-ostree, so nothing is hidden from them.
 
 ## Screenshots
@@ -87,7 +90,8 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 - On package-based systems, the distribution's own packages install with its package manager, after the
   password prompt. Arch packages update with the whole system (`sudo pacman -Syu`), not one at a time. COPR
   isn't offered with dnf yet.
-- Arch-only apps have no icon: Arch ships its app icons as JPEG XL, which uas doesn't read.
+- About one in six Arch apps has no icon: Arch ships icons only as JPEG XL, which the indexer converts, and
+  some use JPEG XL features its decoder doesn't support yet.
 - AppImage launchers and dock matching have only been tested on GNOME and KDE; other desktops should work
   but are untested.
 - Missing `flatpak` or `brew`? Install it and those sources turn on the next time uas starts.
@@ -137,8 +141,9 @@ uas install org.mozilla.firefox
 ## FAQ
 
 **Why not just use GNOME Software or KDE Discover?**<br>
-They cover Flatpak and your distro's packages. uas also covers Homebrew, GitHub releases, COPR and AppImages,
-compares the sources an app is on, and scores the ones no distribution reviews.
+They cover Flatpak and your distro's packages (and snaps, on Ubuntu). uas covers those too, plus Homebrew,
+GitHub, GitLab and Codeberg releases, COPR and AppImages, compares the sources an app is on, and scores the ones
+no distribution reviews.
 
 **Why not just use Flathub?**<br>
 Use Flathub when it has the app; uas recommends it first for that reason. But plenty of tools aren't there: CLI
@@ -152,8 +157,8 @@ app menu and keeps it updated alongside everything else.
 Distrobox is great for a full distro's packages in a container. uas is for installing apps on the host from the
 sources built for it. They work fine together.
 
-**Does uas replace flatpak, brew or rpm-ostree?**<br>
-No. It runs them for you. Anything uas installs shows up in those tools, and anything they install shows up
+**Does uas replace flatpak, brew, snap or my package manager?**<br>
+No. It runs them for you: flatpak, brew, snap, and rpm-ostree, dnf, apt or pacman. Anything uas installs shows up in those tools, and anything they install shows up
 in uas.
 
 **Is installing from GitHub, GitLab, Codeberg or COPR safe?**<br>
@@ -168,12 +173,13 @@ No. It downloads the catalog and app icons, and talks to the sources you install
 ## How it works
 
 ```
- Flathub · Fedora · Homebrew · COPR · GitHub
+ Flathub · Homebrew · Snap · GitHub · GitLab · Codeberg
+ Fedora · Debian · Ubuntu · Arch · COPR
                     │
             uas-indexer (every 6h)        merge, rank, score, sign
                     │
                     ▼
-     Cloudflare Worker + R2 (catalog.db)
+  Cloudflare Worker + R2 (a catalog per kind of system)
                     │
           ┌─────────┴─────────┐
        uas-gui              uas (CLI)      verify, search, install
