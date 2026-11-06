@@ -20,13 +20,19 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 	src := a.searchSource.Get()
 	order := a.searchOrder.Get()
 
+	// A chip for each source this catalog has apps from (catalogs differ by system), and the selected one even
+	// if it has none; the sort moves to the next line when they don't fit beside it.
+	counts := a.sourceCounts(ctx)
 	filters := segmented(ctx, filterChip(ctx, "All", src == "", func() { a.searchSource.Set("") }))
 	for _, s := range catalog.SourcePrecedence {
+		if counts.Data[s] == 0 && src != s {
+			continue
+		}
 		s := s
 		filters = filters.Child(filterChip(ctx, s.Name(), src == s, func() { a.searchSource.Set(s) }))
 	}
-	controls := ui.Div().Row().Align(ui.Center).Gap(space4).
-		Child(ui.Div().Row().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(filters)).
+	controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).
+		Child(filters).
 		Child(orderPicker(a.searchOrder, true))
 	page := pageBody(listMaxWidth)
 
