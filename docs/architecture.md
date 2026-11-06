@@ -362,8 +362,9 @@ type Backend interface {
   `Updates` lists newer builds from `dnf list --upgrades`. A custom polkit policy isn't
   possible because `/usr` is read-only, so the password prompt uses pkexec's generic wording. Installs are
   recorded in the state file; removing the last package uas installed from a project also removes the repo
-  file, but only if uas created it. Packages installed from COPR are listed under COPR, not Fedora (with dnf, `pkgmgr.Backend.Exclude`). Not tested
-  live yet: enabling a repo needs a password.
+  file, but only if uas created it. Packages installed from COPR are listed under COPR, not Fedora (with dnf, `pkgmgr.Backend.Exclude`). The dnf path was tested
+  as root in a Fedora 45 container (November 2026); layering was not tested live, since enabling a repo needs
+  a password.
 
 ### Background update checks
 
