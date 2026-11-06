@@ -1,18 +1,23 @@
 // uas catalog Worker: serves the published catalog from R2 and accepts uploads from the indexer.
 //
-// Public:  GET/HEAD /manifest.json, /catalog-<sha256>.db.zst, /icons/<sha256>.png|svg
+// Public:  GET/HEAD /manifest.json, /catalog-<sha256>.db.zst, /icons/<sha256>.png|svg,
+//          /releases/latest.json, /releases/uas-<version>-linux-<arch>.tar.gz
 // Indexer: PUT /manifest.json, /catalog-<sha256>.db.zst or /icons/<sha256>.png|svg,
+//          and (the release workflow) /releases/latest.json and release archives,
 //          DELETE /catalog-<sha256>.db.zst, GET /_catalogs and /_icons (list stored files).
 //          These need "Authorization: Bearer <UPLOAD_TOKEN>".
 //
 // Icons are those of GitHub apps, read out of their AppImages by the indexer (Flathub hosts its own).
 //
-// Clients do not trust this Worker: they verify the manifest's ed25519 signature and the catalog's hash.
+// Clients do not trust this Worker: they verify the manifest's ed25519 signature and the catalog's hash, and
+// a release's signature and its archive's hash.
 // The upload token only stops strangers from filling the bucket.
 
 const MANIFEST = "manifest.json";
 const CATALOG = /^catalog-[0-9a-f]{64}\.db\.zst$/;
 const ICON = /^icons\/[0-9a-f]{64}\.(png|svg)$/;
+const RELEASE_INFO = "releases/latest.json";
+const RELEASE = /^releases\/uas-\d+\.\d+\.\d+-linux-(x86_64|aarch64)\.tar\.gz$/;
 const MAX_ICON = 1024 * 1024;
 const MAX_UPLOAD = 100 * 1024 * 1024;
 
@@ -25,7 +30,9 @@ export default {
       if (!(await authorized(request, env))) return text(401, "unauthorized");
       return key === "_catalogs" ? listCatalogs(env) : listIcons(env);
     }
-    if (key !== MANIFEST && !CATALOG.test(key) && !ICON.test(key)) return text(404, "not found");
+    if (key !== MANIFEST && key !== RELEASE_INFO && !CATALOG.test(key) && !ICON.test(key) && !RELEASE.test(key)) {
+      return text(404, "not found");
+    }
 
     switch (request.method) {
       case "GET":
@@ -53,7 +60,9 @@ async function serve(request, env, key) {
   obj.writeHttpMetadata(headers);
   headers.set("ETag", obj.httpEtag);
   // Catalog files and icons are named by their hash, so they never change.
-  headers.set("Cache-Control", key === MANIFEST ? "public, max-age=300" : "public, max-age=31536000, immutable");
+  // Release archives are named by version, and a version is never published twice.
+  const mutable = key === MANIFEST || key === RELEASE_INFO;
+  headers.set("Cache-Control", mutable ? "public, max-age=300" : "public, max-age=31536000, immutable");
   if (ICON.test(key)) {
     // Icons come from third-party AppImages. An SVG opened on its own must not run scripts.
     headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
@@ -70,8 +79,13 @@ async function put(request, env, key) {
   const length = Number(request.headers.get("Content-Length"));
   if (!Number.isInteger(length) || length <= 0) return text(411, "Content-Length required");
   if (length > (ICON.test(key) ? MAX_ICON : MAX_UPLOAD)) return text(413, "too large");
-  let contentType = key === MANIFEST ? "application/json" : "application/zstd";
+  let contentType = key === MANIFEST || key === RELEASE_INFO ? "application/json" : "application/zstd";
   if (ICON.test(key)) contentType = key.endsWith(".svg") ? "image/svg+xml" : "image/png";
+  if (RELEASE.test(key)) {
+    contentType = "application/gzip";
+    // A published version is never replaced: clients and caches treat its archive as immutable.
+    if ((await env.BUCKET.head(key)) !== null) return text(409, "this version is already published");
+  }
   await env.BUCKET.put(key, request.body, { httpMetadata: { contentType } });
   return text(201, "stored");
 }

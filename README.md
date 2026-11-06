@@ -85,7 +85,11 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
 ## Install
 
-You need Go 1.27 or newer. From a clone of this repo:
+From a release: download `uas-<version>-linux-x86_64.tar.gz`
+(`https://uas-catalog.tyler-builds.workers.dev/releases/uas-<version>-linux-x86_64.tar.gz`), unpack it and run
+`./install.sh`. uas then updates itself (Settings → About, or `uas self-update`).
+
+From source, with Go 1.27 or newer, in a clone of this repo:
 
 ```sh
 go install ./cmd/uas-gui ./cmd/uas      # to ~/go/bin; make sure it's on your PATH
@@ -190,6 +194,10 @@ Render every page of the desktop app in both themes (the README's screenshots co
 ```sh
 UAS_SHOTS=/tmp/uas-shots UAS_CATALOG=out/catalog.db go test ./internal/gui -run TestShots
 ```
+
+**Releasing.** Push a tag such as `v0.2.0`. The `Release` workflow tests, builds both archives and publishes
+them with a signed `releases/latest.json` (same secrets as the catalog). Run it by hand to build archives
+without publishing. The catalog Worker must be deployed with release support first.
 
 **Publishing.** The `Index` workflow builds and publishes the catalog every 6 hours, or by hand from the
 Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. GitLab is indexed only if the

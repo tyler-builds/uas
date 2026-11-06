@@ -2,7 +2,7 @@
 Type=Application
 Name=uas
 GenericName=App Store
-Comment=Find and install apps for Bazzite from Flathub, Fedora, Homebrew, COPR and GitHub
+Comment=Find and install apps from Flathub, Homebrew, GitHub, Fedora and more
 Exec=uas-gui
 Icon=io.github.tyler_builds.uas
 Terminal=false

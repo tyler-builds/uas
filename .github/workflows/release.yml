@@ -1,0 +1,66 @@
+name: Release
+
+# Builds uas for x86_64 and aarch64 and publishes the archives beside the catalog, with a signed
+# releases/latest.json that installed copies of uas update from. Push a tag such as v0.2.0 to release; run it
+# by hand to build the archives without publishing (or with publish checked, to publish the given version).
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, such as 0.2.0"
+        required: true
+      publish:
+        description: "Publish it (otherwise only build the archives)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # the GitHub release for a tag
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Version
+        id: version
+        run: |
+          v="${{ github.event_name == 'push' && github.ref_name || inputs.version }}"
+          v="${v#v}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version $v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Build
+        run: |
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) # reproducible archive times
+          for arch in x86_64 aarch64; do
+            packaging/linux/build-release.sh "${{ steps.version.outputs.version }}" "$arch" dist
+          done
+          sha256sum dist/*.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: uas-${{ steps.version.outputs.version }}
+          path: dist/*.tar.gz
+      - name: Publish
+        if: github.event_name == 'push' || inputs.publish
+        run: go run ./cmd/uas-release -version "${{ steps.version.outputs.version }}" -publish "$CATALOG_URL" dist/*.tar.gz
+        env:
+          CATALOG_URL: https://uas-catalog.tyler-builds.workers.dev
+          UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
+          UAS_UPLOAD_TOKEN: ${{ secrets.UAS_UPLOAD_TOKEN }}
+      - name: GitHub release
+        if: github.event_name == 'push'
+        run: gh release create "${{ github.ref_name }}" dist/*.tar.gz --title "uas ${{ steps.version.outputs.version }}" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

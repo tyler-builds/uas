@@ -386,8 +386,20 @@ found while building the UI are written up for the Jamb maintainers outside this
 
 ### Packaging the client
 
-Not a Flatpak: the sandbox would block calling `rpm-ostree`, `brew` and `pkexec`. Ship a single static binary.
-While the repo is private, build from source; a Homebrew tap and public releases come later.
+Not a Flatpak: the sandbox would block calling `rpm-ostree`, `brew` and `pkexec`. A release is an archive per
+architecture (`packaging/linux/build-release.sh`): static `uas` and `uas-gui` (no cgo; Jamb loads Wayland
+through purego), the launcher, the icon and `install.sh`, which installs to `~/.local/bin` and writes the
+launcher with the full path. The repo is private, so releases aren't served from GitHub: the Release
+workflow (on a `v*.*.*` tag, or by hand without publishing) builds both archives and `cmd/uas-release`
+uploads them through the catalog Worker, then a signed `releases/latest.json` (the catalog's key, under its
+own signing context, so a manifest signature can't pass as a release's). It refuses a version that isn't
+newer than the published one, and the Worker refuses to replace a published archive.
+
+**Self-update** (`internal/client/selfupdate`): `uas self-update`, Settings → About, and the background check
+(which lists "uas 0.3.0" with app updates) read `latest.json`, verify it, and compare versions. Installing
+downloads the archive, checks its size and SHA-256 against the signed values, writes both programs beside
+the running one, then renames them into place, only if that folder is the user's. Builds from source report
+version `dev` and never update themselves. A Homebrew tap can come later.
 
 ### Telemetry
 
