@@ -412,7 +412,8 @@ func getJSON(ctx context.Context, c *http.Client, p *pacer, u, token string, v a
 			case <-time.After(time.Duration(attempt+1) * 3 * time.Second):
 			}
 		default:
-			return nil, &statusError{URL: u, Status: resp.Status, Code: resp.StatusCode}
+			return nil, &statusError{URL: u, Status: resp.Status, Code: resp.StatusCode,
+				Body: strings.TrimSpace(string(raw[:min(len(raw), 300)]))}
 		}
 	}
 	return nil, lastErr
@@ -422,6 +423,13 @@ func getJSON(ctx context.Context, c *http.Client, p *pacer, u, token string, v a
 type statusError struct {
 	URL, Status string
 	Code        int
+	Body        string // the start of the response, which says why (GitLab: "insufficient_scope")
 }
 
-func (e *statusError) Error() string { return "GET " + e.URL + ": " + e.Status }
+func (e *statusError) Error() string {
+	msg := "GET " + e.URL + ": " + e.Status
+	if e.Body != "" {
+		msg += ": " + e.Body
+	}
+	return msg
+}
