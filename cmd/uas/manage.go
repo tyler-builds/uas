@@ -287,6 +287,9 @@ func runUpdates(ctx context.Context, w io.Writer, args []string) error {
 	n := 0
 	for _, a := range apps {
 		if v, ok := ups[a.Key()]; ok {
+			if v != "" && v == a.Version {
+				v += " (new build)"
+			}
 			if n == 0 {
 				fmt.Fprintln(tw, "NAME\tID\tINSTALLED\tAVAILABLE\tSOURCE")
 			}

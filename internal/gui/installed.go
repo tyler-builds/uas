@@ -264,11 +264,8 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 
 		actions := ui.Div().Row().Align(ui.Center).Gap(space2).Shrink(0)
 		if version, ok := ups[in.Key()]; ok {
-			label := "Update"
-			if version != "" {
-				label = "Update to " + version
-			}
-			actions = actions.Child(ui.Button(label).Icon(icons.Download).Secondary().Small().Loading(busy).
+			label, tip := updateLabel(in.Version, version)
+			actions = actions.Child(ui.Button(label).Icon(icons.Download).Secondary().Small().Loading(busy).Tooltip(tip).
 				Styles(ui.ButtonStyle{Icon: ui.Style{TextColor: t.Link}}).OnClick(func() {
 				a.startJob(ctx, appID, "Updating "+name, false, name+" is up to date",
 					func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })

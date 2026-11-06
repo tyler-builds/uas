@@ -123,10 +123,25 @@ func (a *App) whatsNewDialog(ctx *ui.Context) ui.Element {
 		done := ui.Button("Close").Primary().OnClick(closeDialog)
 		return m.Footer(done).Default(done)
 	}
-	label := "Update"
-	if w.version != "" && len(w.version) <= 12 {
-		label = "Update to " + w.version
-	}
+	label, _ := updateLabel(w.installed, w.version)
 	update := ui.Button(label).Icon(icons.Download).Primary().OnClick(func() { closeDialog(); w.update() })
 	return m.Footer(ui.Button("Not now").Secondary().OnClick(closeDialog), update).Default(update)
+}
+
+// rebuildTip explains an update to the version already installed.
+const rebuildTip = "A new build of the version you have, with no new features: usually rebuilt on updated " +
+	"libraries or runtime, often for security fixes."
+
+// updateLabel is the label and tooltip of an update's button. An update to the installed version is a rebuild,
+// which says so rather than offering the same version again.
+func updateLabel(installed, available string) (label, tip string) {
+	switch {
+	case available == "":
+		return "Update", "A newer version is available"
+	case available == installed:
+		return "Update (new build)", rebuildTip
+	case len(available) > 12:
+		return "Update", "Update to " + available
+	}
+	return "Update to " + available, "Update to " + available
 }

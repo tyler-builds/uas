@@ -25,3 +25,16 @@ func TestNewerChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateLabel(t *testing.T) {
+	for _, tc := range []struct{ installed, available, want string }{
+		{"1.0", "1.1", "Update to 1.1"},
+		{"1.0", "1.0", "Update (new build)"},
+		{"1.0", "", "Update"},
+		{"1.0", "2026.11.06-nightly", "Update"},
+	} {
+		if got, _ := updateLabel(tc.installed, tc.available); got != tc.want {
+			t.Errorf("updateLabel(%q, %q) = %q, want %q", tc.installed, tc.available, got, tc.want)
+		}
+	}
+}
