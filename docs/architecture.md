@@ -333,6 +333,17 @@ because notify-send is broken on some systems (Bazzite 45's fails with a symbol 
 "Show updates" within an hour opens the app on its Updates page (`uas-gui --page updates`), started through
 `systemd-run --user` so it outlives the check. Nothing is installed without the user.
 
+### ujust commands
+
+`internal/client/ujust`. On Universal Blue images (Bazzite, Bluefin, Aurora), `just --justfile
+/usr/share/ublue-os/justfile --dump --dump-format json` lists the recipes without running any: name,
+description, group and first parameter. Options are read from descriptions that list them
+("Options: status | install | uninstall"). The desktop app shows them on a "<system> tools" page, by group,
+filterable from the top bar. A command runs only in a terminal window (`xdg-terminal-exec`, else Ptyxis,
+Console, Konsole and so on), since many ask questions or for a password, and the window stays open until
+Enter so the output can be read. Everything but a `status` option asks first. Recipe names and options are
+checked against plain patterns before they reach a command line.
+
 ### Back up and restore
 
 `session/export.go`. An export is JSON: each installed app's source, ref, app ID, package and name, the

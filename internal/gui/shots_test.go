@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/settings"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
+	"github.com/tyler-builds/uas/internal/client/ujust"
 )
 
 // TestShots renders full pages to PNGs for design review. It needs UAS_SHOTS (an output directory) and a real
@@ -62,6 +63,8 @@ func TestShots(t *testing.T) {
 		{"restore", func(a *App) { a.goTo(view{page: pageInstalled}); a.restore.Set(shotRestorePlan()) }, 700, "", 0},
 		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, "", 0},
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
+		// The system's own ujust commands, when this machine has them.
+		{"tools", func(a *App) { a.goTo(view{page: pageTools}) }, 1100, "", 0},
 	}
 	for _, theme := range []struct {
 		name string
@@ -69,7 +72,7 @@ func TestShots(t *testing.T) {
 	}{{"dark", dark}, {"light", light}} {
 		for _, sh := range shots {
 			s := &session.Session{Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path,
-				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64"},
+				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64"}, Tools: ujust.Detect(),
 				Backends: map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: fp,
 					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh}}
 			a := New(s)

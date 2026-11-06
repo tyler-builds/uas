@@ -30,6 +30,7 @@ const (
 	pageInstalled = "installed"
 	pageUpdates   = "updates"
 	pageSettings  = "settings"
+	pageTools     = "tools"
 )
 
 // view is one place in the app.
@@ -39,7 +40,9 @@ type view struct {
 }
 
 // isList reports whether the view is Installed or Updates, whose lists the top bar filters.
-func (v view) isList() bool { return v.page == pageInstalled || v.page == pageUpdates }
+func (v view) isList() bool {
+	return v.page == pageInstalled || v.page == pageUpdates || v.page == pageTools
+}
 
 // navKey is the sidebar key of a view, such as "category:Game".
 func (v view) navKey() string {
@@ -259,6 +262,8 @@ func (a *App) page(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		return a.updatesPage(ctx)
 	case pageSettings:
 		return a.settingsPage(ctx, info)
+	case pageTools:
+		return a.toolsPage(ctx)
 	}
 	return a.homePage(ctx, info)
 }
@@ -315,6 +320,9 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 		ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Download, Badge: len(installed.Data)},
 		ui.SidebarItem{Key: pageUpdates, Label: "Updates", Icon: icons.RefreshCw, Badge: len(a.updates(ctx).Data)},
 	)
+	if a.s.Tools != nil {
+		items = append(items, ui.SidebarItem{Key: pageTools, Label: a.toolsTitle(), Icon: icons.SquareTerminal})
+	}
 	// The selected item's fill marks it; no bar beside it.
 	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).NoIndicator().
 		OnChange(func(key string) { a.goTo(navView(key)) }).
@@ -355,8 +363,11 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 	if v := a.current(); v.isList() {
 		// Installed and Updates filter their own list instead of searching the catalog.
 		placeholder := "Filter installed apps…"
-		if v.page == pageUpdates {
+		switch v.page {
+		case pageUpdates:
 			placeholder = "Filter updates…"
+		case pageTools:
+			placeholder = "Filter commands…"
 		}
 		search = ui.TextInput(a.listFilter).Label("Filter apps").Placeholder(placeholder).Icon(icons.ListFilter).
 			Small().Clearable().Width(ui.Full).Key("list-filter")
@@ -401,6 +412,8 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 			return "Updates"
 		case pageSettings:
 			return "Settings"
+		case pageTools:
+			return a.toolsTitle()
 		}
 		return ""
 	}
@@ -453,6 +466,8 @@ func crumbIcon(v view) *icons.Icon {
 		return icons.RefreshCw
 	case pageSettings:
 		return icons.Settings
+	case pageTools:
+		return icons.SquareTerminal
 	}
 	return icons.LayoutGrid
 }

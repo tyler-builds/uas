@@ -24,6 +24,8 @@ Flathub, Homebrew, GitHub, GitLab and Codeberg releases, Fedora and COPR, search
   shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
 - **One list for everything installed,** whatever its source, with updates and Update all.
 - **Flatpak permissions.** Turn an app's network, file, device or sound access on or off, as Flatseal does.
+- **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
+  Waydroid, audio tweaks…) are listed by group and run in a terminal window.
 - **Update notifications.** Optionally, uas checks once a day and tells you when updates are ready. It never
   installs anything on its own.
 - **Back up and restore.** Export the list of installed apps and install them on another computer, from

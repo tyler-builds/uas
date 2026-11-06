@@ -27,6 +27,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/settings"
 	"github.com/tyler-builds/uas/internal/client/state"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
+	"github.com/tyler-builds/uas/internal/client/ujust"
 )
 
 // RepoDir is where enabled package repos are configured.
@@ -40,6 +41,8 @@ type Session struct {
 	Backends     map[catalog.SourceID]backend.Backend
 	Telemetry    telemetry.Sink
 	CatalogPath  string
+	// Tools are the system's ujust recipes, on Universal Blue images; nil elsewhere.
+	Tools *ujust.Tools
 }
 
 // Load reads settings and detects the system. scope, if set, overrides the Flatpak scope setting.
@@ -65,6 +68,7 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		Backends:     map[catalog.SourceID]backend.Backend{},
 		Telemetry:    telemetry.ForSettings(st.Telemetry),
 		CatalogPath:  catalogPath,
+		Tools:        ujust.Detect(),
 	}
 	p := s.Platform
 	gh, ghErr := s.releaseBackend(catalog.SourceGitHub)
