@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	"github.com/tyler-builds/uas/internal/client/state"
 )
@@ -66,7 +67,7 @@ func TestInstallAndRemove(t *testing.T) {
 	repoDir := filepath.Join(dir, "yum.repos.d")
 	os.Mkdir(repoDir, 0o755)
 	ostree := rpmostree.New(context.Background(), sys, "rpm-ostree", "rpm", 44)
-	b := &Backend{Ostree: ostree, Runner: sys, Pkexec: "pkexec", RepoDir: repoDir,
+	b := &Backend{Ostree: ostree, Runner: sys, Root: []string{"pkexec"}, RepoDir: repoDir,
 		State: state.Store{Path: filepath.Join(dir, "state.json")}}
 	ctx := context.Background()
 
@@ -137,7 +138,7 @@ func TestExistingRepoIsKept(t *testing.T) {
 	name, _ := RepoFileName("solo/tools")
 	os.WriteFile(filepath.Join(dir, name), []byte("[user's own]\n"), 0o644)
 	b := &Backend{Ostree: rpmostree.New(context.Background(), sys, "rpm-ostree", "rpm", 44), Runner: sys,
-		Pkexec: "pkexec", RepoDir: dir, State: state.Store{Path: filepath.Join(t.TempDir(), "state.json")}}
+		Root: []string{"pkexec"}, RepoDir: dir, State: state.Store{Path: filepath.Join(t.TempDir(), "state.json")}}
 	ctx := context.Background()
 	if err := b.Install(ctx, listing("solo/tools", "tool"), nil); err != nil {
 		t.Fatal(err)
@@ -157,10 +158,101 @@ func TestExistingRepoIsKept(t *testing.T) {
 }
 
 func TestDisableRepoRefusesOtherFiles(t *testing.T) {
-	b := &Backend{RepoDir: "/etc/yum.repos.d", Runner: &fakeSystem{t: t}, Pkexec: "pkexec"}
+	b := &Backend{RepoDir: "/etc/yum.repos.d", Runner: &fakeSystem{t: t}, Root: []string{"pkexec"}}
 	for _, p := range []string{"/etc/yum.repos.d/fedora.repo", "/etc/passwd", "/etc/yum.repos.d/../shadow"} {
 		if err := b.disableRepo(context.Background(), p); err == nil {
 			t.Errorf("disableRepo(%q) succeeded", p)
 		}
+	}
+}
+
+// fakeDNF plays dnf, rpm and pkexec on package-based Fedora.
+type fakeDNF struct {
+	t         *testing.T
+	installed map[string]string // package: version
+	upgrades  string            // what "dnf list --upgrades" prints
+	calls     []string
+}
+
+func (f *fakeDNF) Run(_ context.Context, name string, args []string, _ func(string)) (string, error) {
+	call := name + " " + strings.Join(args, " ")
+	f.calls = append(f.calls, call)
+	switch {
+	case call == "rpm -qa --qf %{NAME}\t%{VERSION}-%{RELEASE}\n":
+		var b strings.Builder
+		b.WriteString("bash\t5.3-1.fc45\n")
+		for p, v := range f.installed {
+			b.WriteString(p + "\t" + v + "\n")
+		}
+		return b.String(), nil
+	case call == "dnf list --upgrades --quiet":
+		return f.upgrades, nil
+	case name == "pkexec" && args[0] == "dnf" && args[1] == "install":
+		f.installed[args[len(args)-1]] = "1.0-1.fc45"
+		return "", nil
+	case name == "pkexec" && args[0] == "dnf" && args[1] == "upgrade":
+		f.installed[args[len(args)-1]] = "1.1-1.fc45"
+		return "", nil
+	case name == "pkexec" && args[0] == "dnf" && args[1] == "remove":
+		delete(f.installed, args[len(args)-1])
+		return "", nil
+	case name == "pkexec" && args[0] == "install":
+		b, err := os.ReadFile(args[len(args)-2])
+		if err != nil {
+			return "", err
+		}
+		return "", os.WriteFile(args[len(args)-1], b, 0o644)
+	case name == "pkexec" && args[0] == "rm":
+		return "", os.Remove(args[len(args)-1])
+	}
+	f.t.Errorf("unexpected command %q", call)
+	return "", nil
+}
+
+// On package-based Fedora, COPR packages install, update and remove with dnf, and need no restart.
+func TestDNF(t *testing.T) {
+	sys := &fakeDNF{t: t, installed: map[string]string{},
+		upgrades: "Available upgrades\nnotes.x86_64  1.1-1.fc45  copr:copr.fedorainfracloud.org:group_team:notes\n" +
+			"bash.x86_64  5.3-2.fc45  updates\n"}
+	dir := t.TempDir()
+	repoDir := filepath.Join(dir, "yum.repos.d")
+	os.Mkdir(repoDir, 0o755)
+	b := &Backend{DNFRelease: 45, Runner: sys, Root: []string{"pkexec"}, RepoDir: repoDir,
+		State: state.Store{Path: filepath.Join(dir, "state.json")}}
+	ctx := context.Background()
+
+	l44 := listing("@team/notes", "notes")
+	l44.Distro = "fedora-44"
+	if !b.Supports(listing("@team/notes", "notes")) || b.Supports(l44) || b.NeedsRestart() {
+		t.Fatal("Supports or NeedsRestart")
+	}
+	if err := b.Install(ctx, listing("@team/notes", "notes"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(sys.calls, "pkexec dnf install -y -- notes") {
+		t.Errorf("calls = %q", sys.calls)
+	}
+	repoFile := filepath.Join(repoDir, "_copr:copr.fedorainfracloud.org:group_team:notes.repo")
+	if _, err := os.Stat(repoFile); err != nil {
+		t.Fatal("repo not enabled")
+	}
+
+	apps, err := b.Installed(ctx)
+	if err != nil || len(apps) != 1 || apps[0].Version != "1.0-1.fc45" || apps[0].Pending {
+		t.Fatalf("installed = %+v, %v", apps, err)
+	}
+	ups, err := b.Updates(ctx)
+	if err != nil || len(ups) != 1 || ups[0].Ref != "notes" || ups[0].Version != "1.1-1.fc45" ||
+		apps[0].Key() != backend.UpdateKey(catalog.SourceCOPR, ups[0].Scope, ups[0].Ref) {
+		t.Fatalf("updates = %+v, %v", ups, err)
+	}
+	if err := b.Update(ctx, apps[0], nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Remove(ctx, apps[0], nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(repoFile); !errors.Is(err, os.ErrNotExist) || len(sys.installed) != 0 {
+		t.Error("package or repo left behind")
 	}
 }

@@ -170,9 +170,13 @@ func Traits(l catalog.Listing, sys System) []string {
 		if l.Trust != nil {
 			t = append(t, fmt.Sprintf("Trust score %d/100, from the project's build history", l.Trust.Score))
 		}
-		t = append(t, "Layered into the system image: takes effect after a restart",
-			"Layered packages can hold up system updates if they conflict with a new image",
-			"Not sandboxed")
+		if layered {
+			t = append(t, "Layered into the system image: takes effect after a restart",
+				"Layered packages can hold up system updates if they conflict with a new image")
+		} else {
+			t = append(t, "Installed system-wide with dnf; asks for your password")
+		}
+		t = append(t, "Not sandboxed")
 	}
 	return t
 }

@@ -148,19 +148,12 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		s.Backends[catalog.SourceFedora] = ostree
 		// Ask rpm-ostree for the target release now, off the startup path, so it's known by first use.
 		go ostree.Release()
-		statePath, err := state.DefaultPath()
-		if err == nil && p.Pkexec != "" {
-			store := state.Store{Path: statePath}
-			s.Backends[catalog.SourceCOPR] = &copr.Backend{Ostree: ostree, Runner: run.Exec{},
-				Pkexec: p.Pkexec, RepoDir: RepoDir, State: store}
-			// Packages layered from COPR show up under COPR, not Fedora.
-			ostree.Exclude = func(pkg string) bool {
-				st, err := store.Load()
-				if err != nil {
-					return false
-				}
-				_, ok := st.FindCOPR(pkg)
-				return ok
+		if root, ok := rootCommand(p); ok {
+			if store, err := coprStore(); err == nil {
+				s.Backends[catalog.SourceCOPR] = &copr.Backend{Ostree: ostree, Runner: run.Exec{}, Root: root,
+					RepoDir: RepoDir, State: store}
+				// Packages layered from COPR show up under COPR, not Fedora.
+				ostree.Exclude = coprPackages(store)
 			}
 		}
 	}
@@ -482,6 +475,8 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 		if pm, ok := s.Backends[l.Source].(*pkgmgr.Backend); ok {
 			notes = append(notes, fmt.Sprintf("Installs with %s for all users. Asks for your password.", pm.Kind))
 		}
+	case l.Source == catalog.SourceCOPR:
+		notes = append(notes, "Installs with dnf for all users. Asks for your password.")
 	}
 	return notes
 }
@@ -646,15 +641,52 @@ func (s *Session) addPackageManager() {
 	default:
 		return
 	}
-	var root []string
-	if os.Geteuid() != 0 {
-		if p.Pkexec == "" {
-			return // nothing to ask for the password with
-		}
-		root = []string{p.Pkexec}
+	root, ok := rootCommand(p)
+	if !ok {
+		return // nothing to ask for the password with
 	}
-	s.Backends[src] = &pkgmgr.Backend{Kind: kind, From: src, Distro: distro, Runner: run.Exec{}, Root: root,
+	pm := &pkgmgr.Backend{Kind: kind, From: src, Distro: distro, Runner: run.Exec{}, Root: root,
 		Known: s.knownPackages(src, distro)}
+	s.Backends[src] = pm
+	// COPR projects build for Fedora, and install with dnf here as they layer on image-based Fedora.
+	if kind == pkgmgr.DNF {
+		if store, err := coprStore(); err == nil {
+			s.Backends[catalog.SourceCOPR] = &copr.Backend{DNFRelease: p.FedoraRelease(), Runner: run.Exec{},
+				Root: root, RepoDir: RepoDir, State: store}
+			// Packages installed from COPR show up under COPR, not Fedora.
+			pm.Exclude = coprPackages(store)
+		}
+	}
+}
+
+// rootCommand is how uas runs a command as root: through pkexec, which asks for the password, or directly
+// when uas runs as root already (as in a container). ok is false when neither works.
+func rootCommand(p platform.Info) (root []string, ok bool) {
+	if os.Geteuid() == 0 {
+		return nil, true
+	}
+	if p.Pkexec == "" {
+		return nil, false
+	}
+	return []string{p.Pkexec}, true
+}
+
+// coprStore is the state file that records COPR installs.
+func coprStore() (state.Store, error) {
+	path, err := state.DefaultPath()
+	return state.Store{Path: path}, err
+}
+
+// coprPackages reports whether uas installed a package from COPR, for the Fedora backends to leave it out.
+func coprPackages(store state.Store) func(pkg string) bool {
+	return func(pkg string) bool {
+		st, err := store.Load()
+		if err != nil {
+			return false
+		}
+		_, ok := st.FindCOPR(pkg)
+		return ok
+	}
 }
 
 // knownPackages returns the packages the catalog lists for a source and release, read once per catalog.

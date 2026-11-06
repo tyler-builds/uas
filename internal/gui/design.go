@@ -236,8 +236,8 @@ var sourceTips = map[catalog.SourceID]string{
 		"password; updates come with the system's",
 	catalog.SourceSnap: "From the Snap Store. Snaps mostly run in a sandbox and update themselves; anyone can " +
 		"publish one, so check for a verified publisher",
-	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it, " +
-		"and installing layers it into the system image",
+	catalog.SourceCOPR: "Built in a Fedora COPR project by the project's owner. Fedora doesn't review it; " +
+		"its page shows a trust score",
 	catalog.SourceAppImage: "An AppImage you added from a file. uas updates it from where the AppImage says, " +
 		"if it says, and checks each download's checksum",
 }

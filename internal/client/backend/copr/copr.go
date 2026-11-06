@@ -1,9 +1,10 @@
-// Package copr installs packages from COPR projects by enabling the project's repo and layering the package
-// with rpm-ostree.
+// Package copr installs packages from COPR projects by enabling the project's repo and installing the package:
+// layered with rpm-ostree on image-based Fedora, with dnf on package-based Fedora.
 //
 // Enabling a repo writes a file to /etc/yum.repos.d, which needs root: uas writes the file to a temporary
 // location and copies it into place with pkexec, so the user sees one password prompt per project. The file
-// matches what "dnf copr enable" writes, including the project's signing key.
+// matches what "dnf copr enable" writes, including the project's signing key, which dnf and rpm-ostree check
+// packages against.
 package copr
 
 import (
@@ -36,9 +37,14 @@ var (
 
 // Backend installs COPR packages.
 type Backend struct {
-	Ostree  *rpmostree.Backend
-	Runner  run.Runner // runs pkexec
-	Pkexec  string
+	// Ostree layers packages on image-based Fedora. When it is nil, packages are installed with dnf, for
+	// Fedora release DNFRelease.
+	Ostree     *rpmostree.Backend
+	DNFRelease int
+	Runner     run.Runner
+	// Root is the command that runs a command as root, such as ["/usr/bin/pkexec"]; empty when uas runs as
+	// root already.
+	Root    []string
 	RepoDir string // /etc/yum.repos.d
 	State   state.Store
 	Now     func() time.Time
@@ -47,14 +53,22 @@ type Backend struct {
 // Source implements backend.Backend.
 func (b *Backend) Source() catalog.SourceID { return catalog.SourceCOPR }
 
-// NeedsRestart implements backend.Restarter.
-func (b *Backend) NeedsRestart() bool { return true }
+// NeedsRestart implements backend.Restarter: layered packages take effect after a restart, dnf's at once.
+func (b *Backend) NeedsRestart() bool { return b.Ostree != nil }
 
-// Supports implements backend.Backend: the listing must be for the Fedora release new layers target.
+// release is the Fedora release packages are installed for: the one new layers target, or the running one.
+func (b *Backend) release() int {
+	if b.Ostree != nil {
+		return b.Ostree.Release()
+	}
+	return b.DNFRelease
+}
+
+// Supports implements backend.Backend: the listing must be for the Fedora release packages go onto.
 func (b *Backend) Supports(l catalog.Listing) bool {
 	_, _, err := splitProject(l.Project)
 	return l.Source == catalog.SourceCOPR && err == nil && packageName.MatchString(l.Package) &&
-		b.Ostree.Release() > 0 && l.Distro == catalog.FedoraDistro(b.Ostree.Release()) && b.Pkexec != ""
+		b.release() > 0 && l.Distro == catalog.FedoraDistro(b.release())
 }
 
 func splitProject(full string) (owner, name string, err error) {
@@ -101,7 +115,7 @@ enabled_metadata=1
 `, host, id, name, name, owner, base, base), nil
 }
 
-// Installed implements backend.Backend. It lists COPR packages uas installed that are still layered.
+// Installed implements backend.Backend. It lists COPR packages uas installed that are still installed.
 func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error) {
 	st, err := b.State.Load()
 	if err != nil {
@@ -109,6 +123,9 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 	}
 	if len(st.COPR) == 0 {
 		return nil, nil
+	}
+	if b.Ostree == nil {
+		return b.installedRPMs(ctx, st)
 	}
 	saved := b.Ostree.Exclude
 	b.Ostree.Exclude = nil
@@ -136,8 +153,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		return backend.ErrWrongSource
 	}
 	if !b.Supports(l) {
-		return fmt.Errorf("copr: %s is for %s, but new packages go onto Fedora %d", l.Package, l.Distro,
-			b.Ostree.Release())
+		return fmt.Errorf("copr: %s is for %s, but packages go onto Fedora %d", l.Package, l.Distro, b.release())
 	}
 	name, err := RepoFileName(l.Project)
 	if err != nil {
@@ -155,7 +171,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 		return err
 	}
 
-	if err := b.Ostree.Layer(ctx, l.Package, progress); err != nil {
+	if err := b.installPackage(ctx, l.Package, progress); err != nil {
 		if added {
 			// Leave no repo behind that nothing uses.
 			_ = b.disableRepo(ctx, repoFile)
@@ -178,9 +194,16 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	return b.State.Save(st)
 }
 
-// Update implements backend.Backend.
-func (b *Backend) Update(context.Context, backend.InstalledApp, func(backend.Progress)) error {
-	return rpmostree.ErrUpdatesWithSystem
+// Update implements backend.Backend. Layered packages update with the system image; dnf updates one package.
+func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress func(backend.Progress)) error {
+	if b.Ostree != nil {
+		return rpmostree.ErrUpdatesWithSystem
+	}
+	if a.Source != catalog.SourceCOPR || !packageName.MatchString(a.Package) {
+		return backend.ErrWrongSource
+	}
+	report(progress, "Updating "+a.Package)
+	return b.root(ctx, []string{"dnf", "upgrade", "-y", "--", a.Package}, progress)
 }
 
 // Remove implements backend.Backend. It removes the layered package and, if uas enabled the repo and no other
@@ -197,7 +220,13 @@ func (b *Backend) Remove(ctx context.Context, a backend.InstalledApp, progress f
 	if !ok {
 		return fmt.Errorf("copr: %s was not installed by uas", a.Package)
 	}
-	if err := b.Ostree.Unlayer(ctx, c.Package, progress); err != nil {
+	if b.Ostree != nil {
+		err = b.Ostree.Unlayer(ctx, c.Package, progress)
+	} else {
+		report(progress, "Removing "+c.Package)
+		err = b.root(ctx, []string{"dnf", "remove", "-y", "--", c.Package}, progress)
+	}
+	if err != nil {
 		return err
 	}
 	st.DeleteCOPR(c.Package)
@@ -233,9 +262,7 @@ func (b *Backend) enableRepo(ctx context.Context, project, dst string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	_, err = b.Runner.Run(ctx, b.Pkexec, []string{"install", "-m", "0644", "-o", "root", "-g", "root", "--",
-		tmp.Name(), dst}, nil)
-	return err
+	return b.root(ctx, []string{"install", "-m", "0644", "-o", "root", "-g", "root", "--", tmp.Name(), dst}, nil)
 }
 
 func (b *Backend) disableRepo(ctx context.Context, repoFile string) error {
@@ -243,7 +270,82 @@ func (b *Backend) disableRepo(ctx context.Context, repoFile string) error {
 	if filepath.Dir(repoFile) != filepath.Clean(b.RepoDir) || !strings.HasPrefix(filepath.Base(repoFile), "_copr:") {
 		return fmt.Errorf("copr: refusing to delete %s", repoFile)
 	}
-	_, err := b.Runner.Run(ctx, b.Pkexec, []string{"rm", "-f", "--", repoFile}, nil)
+	return b.root(ctx, []string{"rm", "-f", "--", repoFile}, nil)
+}
+
+// installPackage layers a package, or installs it with dnf. dnf's -y also accepts the project's signing key,
+// which the repo file names; packages it doesn't sign are refused (gpgcheck=1).
+func (b *Backend) installPackage(ctx context.Context, pkg string, progress func(backend.Progress)) error {
+	if b.Ostree != nil {
+		return b.Ostree.Layer(ctx, pkg, progress)
+	}
+	report(progress, "Installing "+pkg+" with dnf (asks for your password)")
+	return b.root(ctx, []string{"dnf", "install", "-y", "--", pkg}, progress)
+}
+
+// installedRPMs lists the COPR packages uas installed with dnf that rpm still has.
+func (b *Backend) installedRPMs(ctx context.Context, st state.State) ([]backend.InstalledApp, error) {
+	out, err := b.Runner.Run(ctx, "rpm", []string{"-qa", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\n"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	versions := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if name, ver, ok := strings.Cut(strings.TrimSpace(line), "\t"); ok {
+			versions[name] = ver
+		}
+	}
+	var apps []backend.InstalledApp
+	for _, c := range st.COPR {
+		if v, ok := versions[c.Package]; ok {
+			apps = append(apps, backend.InstalledApp{Source: catalog.SourceCOPR, Ref: c.Package, AppID: c.Package,
+				Name: c.Package, Package: c.Package, Version: v, Scope: "system", Origin: "copr:" + c.Project})
+		}
+	}
+	return apps, nil
+}
+
+// Updates implements backend.UpdateChecker on package-based Fedora: newer builds of the COPR packages uas
+// installed, from dnf's metadata. Layered packages update with the system image, so there are none to list.
+func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error) {
+	if b.Ostree != nil {
+		return nil, nil
+	}
+	st, err := b.State.Load()
+	if err != nil || len(st.COPR) == 0 {
+		return nil, err
+	}
+	mine := map[string]bool{}
+	for _, c := range st.COPR {
+		mine[c.Package] = true
+	}
+	out, err := b.Runner.Run(ctx, "dnf", []string{"list", "--upgrades", "--quiet"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var ups []backend.AvailableUpdate
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line) // "gitg.x86_64  44-2.fc45  copr:copr.fedorainfracloud.org:owner:project"
+		if len(f) < 2 {
+			continue
+		}
+		i := strings.LastIndex(f[0], ".")
+		if i <= 0 || !mine[f[0][:i]] {
+			continue
+		}
+		ups = append(ups, backend.AvailableUpdate{Ref: f[0][:i], Scope: "system", Version: f[1]})
+	}
+	return ups, nil
+}
+
+// root runs a command as root, reporting its output.
+func (b *Backend) root(ctx context.Context, args []string, progress func(backend.Progress)) error {
+	cmd := append(append([]string{}, b.Root...), args...)
+	_, err := b.Runner.Run(ctx, cmd[0], cmd[1:], func(line string) { report(progress, line) })
+	var re *run.Error
+	if errors.As(err, &re) && strings.Contains(re.Stderr, "Not authorized") {
+		return errors.New("the password prompt was dismissed")
+	}
 	return err
 }
 
@@ -255,7 +357,7 @@ func (b *Backend) now() time.Time {
 }
 
 func report(progress func(backend.Progress), msg string) {
-	if progress != nil {
+	if progress != nil && strings.TrimSpace(msg) != "" {
 		progress(backend.Progress{Message: msg})
 	}
 }

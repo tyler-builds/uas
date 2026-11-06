@@ -75,7 +75,7 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | Debian and Ubuntu packages | `apt-get`, `pkexec` | Debian 13; Ubuntu 22.04, 24.04 and 26.04, and systems built on them (Linux Mint, Pop!_OS…) |
 | Arch packages | `pacman`, `pkexec` | Arch and systems built on it (EndeavourOS, CachyOS…), x86_64 |
 | Snap Store | `snap` with snapd running | Any distro with snapd |
-| COPR | `rpm-ostree`, `pkexec` | Fedora Atomic |
+| COPR | `rpm-ostree`, or `dnf` and `pkexec` | Fedora Atomic (layered), or package-based Fedora |
 
 The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
@@ -92,7 +92,8 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 - On Fedora Atomic, Fedora and COPR packages are layered into the image and take effect after a restart.
 - On package-based systems, the distribution's own packages install with its package manager, after the
   password prompt. Arch packages update with the whole system (`sudo pacman -Syu`), not one at a time. COPR
-  isn't offered with dnf yet.
+  packages install with dnf on package-based Fedora. COPR builds only for Fedora (and RHEL-family systems,
+  which uas doesn't support), so it isn't offered elsewhere.
 - About one in six Arch apps has no icon: Arch ships icons only as JPEG XL, which the indexer converts, and
   some use JPEG XL features its decoder doesn't support yet.
 - AppImage launchers and dock matching have only been tested on GNOME and KDE; other desktops should work

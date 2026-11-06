@@ -26,7 +26,8 @@ func everywhere(s catalog.SourceID) bool {
 	return s == catalog.SourceFlathub || s == catalog.SourceHomebrew || s.Releases()
 }
 
-// Editions returns the editions for a run's listings: fedora-atomic (layering and COPR, no snapd), fedora (dnf),
+// Editions returns the editions for a run's listings: fedora-atomic (layering and COPR, no snapd), fedora (dnf
+// and COPR),
 // one per Debian and Ubuntu release found, arch, and other. All but fedora-atomic include snaps.
 func Editions(all []catalog.Listing) []Edition {
 	with := func(name string, also func(catalog.Listing) bool) Edition {
@@ -37,7 +38,9 @@ func Editions(all []catalog.Listing) []Edition {
 		with(manifest.EditionFedoraAtomic, func(l catalog.Listing) bool {
 			return l.Source == catalog.SourceFedora || l.Source == catalog.SourceCOPR
 		}),
-		with(manifest.EditionFedora, func(l catalog.Listing) bool { return l.Source == catalog.SourceFedora || snap(l) }),
+		with(manifest.EditionFedora, func(l catalog.Listing) bool {
+			return l.Source == catalog.SourceFedora || l.Source == catalog.SourceCOPR || snap(l)
+		}),
 		with(manifest.EditionArch, func(l catalog.Listing) bool { return l.Source == catalog.SourceArch || snap(l) }),
 		with(manifest.EditionOther, snap),
 	}

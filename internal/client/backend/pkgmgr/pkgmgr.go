@@ -39,6 +39,9 @@ type Backend struct {
 	Root []string
 	// Known returns the packages the catalog lists for Distro.
 	Known func(ctx context.Context) (map[string]bool, error)
+	// Exclude, if set, leaves packages out of Installed and Updates: those another backend manages, such as
+	// COPR packages on Fedora.
+	Exclude func(pkg string) bool
 }
 
 var packageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
@@ -91,7 +94,7 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 			}
 			pkg, ver = f[0], f[1]
 		}
-		if !known[pkg] {
+		if !known[pkg] || (b.Exclude != nil && b.Exclude(pkg)) {
 			continue
 		}
 		apps = append(apps, backend.InstalledApp{Source: b.From, Ref: b.Distro + "/" + pkg, AppID: pkg, Name: pkg,
@@ -201,7 +204,7 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 			}
 			pkg = f[0][:i]
 		}
-		if known[pkg] {
+		if known[pkg] && (b.Exclude == nil || !b.Exclude(pkg)) {
 			ups = append(ups, backend.AvailableUpdate{Ref: b.Distro + "/" + pkg, Scope: "system", Version: f[1]})
 		}
 	}

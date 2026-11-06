@@ -14,7 +14,7 @@ immutable system, and explains how far each source can be trusted.
 | Homebrew | `brew` | No | No |
 | GitHub releases | AppImage to home dir, `.flatpak` bundle, `.rpm` via rpm-ostree | Only for `.rpm` | Only for `.rpm` |
 | Fedora repos | `rpm-ostree install` (layering) | rpm-ostree's polkit prompt | Yes |
-| COPR | Write `.repo` file via `pkexec`, then layer | Yes | Yes |
+| COPR | Write `.repo` file via `pkexec`, then layer (or `dnf install`) | Yes | Layered only |
 
 Checked on the dev machine: Bazzite 44 (`ID=bazzite`, `ID_LIKE=fedora`), KDE Plasma on Wayland, Flathub as a
 system remote, Homebrew at `/home/linuxbrew/.linuxbrew`, libfuse2 present, Go 1.27.3, rpm-ostree layering
@@ -228,7 +228,7 @@ Icons are mirrored to R2. Screenshots link to their original URLs.
 client isn't. So the indexer fetches once and then merges and writes one catalog per kind of system
 (`indexer/editions.go`): the sources that work everywhere (Flathub, Homebrew, GitHub, Codeberg), plus
 `fedora-atomic` (Fedora and COPR, for layering; no snaps, since image-based Fedora has no snapd), `fedora`
-(Fedora for dnf, snaps), one per Debian and Ubuntu release (`debian-13`, `ubuntu-24.04`: that release only,
+(Fedora and COPR for dnf, snaps), one per Debian and Ubuntu release (`debian-13`, `ubuntu-24.04`: that release only,
 snaps), `arch` (Arch, snaps) and `other` (snaps). Splitting by source instead would leave clients to merge
 apps across sources themselves. The signed manifest names every edition's file (`editions`), and its single
 `catalog` is fedora-atomic's, for clients from before editions. A client asks for `platform.Info.Edition()`
@@ -356,10 +356,13 @@ type Backend interface {
   Bazzite's polkit rules let `wheel` users layer without a password.
 - **copr:** If the project's repo isn't enabled, writes the same `.repo` file `dnf copr enable` would (same
   name, `gpgcheck=1` with the project's key) to a temp file and copies it into `/etc/yum.repos.d` with
-  `pkexec install`, then layers the package through the rpmostree backend. A custom polkit policy isn't
+  `pkexec install`, then layers the package through the rpmostree backend, or on package-based Fedora
+  installs it with `pkexec dnf install -y` (`-y` also accepts the project's signing key the repo file names;
+  `gpgcheck=1` refuses packages it didn't sign). With dnf, updates are per package (`dnf upgrade`) and
+  `Updates` lists newer builds from `dnf list --upgrades`. A custom polkit policy isn't
   possible because `/usr` is read-only, so the password prompt uses pkexec's generic wording. Installs are
   recorded in the state file; removing the last package uas installed from a project also removes the repo
-  file, but only if uas created it. Packages layered from COPR are listed under COPR, not Fedora. Not tested
+  file, but only if uas created it. Packages installed from COPR are listed under COPR, not Fedora (with dnf, `pkgmgr.Backend.Exclude`). Not tested
   live yet: enabling a repo needs a password.
 
 ### Background update checks
