@@ -66,10 +66,14 @@ type glProject struct {
 }
 
 type glRelease struct {
-	TagName    string    `json:"tag_name"`
-	ReleasedAt time.Time `json:"released_at"`
-	Upcoming   bool      `json:"upcoming_release"`
-	Assets     struct {
+	TagName     string    `json:"tag_name"`
+	ReleasedAt  time.Time `json:"released_at"`
+	Upcoming    bool      `json:"upcoming_release"`
+	Description string    `json:"description"`
+	Links       struct {
+		Self string `json:"self"`
+	} `json:"_links"`
+	Assets struct {
 		Links []struct {
 			Name      string `json:"name"`
 			URL       string `json:"url"`
@@ -150,7 +154,7 @@ list:
 			Owner: p.Namespace.Name, Stars: p.Stars, Created: p.CreatedAt}
 		for _, rel := range rels {
 			out := Release{Tag: rel.TagName, Published: rel.ReleasedAt, Draft: rel.Upcoming,
-				Prerelease: prereleaseTag.MatchString(rel.TagName)}
+				Prerelease: prereleaseTag.MatchString(rel.TagName), Notes: rel.Description, URL: rel.Links.Self}
 			for _, l := range rel.Assets.Links {
 				u := l.DirectURL
 				if u == "" {

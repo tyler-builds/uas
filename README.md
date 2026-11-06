@@ -26,6 +26,9 @@ COPR packages, searched and installed from one place.
 - **Trust scores.** GitHub, GitLab and Codeberg releases and COPR projects are scored 0–100 from public signals, with the breakdown
   shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
 - **One list for everything installed,** whatever its source, with updates and Update all.
+- **Release notes.** An app's page shows what changed in its recent versions, and an update's What's new
+  shows what it brings since your version, where the source publishes notes (most Flathub apps, GitHub,
+  GitLab and Codeberg releases, and distribution packages' AppStream data).
 - **Flatpak permissions.** Turn an app's network, file, device or sound access on or off, as Flatseal does.
 - **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
   Waydroid, audio tweaks…) are listed by group and run in a terminal window.

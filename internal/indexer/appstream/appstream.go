@@ -53,6 +53,8 @@ type Release struct {
 	Version string
 	Type    string
 	Time    time.Time
+	Notes   string // what changed, as Markdown, if the release says
+	URL     string // its details page, if it has one
 }
 
 // Bundle says how the component is packaged, for example a Flatpak ref.
@@ -176,6 +178,9 @@ type xRelease struct {
 	Type      string `xml:"type,attr"`
 	Timestamp string `xml:"timestamp,attr"`
 	Date      string `xml:"date,attr"`
+	// Descriptions are what changed, and its translations.
+	Descriptions []xInner `xml:"description"`
+	URLs         []xURL   `xml:"url"`
 }
 
 type xValue struct {
@@ -271,8 +276,21 @@ func (x *xComponent) convert() (*Component, error) {
 		}
 	}
 	for _, r := range x.Releases {
-		c.Releases = append(c.Releases, Release{Version: strings.TrimSpace(r.Version), Type: r.Type,
-			Time: releaseTime(r)})
+		rel := Release{Version: strings.TrimSpace(r.Version), Type: r.Type, Time: releaseTime(r)}
+		for _, d := range r.Descriptions {
+			if d.Lang == "" {
+				// A release whose notes don't parse still counts; it just has no notes.
+				rel.Notes, _ = descriptionMarkdown(d.Inner)
+				break
+			}
+		}
+		for _, u := range r.URLs {
+			if u.Type == "" || u.Type == "details" {
+				rel.URL = strings.TrimSpace(u.Value)
+				break
+			}
+		}
+		c.Releases = append(c.Releases, rel)
 	}
 	sort.SliceStable(c.Releases, func(i, j int) bool { return c.Releases[i].Time.After(c.Releases[j].Time) })
 	// Older catalogs use <metadata>; newer ones use <custom>. Custom wins when both have a key.

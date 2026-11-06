@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -65,6 +66,8 @@ func TestShots(t *testing.T) {
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
 		// The system's own ujust commands, when this machine has them.
 		{"tools", func(a *App) { a.goTo(view{page: pageTools}) }, 1100, "", 0},
+		// The notes of an update, opened from the app page.
+		{"whats-new", func(a *App) { a.whatsNew.Set(shotWhatsNew(a, "org.gimp.GIMP")) }, 900, "org.gimp.GIMP", 0},
 	}
 	for _, theme := range []struct {
 		name string
@@ -138,4 +141,22 @@ func shotRestorePlan() *restorePlan {
 			{App: app(catalog.SourceAppImage, "CurseForge"), Action: session.RestoreManual,
 				Note: "added from a file; add the AppImage again"},
 		}}
+}
+
+// shotWhatsNew is the "What's new" dialog for an app's catalog notes, as if the oldest one were installed.
+func shotWhatsNew(a *App, id string) *whatsNew {
+	db, err := a.catalog(context.Background())
+	if err != nil {
+		return nil
+	}
+	app, err := db.Resolve(context.Background(), id)
+	if err != nil {
+		return nil
+	}
+	cs, _ := changelogFor(app, catalog.Listing{})
+	if len(cs) < 2 {
+		return nil
+	}
+	return &whatsNew{name: app.Name, changes: newerChanges(cs, cs[len(cs)-1].Version), version: cs[0].Version,
+		installed: cs[len(cs)-1].Version, update: func() {}}
 }

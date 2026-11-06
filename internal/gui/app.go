@@ -73,6 +73,7 @@ type App struct {
 	confirm  *ui.Signal[*pending]     // an install waiting for the user's OK
 	removing *ui.Signal[*removal]     // a removal waiting for the user's OK
 	restore  *ui.Signal[*restorePlan] // a restore waiting for the user's OK
+	whatsNew *ui.Signal[*whatsNew]    // an open "What's new" dialog
 
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
@@ -100,6 +101,7 @@ func New(s *session.Session) *App {
 		confirm:      ui.NewSignal[*pending](nil),
 		removing:     ui.NewSignal[*removal](nil),
 		restore:      ui.NewSignal[*restorePlan](nil),
+		whatsNew:     ui.NewSignal[*whatsNew](nil),
 		catalogGen:   ui.NewSignal(0),
 		icons:        newIconLoader(),
 	}
@@ -239,6 +241,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.confirmDialog(ctx)).
 		Child(a.removeDialog(ctx)).
 		Child(a.restoreDialog(ctx)).
+		Child(a.whatsNewDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
 }
 

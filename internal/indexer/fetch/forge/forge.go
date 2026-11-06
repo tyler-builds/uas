@@ -26,6 +26,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/appimage"
+	"github.com/tyler-builds/uas/internal/indexer/changelog"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/github"
 	"github.com/tyler-builds/uas/internal/indexer/trust"
@@ -56,6 +57,8 @@ type Release struct {
 	Prerelease bool
 	Draft      bool
 	Files      []github.ReleaseFile
+	Notes      string // Markdown
+	URL        string // the release's page
 }
 
 // recentReleases is how many releases are read per repo, for release activity.
@@ -199,7 +202,7 @@ func (b *Builder) listing(r Repo, now time.Time) (catalog.Listing, bool) {
 	if name == "" {
 		name = r.Path[strings.LastIndex(r.Path, "/")+1:]
 	}
-	return catalog.Listing{
+	l := catalog.Listing{
 		Source:    b.Source,
 		Ref:       b.Source.Host() + "/" + r.Path,
 		Kind:      catalog.KindDesktopApp,
@@ -214,7 +217,13 @@ func (b *Builder) listing(r Repo, now time.Time) (catalog.Listing, bool) {
 		Assets:    assets,
 		Trust:     &t,
 		Stars:     r.Stars,
-	}, true
+	}
+	for _, rel := range r.Releases {
+		if !rel.Draft && !rel.Prerelease && !rel.Published.After(latest.Published) {
+			changelog.Add(&l, strings.TrimPrefix(rel.Tag, "v"), rel.Published, rel.Notes, rel.URL)
+		}
+	}
+	return l, true
 }
 
 // pinned is what is kept per release file.

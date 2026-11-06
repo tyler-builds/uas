@@ -60,6 +60,11 @@ Screenshots:
 Releases:
 - version: 44.0
   unix-timestamp: 1679000000
+  description:
+    C: <p>Faster history.</p>
+    de: <p>Schnellere Historie.</p>
+  url:
+    details: https://example.org/44
 ---
 Type: console-application
 ID: htop
@@ -97,7 +102,8 @@ func TestParse(t *testing.T) {
 	if !strings.Contains(c.Description, "- Browse repositories") {
 		t.Errorf("description = %q", c.Description)
 	}
-	if len(c.Releases) != 1 || c.Releases[0].Version != "44.0" || c.Releases[0].Time.Year() != 2023 {
+	if len(c.Releases) != 1 || c.Releases[0].Version != "44.0" || c.Releases[0].Time.Year() != 2023 ||
+		c.Releases[0].Notes != "Faster history." || c.Releases[0].URL != "https://example.org/44" {
 		t.Errorf("releases = %+v", c.Releases)
 	}
 	if got[1].Type != "console-application" {

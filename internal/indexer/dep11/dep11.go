@@ -54,9 +54,11 @@ type screenshot struct {
 }
 
 type release struct {
-	Version   string `yaml:"version"`
-	Type      string `yaml:"type"`
-	Timestamp int64  `yaml:"unix-timestamp"`
+	Version     string            `yaml:"version"`
+	Type        string            `yaml:"type"`
+	Timestamp   int64             `yaml:"unix-timestamp"`
+	Description localized         `yaml:"description"`
+	URL         map[string]string `yaml:"url"`
 }
 
 type header struct {
@@ -154,7 +156,10 @@ func (c *component) convert(base string) *appstream.Component {
 		}
 	}
 	for _, r := range c.Releases {
-		rel := appstream.Release{Version: r.Version, Type: r.Type}
+		rel := appstream.Release{Version: r.Version, Type: r.Type, URL: r.URL["details"]}
+		if r.Description.C != "" {
+			rel.Notes, _ = appstream.DescriptionMarkdown(r.Description.C)
+		}
 		if r.Timestamp > 0 {
 			rel.Time = time.Unix(r.Timestamp, 0).UTC()
 		}

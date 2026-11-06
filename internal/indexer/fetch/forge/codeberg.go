@@ -66,6 +66,8 @@ type cbRelease struct {
 	PublishedAt time.Time `json:"published_at"`
 	Prerelease  bool      `json:"prerelease"`
 	Draft       bool      `json:"draft"`
+	Body        string    `json:"body"`
+	HTMLURL     string    `json:"html_url"`
 	Assets      []struct {
 		Name          string `json:"name"`
 		Size          int64  `json:"size"`
@@ -136,7 +138,8 @@ search:
 		repo := Repo{Path: r.FullName, Name: r.Name, Description: r.Description, Homepage: r.Website,
 			WebURL: r.HTMLURL, Owner: r.Owner.Login, Stars: r.Stars, Created: r.CreatedAt}
 		for _, rel := range rels {
-			out := Release{Tag: rel.TagName, Published: rel.PublishedAt, Prerelease: rel.Prerelease, Draft: rel.Draft}
+			out := Release{Tag: rel.TagName, Published: rel.PublishedAt, Prerelease: rel.Prerelease, Draft: rel.Draft,
+				Notes: rel.Body, URL: rel.HTMLURL}
 			for _, a := range rel.Assets {
 				out.Files = append(out.Files, github.ReleaseFile{Name: a.Name, URL: a.URL, Size: a.Size,
 					Downloads: a.DownloadCount})

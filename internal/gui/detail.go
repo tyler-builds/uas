@@ -104,6 +104,9 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			main = main.Child(ui.Div().Column().Gap(space1).Child(heading("About")).
 				Child(markdown.View(app.Description).Key("desc:" + app.ID).Label("Description").OnLink(openURL)))
 		}
+		if notes := changelogSection(ctx, app, listing); notes != nil {
+			main = main.Child(notes)
+		}
 		if listing.Trust != nil {
 			main = main.Child(trustPanel(ctx, listing))
 		}
@@ -419,17 +422,38 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 	version, hasUpdate := ups.Data[in.Key()]
 	hasUpdate = hasUpdate && a.canCheck(in)
 
-	var main ui.Element
+	var main, notes ui.Element
 	if hasUpdate {
 		label := "Update"
 		if version != "" && len(version) <= 12 {
 			label = "Update to " + version
 		}
-		main = ui.Button(label).Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
-			Tooltip("Update to " + version).Loading(busy).OnClick(func() {
+		update := func() {
 			a.startJob(ctx, app.ID, "Updating "+app.Name, a.s.NeedsRestart(in.Source), app.Name+" is up to date",
 				func(c context.Context, p func(backend.Progress)) error { return a.s.Update(c, in, p) })
-		})
+		}
+		main = ui.Button(label).Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
+			Tooltip("Update to " + version).Loading(busy).OnClick(update)
+		// The notes of the releases the update brings, from the installed copy's listing when it has any.
+		var mine catalog.Listing
+		for _, l := range app.Listings {
+			if in.Matches(l) {
+				mine = l
+				break
+			}
+		}
+		if cs, from := changelogFor(app, mine); len(cs) > 0 {
+			if from == in.Source {
+				from = ""
+			}
+			w := &whatsNew{name: app.Name, changes: newerChanges(cs, in.Version), from: from, version: version,
+				installed: in.Version}
+			if !busy {
+				w.update = update
+			}
+			notes = ui.Button("What's new").Ghost().Small().Disabled(busy).Tooltip("What changed since your version").
+				OnClick(func() { a.whatsNew.Set(w) })
+		}
 	} else if path := a.launcher(ctx, in, app.ID); path != "" {
 		// Installed with nothing to update: the button opens the app.
 		main = ui.Button("Open").Icon(icons.ExternalLink).Primary().Large().Width(ui.Full).Styles(big).
@@ -451,12 +475,14 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 	}
 
 	status := ""
-	if in.Version != "" {
+	if in.Version != "" && notes == nil {
+		// With an update's notes to open, the installed version is in them instead, to leave room.
 		status = "Version " + in.Version
 	}
 	line := ui.Div().Row().Align(ui.Center).Gap(space2).
 		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(caption(ctx, status).Truncate())).
+		Child(notes).
 		Child(ui.Button("Remove").Ghost().Small().Disabled(busy).
 			OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) }))
 	return ui.Div().Column().Gap(space1).Child(main).Child(line)

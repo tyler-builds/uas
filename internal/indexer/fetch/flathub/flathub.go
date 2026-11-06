@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer/appstream"
+	"github.com/tyler-builds/uas/internal/indexer/changelog"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
 )
 
@@ -195,6 +196,7 @@ func toListing(c *appstream.Component, arch string) (catalog.Listing, bool) {
 	if r, ok := c.Latest(); ok {
 		l.Version, l.Released = r.Version, r.Time
 	}
+	changelog.FromAppStream(&l, c.Releases)
 	if c.Custom["flathub::verification::verified"] == "true" {
 		l.Verified = true
 		switch {

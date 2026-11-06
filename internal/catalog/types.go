@@ -176,10 +176,25 @@ type Listing struct {
 	// with "snap install --classic".
 	Classic bool `json:"classic,omitempty"`
 
+	// Changelog is what changed in the newest releases, newest first, where the source publishes release notes:
+	// AppStream release descriptions, or a code forge's release notes.
+	Changelog []Change `json:"changelog,omitempty"`
+
 	// Assets are downloadable files, for sources that ship release files (GitHub), best first.
 	Assets []Asset `json:"assets,omitempty"`
 	// Trust explains how far a listing from an unreviewed source (GitHub, COPR) can be trusted.
 	Trust *Trust `json:"trust,omitempty"`
+}
+
+// Change is one release's notes.
+type Change struct {
+	Version string    `json:"version"`
+	Date    time.Time `json:"date,omitzero"`
+	Notes   string    `json:"notes"` // Markdown, shortened to a few paragraphs
+	// URL is where the full notes are, when the source has a page for them.
+	URL string `json:"url,omitempty"`
+	// Cut is true when Notes was shortened.
+	Cut bool `json:"cut,omitempty"`
 }
 
 // Asset kinds.

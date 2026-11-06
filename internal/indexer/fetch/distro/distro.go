@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer/appstream"
+	"github.com/tyler-builds/uas/internal/indexer/changelog"
 )
 
 // Package is a binary package in a repository.
@@ -67,5 +68,6 @@ func Listing(c *appstream.Component, src catalog.SourceID, distro string, pkgs m
 		l.Screenshots = append(l.Screenshots, catalog.Screenshot{URL: s.Source, ThumbURL: s.Thumbnail,
 			Caption: s.Caption})
 	}
+	changelog.FromAppStream(&l, c.Releases)
 	return l, true
 }

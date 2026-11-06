@@ -29,6 +29,7 @@ import (
 	"unicode"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/indexer/changelog"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
 	"github.com/tyler-builds/uas/internal/indexer/trust"
 )
@@ -408,7 +409,7 @@ const repoFields = `id nameWithOwner name description homepageUrl url stargazerC
       latestRelease { tagName publishedAt isPrerelease isDraft
         releaseAssets(first: 40) { nodes { name downloadUrl size digest downloadCount } } }
       releases(first: ` + recentReleasesText + `, orderBy: {field: CREATED_AT, direction: DESC}) {
-        nodes { publishedAt isPrerelease isDraft }
+        nodes { tagName publishedAt isPrerelease isDraft description url }
       }`
 
 const nodesQuery = `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Repository { ` + repoFields + ` } } }`
@@ -460,6 +461,8 @@ type release struct {
 	PublishedAt   time.Time `json:"publishedAt"`
 	IsPrerelease  bool      `json:"isPrerelease"`
 	IsDraft       bool      `json:"isDraft"`
+	Description   string    `json:"description"` // the release notes, Markdown
+	URL           string    `json:"url"`
 	ReleaseAssets struct {
 		Nodes []asset `json:"nodes"`
 	} `json:"releaseAssets"`
@@ -600,7 +603,7 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 	}, now)
 
 	kind := catalog.KindDesktopApp
-	return catalog.Listing{
+	l := catalog.Listing{
 		Source:    catalog.SourceGitHub,
 		Ref:       r.NameWithOwner,
 		Kind:      kind,
@@ -615,7 +618,13 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 		Assets:    assets,
 		Trust:     &t,
 		Stars:     r.StargazerCount,
-	}, true
+	}
+	for _, rel := range r.Releases.Nodes {
+		if !rel.IsDraft && !rel.IsPrerelease && !rel.PublishedAt.After(latest.PublishedAt) {
+			changelog.Add(&l, strings.TrimPrefix(rel.TagName, "v"), rel.PublishedAt, rel.Description, rel.URL)
+		}
+	}
+	return l, true
 }
 
 var (
