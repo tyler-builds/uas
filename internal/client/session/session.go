@@ -30,6 +30,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/selfupdate"
 	"github.com/tyler-builds/uas/internal/client/settings"
 	"github.com/tyler-builds/uas/internal/client/state"
+	"github.com/tyler-builds/uas/internal/client/sysapps"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
 	"github.com/tyler-builds/uas/internal/client/ujust"
 )
@@ -47,6 +48,46 @@ type Session struct {
 	CatalogPath  string
 	// Tools are the system's ujust recipes, on Universal Blue images; nil elsewhere.
 	Tools *ujust.Tools
+	// SysApps are the apps that came with the system, by AppStream ID (see SystemApps). Nil reads them on
+	// first use; tests set it.
+	SysApps map[string]sysapps.App
+	sysOnce sync.Once
+}
+
+// SystemApps returns the apps installed with the system rather than by a uas backend, such as Steam on
+// Bazzite's image, by AppStream ID. It reads them once.
+func (s *Session) SystemApps() map[string]sysapps.App {
+	s.sysOnce.Do(func() {
+		if s.SysApps == nil {
+			s.SysApps = sysapps.Scan(sysapps.MetainfoDirs, sysapps.AppDirs)
+		}
+	})
+	return s.SysApps
+}
+
+// SystemApp returns the app's copy that came with the system, matched by the AppStream IDs of the app and its
+// listings.
+func (s *Session) SystemApp(app *catalog.App) (sysapps.App, bool) {
+	sys := s.SystemApps()
+	ids := []string{app.ID}
+	for _, l := range app.Listings {
+		ids = append(ids, l.AppStreamID)
+	}
+	for _, id := range ids {
+		if a, ok := sys[strings.TrimSuffix(id, ".desktop")]; ok && id != "" {
+			return a, true
+		}
+	}
+	return sysapps.App{}, false
+}
+
+// SystemAppLabel says where a system app came from: "Included with Bazzite" on an image-based system, where
+// it is part of the image, and "Installed on this system" elsewhere.
+func (s *Session) SystemAppLabel() string {
+	if s.Platform.Atomic && s.Platform.PrettyName != "" {
+		return "Included with " + s.Platform.PrettyName
+	}
+	return "Installed on this system"
 }
 
 // Load reads settings and detects the system. scope, if set, overrides the Flatpak scope setting.

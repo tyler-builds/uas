@@ -27,8 +27,16 @@ func (a *App) installedApps(ctx *ui.Context) installedIndex {
 			idx[string(in.Source)+"|pkg:"+in.Package] = in
 		}
 	}
+	// Apps that came with the system, by AppStream ID, which a merged app's ID is.
+	for id, sa := range a.s.SystemApps() {
+		idx["sys|"+id] = backend.InstalledApp{AppID: id, Name: sa.Name, Version: sa.Version, Desktop: sa.Desktop,
+			Origin: originSystem}
+	}
 	return idx
 }
+
+// originSystem marks a copy that came with the system (see session.SystemApps); no backend manages it.
+const originSystem = "system"
 
 // find returns the installed copy of a result, if any of its listings is installed.
 func (idx installedIndex) find(r catalog.SearchResult) (backend.InstalledApp, bool) {
@@ -41,6 +49,9 @@ func (idx installedIndex) find(r catalog.SearchResult) (backend.InstalledApp, bo
 				return in, true
 			}
 		}
+	}
+	if in, ok := idx["sys|"+r.ID]; ok {
+		return in, true
 	}
 	return backend.InstalledApp{}, false
 }
@@ -166,8 +177,11 @@ func (a *App) rowActions(ctx *ui.Context, r catalog.SearchResult, installed inst
 	var main ui.Element
 	if in, ok := installed.find(r); ok {
 		label := "Installed"
-		if in.Pending {
+		switch {
+		case in.Pending:
 			label = "After restart"
+		case in.Origin == originSystem:
+			label = a.s.SystemAppLabel()
 		}
 		main = ui.IconButton(icons.Check).Ghost().Small().Label(label).
 			Tooltip(label + ": open its page to update or remove it").

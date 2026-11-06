@@ -57,6 +57,11 @@ func runInstall(ctx context.Context, args []string) error {
 		fmt.Printf("%s is already installed (%s).\n", app.Name, a.Scope)
 		return nil
 	}
+	if _, ok := e.SystemApp(app); ok && *source == "" {
+		fmt.Printf("%s is already on this system (%s). To install a copy from %s as well, run:\n  uas install --source %s %s\n",
+			app.Name, strings.ToLower(e.SystemAppLabel()[:1])+e.SystemAppLabel()[1:], l.Source.Name(), l.Source, ids[0])
+		return nil
+	}
 
 	fmt.Printf("%s %s from %s", app.Name, l.Version, l.Source)
 	if l.Verified {

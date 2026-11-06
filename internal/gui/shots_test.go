@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/settings"
+	"github.com/tyler-builds/uas/internal/client/sysapps"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
 	"github.com/tyler-builds/uas/internal/client/ujust"
 )
@@ -68,6 +69,8 @@ func TestShots(t *testing.T) {
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
 		// The system's own ujust commands, when this machine has them.
 		{"tools", func(a *App) { a.goTo(view{page: pageTools}) }, 1100, "", 0},
+		// An app that came with the system image.
+		{"detail-system", func(a *App) {}, 900, "com.valvesoftware.Steam", 0},
 		// The notes of an update, opened from the app page.
 		{"whats-new", func(a *App) { a.whatsNew.Set(shotWhatsNew(a, "org.gimp.GIMP")) }, 900, "org.gimp.GIMP", 0},
 	}
@@ -77,7 +80,9 @@ func TestShots(t *testing.T) {
 	}{{"dark", dark}, {"light", light}} {
 		for _, sh := range shots {
 			s := &session.Session{Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path,
-				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64"}, Tools: ujust.Detect(),
+				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true}, Tools: ujust.Detect(),
+				SysApps: map[string]sysapps.App{"com.valvesoftware.Steam": {ID: "com.valvesoftware.Steam", Name: "Steam",
+					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
 				Backends: map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: fp,
 					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh}}
 			a := New(s)

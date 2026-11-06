@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/recommend"
+	"github.com/tyler-builds/uas/internal/client/sysapps"
 )
 
 // pending is an install waiting for the user's OK.
@@ -192,6 +193,15 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	}
 	job, busy := a.running(app.ID)
 	big := ui.ButtonStyle{Root: ui.Style{Height: ui.Px(34), FontSize: 14, Radius: radiusS}}
+	// A copy that came with the system counts when no source's copy is installed.
+	sys, hasSys := a.s.SystemApp(app)
+	for _, in := range installed.Data {
+		for _, l := range app.Listings {
+			if in.Matches(l) {
+				hasSys = false
+			}
+		}
+	}
 
 	var action ui.Element
 	switch {
@@ -200,6 +210,8 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 		action = ui.Button("Install").Primary().Large().Width(ui.Full).Styles(big).Loading(true)
 	case copy != nil:
 		action = a.installedAction(ctx, *copy, app, busy, big)
+	case hasSys:
+		action = a.systemAction(ctx, sys, app, listing, busy, big)
 	default:
 		action = ui.Button("Install").Icon(icons.Download).Primary().Large().Width(ui.Full).Styles(big).
 			Loading(busy).OnClick(func() { a.requestInstall(ctx, app, listing) })
@@ -484,6 +496,31 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 		Child(ui.Button("Remove").Ghost().Small().Disabled(busy).
 			OnClick(func() { a.removing.Set(&removal{app: in, name: app.Name}) }))
 	return ui.Div().Column().Gap(space1).Child(main).Child(line)
+}
+
+// systemAction is the install area of an app that came with the system: Open, where it came from, and a way
+// to install a source's copy too (Steam's Flatpak, say, beside the system's).
+func (a *App) systemAction(ctx *ui.Context, sys sysapps.App, app *catalog.App, l catalog.Listing, busy bool,
+	big ui.ButtonStyle) ui.Element {
+	tip := "Open " + app.Name
+	if sys.Version != "" {
+		tip += " " + sys.Version
+	}
+	open := ui.Button("Open").Icon(icons.ExternalLink).Primary().Large().Width(ui.Full).Styles(big).
+		Tooltip(tip).Disabled(busy).OnClick(func() {
+		if err := a.s.Launch(sys.Desktop); err != nil {
+			ctx.Toast(ui.ToastError, errText(err)).Title("Could not open " + app.Name)
+		}
+	})
+	status := a.s.SystemAppLabel()
+	line := ui.Div().Row().Align(ui.Center).Gap(space2).
+		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(caption(ctx, status).Truncate()))
+	if l.Source != "" {
+		line = line.Child(ui.Button("Install too").Ghost().Small().Disabled(busy).
+			Tooltip("Install "+app.Name+" from "+l.Source.Name()+" as well; you'd have two copies").
+			OnClick(func() { a.requestInstall(ctx, app, l) }))
+	}
+	return ui.Div().Column().Gap(space1).Child(open).Child(line)
 }
 
 // launcher finds an installed app's launcher, kept for a minute since it reads the disk.
