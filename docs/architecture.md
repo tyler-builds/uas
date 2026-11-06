@@ -319,6 +319,17 @@ type Backend interface {
   file, but only if uas created it. Packages layered from COPR are listed under COPR, not Fedora. Not tested
   live yet: enabling a repo needs a password.
 
+### Back up and restore
+
+`session/export.go`. An export is JSON: each installed app's source, ref, app ID, package and name, the
+Flatpak scope setting, and the user's Flatpak overrides (the files under `~/.local/share/flatpak/overrides`),
+with no paths or user names. Restoring plans each app: already installed (from any source) is skipped; the
+same listing is installed when this system supports it; otherwise the same source's other listing (another
+Fedora release), else the source uas recommends ("from Flathub instead of Fedora"). Two exported copies of
+one catalog app install once. AppImages added from files can't be fetched again and are listed for the user.
+Layered packages go last. Overrides are written only for apps with none here yet. CLI: `uas export`,
+`uas restore [-n] [-y]`; desktop: Installed → Back up.
+
 ### UI (Jamb)
 
 `cmd/uas-gui` with `internal/gui`, on top of `internal/client/session`, the engine the CLI uses too (settings,

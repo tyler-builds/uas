@@ -24,6 +24,8 @@ Flathub, Homebrew, GitHub, GitLab and Codeberg releases, Fedora and COPR, search
   shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
 - **One list for everything installed,** whatever its source, with updates and Update all.
 - **Flatpak permissions.** Turn an app's network, file, device or sound access on or off, as Flatseal does.
+- **Back up and restore.** Export the list of installed apps and install them on another computer, from
+  whatever source fits it, with your Flatpak permission changes.
 - **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
 - **A signed catalog,** rebuilt every 6 hours and verified before use.
 - **Native tools underneath.** uas installs through flatpak, brew and rpm-ostree, so nothing is hidden from them.
@@ -110,6 +112,8 @@ uas install org.mozilla.firefox
 | `refresh` | Download the latest catalog |
 | `system` | Show what uas detected |
 | `settings [key value]` | Show or change settings |
+| `export [-o file]` | Save the list of installed apps |
+| `restore <file>` | Install the apps of an export that aren't installed yet |
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
 
 ## FAQ

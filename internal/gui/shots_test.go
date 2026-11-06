@@ -59,6 +59,7 @@ func TestShots(t *testing.T) {
 		{"search-narrow", func(a *App) { a.query.Set("discord"); a.search.Set("discord"); a.goTo(view{page: pageSearch}) },
 			800, "", 1180},
 		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 640, "", 0},
+		{"restore", func(a *App) { a.goTo(view{page: pageInstalled}); a.restore.Set(shotRestorePlan()) }, 700, "", 0},
 		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, "", 0},
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
 	}
@@ -115,4 +116,23 @@ func useBundledFont(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("FONTCONFIG_FILE", conf)
+}
+
+// shotRestorePlan is a restore with one app of each kind.
+func shotRestorePlan() *restorePlan {
+	app := func(src catalog.SourceID, name string) session.ExportedApp {
+		return session.ExportedApp{Source: src, Name: name}
+	}
+	return &restorePlan{ex: session.Export{System: "Bazzite", FlatpakOverrides: map[string]string{"org.gimp.GIMP": ""}},
+		items: []session.RestoreItem{
+			{App: app(catalog.SourceFlathub, "GIMP"), Action: session.RestoreInstalled},
+			{App: app(catalog.SourceFlathub, "Krita"), Action: session.RestoreInstall,
+				Listing: catalog.Listing{Source: catalog.SourceFlathub}},
+			{App: app(catalog.SourceHomebrew, "htop"), Action: session.RestoreInstall,
+				Listing: catalog.Listing{Source: catalog.SourceHomebrew}},
+			{App: app(catalog.SourceFedora, "Okular"), Action: session.RestoreInstall,
+				Listing: catalog.Listing{Source: catalog.SourceFlathub}, Note: "from Flathub instead of Fedora"},
+			{App: app(catalog.SourceAppImage, "CurseForge"), Action: session.RestoreManual,
+				Note: "added from a file; add the AppImage again"},
+		}}
 }

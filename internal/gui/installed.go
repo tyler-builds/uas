@@ -26,6 +26,7 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 			"Everything installed on this system, from every source.",
 			ui.Div().Row().Gap(space2).
 				Child(a.addAppImageButton(ctx)).
+				Child(a.backupMenu(ctx)).
 				Child(a.refreshButton(ctx, res, ups))))
 	switch {
 	case res.Loading:
@@ -56,7 +57,7 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 		Child(a.refreshButton(ctx, res, ups))
 	page := pageBody(listMaxWidth).
 		Child(pageHeader(ctx, "Updates",
-			"Newer versions from Flathub, Homebrew and GitHub. Layered packages update with the system.",
+			"Newer versions from Flathub, Homebrew and release downloads. Layered packages update with the system.",
 			actions))
 	switch {
 	case res.Loading || ups.Loading:
