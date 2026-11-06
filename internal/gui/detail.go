@@ -517,7 +517,7 @@ func (a *App) systemAction(ctx *ui.Context, sys sysapps.App, app *catalog.App, l
 		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(caption(ctx, status).Truncate()))
 	if l.Source != "" {
 		line = line.Child(ui.Button("Install too").Ghost().Small().Disabled(busy).
-			Tooltip("Install "+app.Name+" from "+l.Source.Name()+" as well; you'd have two copies").
+			Tooltip("Install " + app.Name + " from " + l.Source.Name() + " as well; you'd have two copies").
 			OnClick(func() { a.requestInstall(ctx, app, l) }))
 	}
 	return ui.Div().Column().Gap(space1).Child(open).Child(line)
