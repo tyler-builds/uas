@@ -67,7 +67,9 @@ func (a *App) toolsPage(ctx *ui.Context) ui.Element {
 		for _, g := range groups {
 			page = page.Child(section(sectionHeader(ctx, groupTitle(g), ""), settingsList(ctx, byGroup[g]...)))
 		}
-		return ui.Div().Size(ui.Full, ui.Full).Child(scroll(page)).Child(a.toolDialog(ctx, confirm))
+		// The page fills what's left under the top bar, as scroll does on its own.
+		return ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).
+			Child(scroll(page)).Child(a.toolDialog(ctx, confirm))
 	}).Key("tools")
 }
 

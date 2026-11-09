@@ -31,7 +31,7 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 		s := s
 		filters = filters.Child(filterChip(ctx, s.Name(), src == s, func() { a.searchSource.Set(s) }))
 	}
-	controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).
+	controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).Shrink(0).
 		Child(filters).
 		Child(orderPicker(a.searchOrder, true))
 	page := pageBody(listMaxWidth)
@@ -63,7 +63,7 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 	if res.Fetching && !res.Loading {
 		busy = ui.ProgressRing().Size(ui.RingSmall).Label("Searching")
 	}
-	return scroll(page.
+	return fixed(page.
 		Child(pageHeader(ctx, "Search results", summary, busy)).
 		Child(controls).
 		Child(a.resultList(ctx, res, "Try other words, another source, or check the spelling.")))
@@ -99,7 +99,7 @@ func (a *App) categoryPage(ctx *ui.Context, key string) ui.Element {
 		order = catalog.OrderPopular
 	}
 	res := a.browse(ctx, catalog.BrowseQuery{Category: key, Order: order, AppsOnly: true, Limit: 120})
-	return scroll(pageBody(listMaxWidth).
+	return fixed(pageBody(listMaxWidth).
 		Child(pageHeader(ctx, categoryLabel(key), categoryTip(key), orderPicker(a.browseOrder, false))).
 		Child(a.resultList(ctx, res, "Nothing in this category yet.")))
 }
@@ -115,14 +115,14 @@ func (a *App) sourcePage(ctx *ui.Context, src catalog.SourceID) ui.Element {
 	if a.s.Backends[src] == nil {
 		sub += " This system can't install from it."
 	}
-	return scroll(pageBody(listMaxWidth).
+	return fixed(pageBody(listMaxWidth).
 		Child(pageHeader(ctx, src.Name(), sub, orderPicker(a.browseOrder, false))).
 		Child(a.resultList(ctx, res, "This source has no apps in the catalog.")))
 }
 
 // pageHeader is the top of every page: its title, a line about it, and controls on the right.
 func pageHeader(ctx *ui.Context, titleText, sub string, trailing ui.Element) ui.Element {
-	return ui.Div().Row().Align(ui.End).Gap(space4).
+	return ui.Div().Row().Align(ui.End).Gap(space4).Shrink(0).
 		Child(ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(title(titleText)).
 			Child(ui.If(sub != "", muted(ctx, sub)))).

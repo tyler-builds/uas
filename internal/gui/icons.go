@@ -169,14 +169,16 @@ func (a *App) screenshot(url string, width float32, caption string) ui.Element {
 			}
 			return ui.Skeleton().Width(ui.Px(width)).Height(ui.Px(width * 9 / 16))
 		}
+		// The frame is width wide, its 1px border included.
 		w, h := res.Data.img.Size()
-		height := width
+		inner := width - 2
+		height := inner
 		if w > 0 {
-			height = width * float32(h) / float32(w)
+			height = inner * float32(h) / float32(w)
 		}
 		return ui.Div().Column().Gap(6).
 			Child(ui.Div().Radius(radiusM).Border(1, t.Border).ClipContent().
-				Child(ui.Image(res.Data.img).Size(ui.Px(width), ui.Px(height)).Fit(ui.FitContain).Alt(caption))).
+				Child(ui.Image(res.Data.img).Size(ui.Px(inner), ui.Px(height)).Fit(ui.FitContain).Alt(caption))).
 			Child(ui.If(caption != "", ui.Text(caption).FontSize(12).TextColor(t.TextMuted)))
 	}).Key("shot:" + url)
 }

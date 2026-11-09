@@ -38,7 +38,7 @@ func (a *App) installedPage(ctx *ui.Context) ui.Element {
 		return scroll(page.Child(ui.Empty("No apps installed yet").Icon(icons.Package).
 			Description("Apps you install from any source show up here.")))
 	}
-	return scroll(page.Child(a.filteredList(ctx, res.Data, ups.Data, "installed")))
+	return fixed(page.Child(a.filteredList(ctx, res.Data, ups.Data, "installed")))
 }
 
 // updatesPage lists the installed apps that have updates, with Update all.
@@ -67,11 +67,12 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 		return scroll(page.Child(ui.Empty("Everything is up to date").Icon(icons.CircleCheck).
 			Description("uas checks for updates every ten minutes while it runs.")))
 	}
-	return scroll(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")))
+	return fixed(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")))
 }
 
 // filteredList shows apps narrowed by the top bar's filter and the source chips, with a count. The chips
-// appear when the apps come from more than one source.
+// appear when the apps come from more than one source. The list scrolls on its own, under the chips, so the
+// page goes in fixed rather than scroll.
 func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map[string]string,
 	what string) ui.Element {
 	q := strings.ToLower(strings.TrimSpace(a.listFilter.Get()))
@@ -94,7 +95,7 @@ func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map
 	if len(shown) != len(apps) {
 		count = fmt.Sprintf("%d of %s", len(shown), count)
 	}
-	bar := ui.Div().Row().Align(ui.Center).Gap(space4)
+	bar := ui.Div().Row().Align(ui.Center).Gap(space4).Shrink(0)
 	if len(counts) > 1 {
 		chips := segmented(ctx, filterChip(ctx, "All", src == "", func() { a.listSource.Set("") }))
 		for _, s := range sources {
@@ -118,11 +119,11 @@ func (a *App) filteredList(ctx *ui.Context, apps []backend.InstalledApp, ups map
 					a.listSource.Set("")
 				})))
 	}
-	list := listBox(ctx)
+	list := scrollList(listBox(ctx))
 	for i, in := range shown {
 		list = list.Child(a.installedRow(ctx, in, ups, i == 0))
 	}
-	return ui.Div().Column().Gap(space5).Child(bar).Child(list)
+	return ui.Div().Column().Gap(space5).MinHeight(ui.Px(0)).Child(bar).Child(list)
 }
 
 // sources are the sources in the order the chips show them: the catalog's, then added AppImages.

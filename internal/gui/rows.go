@@ -157,7 +157,7 @@ func (a *App) resultRow(ctx *ui.Context, r catalog.SearchResult, installed insta
 // listRow is one row of a listBox; rows after the first have a hairline above them.
 func listRow(ctx *ui.Context, first bool) *ui.DivElement {
 	t := ctx.Theme()
-	row := ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space4).PaddingY(10).
+	row := ui.Div().Row().Align(ui.Center).Gap(space4).PaddingX(space4).PaddingY(10).Shrink(0).
 		Hover(ui.Style{Background: t.SurfaceHover})
 	if !first {
 		row = row.BorderEdges(ui.Edges{Top: 1}, t.Border)
@@ -218,11 +218,12 @@ func (a *App) quickInstall(ctx *ui.Context, r catalog.SearchResult) {
 	}()
 }
 
-// resultList shows results as rows, or a message when there are none.
+// resultList shows results as rows, or a message when there are none. The rows scroll on their own, so the
+// page goes in fixed.
 func (a *App) resultList(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchResult], empty string) ui.Element {
 	switch {
 	case res.Loading:
-		col := ui.Div().Column().Gap(space2)
+		col := ui.Div().Column().Gap(space2).MinHeight(ui.Px(0)).ClipContent()
 		for range 6 {
 			col = col.Child(ui.Skeleton().Height(ui.Px(60)))
 		}
@@ -233,7 +234,7 @@ func (a *App) resultList(ctx *ui.Context, res ui.QueryResult[[]catalog.SearchRes
 		return ui.Empty("No apps found").Icon(icons.Search).Description(empty)
 	}
 	installed := a.installedApps(ctx)
-	col := listBox(ctx)
+	col := scrollList(listBox(ctx))
 	for i, r := range res.Data {
 		col = col.Child(a.resultRow(ctx, r, installed, i == 0))
 	}
@@ -253,9 +254,13 @@ func orderPicker(sig *ui.Signal[catalog.Order], withRelevance bool) ui.Element {
 	return ui.Select(sig, opts...).Label("Sort by").Small().Width(ui.Px(170))
 }
 
-// pageBody is a scrolling page with the standard padding, centered up to maxWidth.
+// pagePad is a page's margin at the sides and bottom, inside the content area.
+const pagePad = space4
+
+// pageBody is a page with the standard padding, centered up to maxWidth. It goes in scroll, or in fixed for a
+// page whose list scrolls on its own.
 func pageBody(maxWidth float32) *ui.DivElement {
-	return ui.Div().Column().Gap(space6).PaddingX(space8).PaddingTop(space6).PaddingBottom(space8).
+	return ui.Div().Column().Gap(space6).PaddingX(pagePad).PaddingTop(space6).PaddingBottom(pagePad).
 		MaxWidth(ui.Px(maxWidth))
 }
 
@@ -265,10 +270,23 @@ func scroll(page *ui.DivElement) ui.Element {
 		Child(page.Width(ui.Full))
 }
 
+// fixed puts a page in a column that fills the content area without scrolling, centered up to its MaxWidth, so
+// its list (a scrollList) scrolls on its own under a header that stays put.
+func fixed(page *ui.DivElement) ui.Element {
+	return ui.Div().Column().Align(ui.Center).Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).
+		Child(page.Width(ui.Full).Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)))
+}
+
+// scrollList makes a listBox scroll by itself: it's as tall as its rows, down to the page's bottom padding,
+// and scrolls past that. Its page goes in fixed.
+func scrollList(list *ui.DivElement) *ui.DivElement {
+	return list.ScrollY().MinHeight(ui.Px(0))
+}
+
 // gridColumns fits items of about minWidth into the content area, up to most.
 func gridColumns(ctx *ui.Context, maxWidth, minWidth float32, most int) int {
 	w, _ := ctx.WindowSize()
-	content := min(w-sidebarWidth-space2, maxWidth) - 2*space8
+	content := min(w-sidebarWidth-space2, maxWidth) - 2*pagePad
 	return max(1, min(most, int(content/minWidth)))
 }
 

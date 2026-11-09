@@ -83,7 +83,7 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 		if len(app.Screenshots) > 0 {
 			// Two screenshots side by side, sized to the main column.
 			w, _ := ctx.WindowSize()
-			mainW := min(w-sidebarWidth-space2-2, detailMaxWidth) - 2*space8
+			mainW := min(w-sidebarWidth-space2-2, detailMaxWidth) - 2*pagePad
 			if w-sidebarWidth > 1000 {
 				mainW -= 290 + space6
 			}
