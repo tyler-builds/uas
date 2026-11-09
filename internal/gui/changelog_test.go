@@ -38,3 +38,27 @@ func TestUpdateLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseVersion(t *testing.T) {
+	for tag, want := range map[string]string{
+		"5.6.2":           "5.6.2",
+		"v5.6.2":          "5.6.2",
+		"release-5.6.2":   "5.6.2",
+		"darktable-5.6.2": "5.6.2",
+		"app-v1.2":        "1.2",
+		"Release_1.0":     "1.0",
+		"nightly":         "nightly",
+		"vim9":            "vim9", // no separator: the name is part of the tag
+		"2026.11.06":      "2026.11.06",
+		"1:1.2-1.fc45":    "1:1.2-1.fc45",
+		"build#12":        "build#12",
+	} {
+		if got := releaseVersion(tag); got != want {
+			t.Errorf("releaseVersion(%q) = %q, want %q", tag, got, want)
+		}
+	}
+	cs := []catalog.Change{{Version: "release-5.6.2"}, {Version: "release-5.6.1"}}
+	if got := newerChanges(cs, "5.6.1"); len(got) != 1 {
+		t.Errorf("newerChanges with tags = %v, want the newest", got)
+	}
+}

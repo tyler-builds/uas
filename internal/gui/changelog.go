@@ -63,13 +63,13 @@ func updateNotes(app *catalog.App, in backend.InstalledApp, version string) *wha
 // newerChanges returns the changes after the installed version, newest first: those above the entry for the
 // installed version, or the newest one when the installed version isn't in the list.
 func newerChanges(cs []catalog.Change, installed string) []catalog.Change {
-	if iv := strings.TrimPrefix(installed, "v"); iv != "" {
+	if iv := releaseVersion(installed); iv != "" {
 		// A package's version carries the packaging's own parts: "1:1.2.3-1.fc45", "1.2.3-1ubuntu2".
 		if _, after, ok := strings.Cut(iv, ":"); ok {
 			iv = after
 		}
 		for i, c := range cs {
-			v := strings.TrimPrefix(c.Version, "v")
+			v := releaseVersion(c.Version)
 			if iv == v || strings.HasPrefix(iv, v+"-") || strings.HasPrefix(iv, v+"+") || strings.HasPrefix(iv, v+"~") {
 				return cs[:i]
 			}
@@ -81,10 +81,28 @@ func newerChanges(cs []catalog.Change, installed string) []catalog.Change {
 	return nil
 }
 
+// releaseVersion is the version a release's tag names: "release-5.6.2", "darktable-5.6.2" and "v5.6.2" are
+// 5.6.2. A tag whose text before its first digit isn't a word and a separator, or a "v", stays as it is.
+func releaseVersion(tag string) string {
+	i := strings.IndexAny(tag, "0123456789")
+	if i <= 0 {
+		return tag
+	}
+	prefix := tag[:i]
+	if strings.TrimRight(strings.ToLower(prefix), "abcdefghijklmnopqrstuvwxyz-_. ") != "" {
+		return tag
+	}
+	if last := prefix[len(prefix)-1]; last == '-' || last == '_' || last == ' ' || last == '.' ||
+		strings.EqualFold(prefix, "v") || strings.HasSuffix(strings.ToLower(prefix), "-v") {
+		return tag[i:]
+	}
+	return tag
+}
+
 // changeView is one release's notes: its version and date, the notes, and a link to the full notes.
 func changeView(ctx *ui.Context, c catalog.Change, key string) ui.Element {
 	head := ui.Div().Row().Align(ui.Center).Gap(space2).
-		Child(ui.Text("Version " + c.Version).FontSize(14).Semibold())
+		Child(ui.Text("Version " + releaseVersion(c.Version)).FontSize(14).Semibold())
 	if !c.Date.IsZero() {
 		head = head.Child(caption(ctx, c.Date.Local().Format("Jan 2, 2006")))
 	}
