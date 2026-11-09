@@ -36,8 +36,8 @@ func TestShots(t *testing.T) {
 	light, dark := Themes()
 	fp := &fakeBackend{src: catalog.SourceFlathub, installed: []backend.InstalledApp{
 		{Source: catalog.SourceFlathub, Ref: "app/org.mozilla.firefox/x86_64/stable", AppID: "org.mozilla.firefox", Name: "Firefox", Version: "159.0.1", Scope: "system"},
-		{Source: catalog.SourceFlathub, Ref: "app/org.gimp.GIMP/x86_64/stable", AppID: "org.gimp.GIMP", Name: "GIMP", Version: "3.2.6", Scope: "user"},
-	}, available: []backend.AvailableUpdate{{Ref: "app/org.gimp.GIMP/x86_64/stable", Scope: "user", Version: "3.2.9"},
+		{Source: catalog.SourceFlathub, Ref: "app/org.gimp.GIMP/x86_64/stable", AppID: "org.gimp.GIMP", Name: "GIMP", Version: "3.2.4", Scope: "user"},
+	}, available: []backend.AvailableUpdate{{Ref: "app/org.gimp.GIMP/x86_64/stable", Scope: "user", Version: "3.2.8"},
 		// A rebuild of the installed version.
 		{Ref: "app/org.mozilla.firefox/x86_64/stable", Scope: "system", Version: "159.0.1"}}}
 	hb := &fakeBackend{src: catalog.SourceHomebrew, installed: []backend.InstalledApp{
@@ -150,7 +150,7 @@ func shotRestorePlan() *restorePlan {
 		}}
 }
 
-// shotWhatsNew is the "What's new" dialog for an app's catalog notes, as if the oldest one were installed.
+// shotWhatsNew is the "What's new" dialog of the fake GIMP update (3.2.4 to 3.2.8), as on the Updates page.
 func shotWhatsNew(a *App, id string) *whatsNew {
 	db, err := a.catalog(context.Background())
 	if err != nil {
@@ -160,10 +160,10 @@ func shotWhatsNew(a *App, id string) *whatsNew {
 	if err != nil {
 		return nil
 	}
-	cs, _ := changelogFor(app, catalog.Listing{})
-	if len(cs) < 2 {
-		return nil
+	w := updateNotes(app, backend.InstalledApp{Source: catalog.SourceFlathub, Ref: "app/" + id + "/x86_64/stable",
+		AppID: id, Version: "3.2.4"}, "3.2.8")
+	if w != nil {
+		w.update = func() {}
 	}
-	return &whatsNew{name: app.Name, changes: newerChanges(cs, cs[len(cs)-1].Version), version: cs[0].Version,
-		installed: cs[len(cs)-1].Version, update: func() {}}
+	return w
 }
