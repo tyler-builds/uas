@@ -18,7 +18,7 @@ COPR packages, searched and installed from one place.
 
 ## Features
 
-- **One catalog for your system.** 6,000 to 8,000 apps, depending on the system, merged so each app appears
+- **One catalog for your system.** About 8,000 apps on Fedora Atomic, more or fewer depending on the system, merged so each app appears
   once with every source it's on. You download only what your system can install: Flathub, Homebrew and
   release downloads everywhere, plus your distribution's packages and, where snapd runs, snaps.
 - **A recommended source.** uas picks the best fit for your system and tells you why, with the other sources a
@@ -39,7 +39,8 @@ COPR packages, searched and installed from one place.
 - **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
 - **A signed catalog,** rebuilt every 6 hours and verified before use.
 - **Updates itself** from signed releases.
-- **Native tools underneath.** uas installs through flatpak, brew and rpm-ostree, so nothing is hidden from them.
+- **Native tools underneath.** uas installs through flatpak, brew, snap and your system's package manager (rpm-ostree, dnf, apt or
+  pacman), so nothing is hidden from them.
 
 ## Screenshots
 
@@ -142,6 +143,8 @@ uas install org.mozilla.firefox
 | `export [-o file]` | Save the list of installed apps |
 | `restore <file>` | Install the apps of an export that aren't installed yet |
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
+| `self-update` | Update uas to the latest signed release |
+| `version` | Show uas's version |
 
 ## FAQ
 
