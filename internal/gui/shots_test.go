@@ -50,7 +50,7 @@ func TestShots(t *testing.T) {
 		selected string
 		w        float32 // 0: 1440
 	}{
-		{"home", func(a *App) {}, 1110, "", 0},
+		{"home", func(a *App) {}, 1038, "", 0},
 		{"detail-github", func(a *App) {}, 1400, "github:adileo/squirreldisk", 0},
 		{"detail-darktable", func(a *App) {}, 940, "org.darktable.Darktable", 0},
 		{"detail-vscode", func(a *App) {}, 1100, "com.visualstudio.code", 0},
