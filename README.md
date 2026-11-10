@@ -32,13 +32,13 @@ COPR packages, searched and installed from one place.
 - **Flatpak permissions.** Turn an app's network, file, device or sound access on or off, as Flatseal does.
 - **GNOME extensions.** On GNOME, an Extensions page lists every extension on the system, whichever app
   installed it, with its switch, settings and removal, and searches the ones extensions.gnome.org has for
-  your version of GNOME. GNOME Shell does the installing.
+  your version of GNOME. GNOME Shell does the installing, and its extension updates show under Updates.
 - **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
   Waydroid, audio tweaks…) are listed by group and run in a terminal window.
 - **Update notifications.** Optionally, uas checks once a day and tells you when updates are ready. It never
   installs anything on its own.
-- **Back up and restore.** Export the list of installed apps and install them on another computer, from
-  whatever source fits it, with your Flatpak permission changes.
+- **Back up and restore.** Export the list of installed apps and GNOME extensions and install them on
+  another computer, from whatever source fits it, with your Flatpak permission changes.
 - **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
 - **A signed catalog,** rebuilt every 6 hours and verified before use.
 - **Updates itself** from signed releases.
@@ -66,7 +66,7 @@ COPR packages, searched and installed from one place.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/whats-new.png" alt="An update's What's new: the release notes since the installed version"></td>
-    <td width="50%"><img src="docs/screenshots/updates.png" alt="Updates, with a What's new link, a new build of the same version, and when updates were last checked"></td>
+    <td width="50%"><img src="docs/screenshots/updates.png" alt="Updates, with a What's new link, a new build of the same version, when updates were last checked, and an extension update waiting for the next login"></td>
   </tr>
   <tr>
     <td align="center">What's new</td>

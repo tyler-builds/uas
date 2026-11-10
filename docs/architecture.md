@@ -434,13 +434,29 @@ description (plain text, as its author wrote it), and Install or its switch. uas
 installing, since the Shell does. CLI: `uas extensions [list | search | install | remove | enable | disable |
 settings]`.
 
-Not yet: extensions aren't in exports, and the Updates page doesn't list them (the Shell applies their
-updates itself, at login).
+**Updates.** The Shell can't swap a running extension's code, so nothing installs an extension update
+before the next login, uas included. The Shell looks for updates of the user's extensions once a day (the
+system's update with the system), unpacks each one into `~/.local/share/gnome-shell/extension-updates/<uuid>`
+and marks the extension `hasUpdate`; at login it moves them into place. uas shows that state: the Updates
+page lists those extensions in their own section as "At next login", with the installed version and the
+downloaded one (read from the download's `metadata.json`), and Update all and the sidebar's count leave them
+out, since there is nothing to press. Opening or refreshing the page asks the Shell to look now
+(`CheckForUpdates`), at most once an hour unless Refresh is pressed, since each look asks
+extensions.gnome.org. `uas updates` lists them too, and the background check names them in its notification
+(it reads what the Shell has found and doesn't ask it to look).
+
+**Backups.** An export lists the extensions worth restoring (`extensions`: UUID, name, on or off): every one
+the user added, and the system's that are switched on. Restoring installs the ones that aren't on the system
+when extensions.gnome.org has a version for its GNOME release (the Shell asks about each), switches a newly
+installed one off again if it was off, and switches on the ones that are there but off. It never switches
+anything off, and it says why for the rest ("no version for GNOME 51", "came with Bazzite"). Extensions'
+own settings (dconf) aren't exported. Older versions of uas ignore the field, so the export format is still
+version 1.
 
 ### Back up and restore
 
 `session/export.go`. An export is JSON: each installed app's source, ref, app ID, package and name, the
-Flatpak scope setting, and the user's Flatpak overrides (the files under `~/.local/share/flatpak/overrides`),
+GNOME Shell extensions (see above), the Flatpak scope setting, and the user's Flatpak overrides (the files under `~/.local/share/flatpak/overrides`),
 with no paths or user names. Restoring plans each app: already installed (from any source) is skipped; the
 same listing is installed when this system supports it; otherwise the same source's other listing (another
 Fedora release), else the source uas recommends ("from Flathub instead of Fedora"). Two exported copies of
