@@ -2,10 +2,12 @@ package session
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tyler-builds/uas/internal/client/appimage"
 	"github.com/tyler-builds/uas/internal/client/backend"
@@ -73,17 +75,50 @@ func applicationDirs() []string {
 
 // Launch starts an app from its launcher, as the desktop would, and returns once it has started.
 func (s *Session) Launch(desktopFile string) error {
-	var cmd *exec.Cmd
+	var argv []string
 	if gio, err := exec.LookPath("gio"); err == nil {
-		cmd = exec.Command(gio, "launch", desktopFile)
+		argv = []string{gio, "launch", desktopFile}
 	} else if gtk, err := exec.LookPath("gtk-launch"); err == nil {
-		cmd = exec.Command(gtk, strings.TrimSuffix(filepath.Base(desktopFile), ".desktop"))
+		argv = []string{gtk, strings.TrimSuffix(filepath.Base(desktopFile), ".desktop")}
 	} else {
 		return errors.New("neither gio nor gtk-launch is installed to start apps")
 	}
+	argv = append(ownScope(desktopFile), argv...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	go cmd.Wait() // gio returns once the app has started
 	return nil
+}
+
+// ownScope is the command prefix that starts an app in a systemd scope of its own, named as the desktop
+// names the apps it launches. Without it the app stays in uas's scope, so system monitors count its
+// processes and memory as uas's, and anything that stops uas's scope stops the app too. It is empty where
+// there is no systemd user session to ask.
+func ownScope(desktopFile string) []string {
+	run, err := exec.LookPath("systemd-run")
+	if err != nil {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "systemd", "private")); err != nil {
+		return nil
+	}
+	return []string{run, "--user", "--scope", "--collect", "--quiet", "--slice=app.slice",
+		"--unit=" + scopeName(desktopFile, time.Now().UnixNano()), "--"}
+}
+
+// scopeName names an app's scope app-uas-<application ID>-<n>.scope, the form the desktop's own launchers
+// use, with the ID escaped as systemd asks so that its dashes aren't read as separators.
+func scopeName(desktopFile string, n int64) string {
+	var id strings.Builder
+	for _, c := range []byte(strings.TrimSuffix(filepath.Base(desktopFile), ".desktop")) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '.':
+			id.WriteByte(c)
+		default:
+			fmt.Fprintf(&id, `\x%02x`, c)
+		}
+	}
+	return fmt.Sprintf("app-uas-%s-%d.scope", id.String(), n)
 }

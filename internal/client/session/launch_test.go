@@ -43,3 +43,10 @@ func TestLauncher(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeName(t *testing.T) {
+	got := scopeName("/apps/pkgforge-dev__ghostty appimage.desktop", 7)
+	if want := `app-uas-pkgforge\x2ddev__ghostty\x20appimage-7.scope`; got != want {
+		t.Errorf("scopeName = %q, want %q", got, want)
+	}
+}
