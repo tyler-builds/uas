@@ -395,3 +395,36 @@ func TestRestoreExtensions(t *testing.T) {
 		t.Errorf("exported %q, want %q", uuids, want)
 	}
 }
+
+// TestAppSearchPointsAtExtensions checks that a search for apps says when extensions match it, and leads to
+// them, since the two are searched apart.
+func TestAppSearchPointsAtExtensions(t *testing.T) {
+	a, _ := extTestApp(t)
+	a.goTo(view{page: pageHome})
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
+	u.ByRole(access.RoleTextField, "Search apps").Type("clock")
+	// No app is called clock, but an extension for this GNOME is.
+	waitText(t, u, "ext-hint", "1 GNOME extension matches “clock”.")
+	if u.Has("ext-row:" + catalog.ExtensionAppID("clock@example.com")) {
+		t.Error("an extension among the app results")
+	}
+	clickButton(u, "Show extensions")
+	u.WaitFor("the extension search", func() bool {
+		return u.Has("ext-row:" + catalog.ExtensionAppID("clock@example.com"))
+	})
+	if a.current().page != pageExtensions || a.listFilter.Peek() != "clock" {
+		t.Errorf("at %+v with filter %q", a.current(), a.listFilter.Peek())
+	}
+
+	// An extension for another GNOME release doesn't count, and neither does a search only apps match.
+	a.goTo(view{page: pageSearch})
+	a.query.Set("notes")
+	a.search.Set("notes")
+	u.WaitFor("the Notes row", func() bool { return u.Has("row:org.example.Notes") })
+	u.Settle()
+	if u.Has("ext-hint") && strings.Contains(u.Get("ext-hint").Text(), "extension") {
+		t.Errorf("a hint for a search no extension matches: %q", u.Get("ext-hint").Text())
+	}
+}

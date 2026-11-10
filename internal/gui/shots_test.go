@@ -89,6 +89,9 @@ func TestShots(t *testing.T) {
 			a.goTo(view{page: pageExtensions})
 			a.openExtension(catalog.ExtensionAppID("blur-my-shell@aunetx"))
 		}, 1000, "", 0},
+		// An app search that extensions match too.
+		{"search-extensions", func(a *App) { a.query.Set("blur"); a.search.Set("blur"); a.goTo(view{page: pageSearch}) },
+			700, "", 0},
 		{"detail-extension-new", func(a *App) {
 			a.goTo(view{page: pageExtensions})
 			a.openExtension(catalog.ExtensionAppID("Vitals@CoreCoding.com"))

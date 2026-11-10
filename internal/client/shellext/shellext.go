@@ -1,8 +1,15 @@
-// Package shellext manages GNOME Shell extensions through the Shell's own D-Bus service,
+// Package shellext manages GNOME Shell extensions through the Shell's own D-Bus interface,
 // org.gnome.Shell.Extensions, which the Extensions app and the browser connector use too. The Shell does the
 // work: it lists every extension it knows (the user's and the system's, whoever installed them), downloads
 // and installs one from extensions.gnome.org after asking the user in its own dialog, and turns them on and
 // off. uas never unpacks an extension itself.
+//
+// It calls the Shell itself (org.gnome.Shell, at /org/gnome/Shell), not the helper service of the same name
+// as the interface (org.gnome.Shell.Extensions, at /org/gnome/Shell/Extensions) that forwards to it. The
+// helper is a separate program that D-Bus starts on demand and that exits after two idle seconds, so asking
+// it every few seconds would start it over and over; and it forwards each call with D-Bus's default 25
+// second limit, which an install would overrun whenever the user takes longer than that to answer the
+// Shell's dialog.
 package shellext
 
 import (
@@ -23,8 +30,8 @@ import (
 )
 
 const (
-	service = "org.gnome.Shell.Extensions"
-	path    = "/org/gnome/Shell/Extensions"
+	service = "org.gnome.Shell"
+	path    = "/org/gnome/Shell"
 	iface   = "org.gnome.Shell.Extensions"
 )
 
@@ -89,10 +96,10 @@ func (e Extension) Problem() string {
 // ErrCancelled is returned by Install when the user says no in the Shell's dialog.
 var ErrCancelled = errors.New("cancelled in the GNOME dialog")
 
-// ErrUnavailable is returned when the Shell's extension service can't be reached.
-var ErrUnavailable = errors.New("GNOME Shell's extension service is not available")
+// ErrUnavailable is returned when GNOME Shell can't be reached.
+var ErrUnavailable = errors.New("GNOME Shell is not answering")
 
-// Bus is the Shell's extension service. Tests use a fake.
+// Bus is the Shell's extension interface. Tests use a fake.
 type Bus interface {
 	// Call calls a method of the service and stores its results in out.
 	Call(ctx context.Context, method string, args []any, out ...any) error
@@ -160,13 +167,19 @@ func (m *Manager) downloadedVersion(uuid string) string {
 	return ""
 }
 
-// Detect returns a manager when this session runs GNOME Shell, and nil otherwise. It doesn't connect until
-// the manager is used, and never starts the service on another desktop.
+// Detect returns a manager when this session runs GNOME Shell, and nil otherwise. Desktops built on GNOME's
+// parts name it in XDG_CURRENT_DESKTOP too ("ubuntu:GNOME", but also "Budgie:GNOME"), so it also checks that
+// the Shell is on the session bus. It asks the bus only on such a desktop, and starts nothing.
 func Detect() *Manager {
 	if !slicesContainsFold(strings.Split(os.Getenv("XDG_CURRENT_DESKTOP"), ":"), "GNOME") {
 		return nil
 	}
-	return &Manager{Bus: &sessionBus{}}
+	bus := &sessionBus{}
+	if !bus.running() {
+		bus.close()
+		return nil
+	}
+	return &Manager{Bus: bus}
 }
 
 func slicesContainsFold(list []string, want string) bool {
@@ -421,7 +434,7 @@ func (m *Manager) SetUserExtensionsEnabled(ctx context.Context, on bool) error {
 	return m.Bus.Set(ctx, "UserExtensionsEnabled", on)
 }
 
-// sessionBus talks to the service on the session bus, connecting on first use.
+// sessionBus talks to the Shell on the session bus.
 type sessionBus struct {
 	mu   sync.Mutex
 	conn *dbus.Conn
@@ -439,6 +452,31 @@ func (b *sessionBus) object() (dbus.BusObject, error) {
 		b.conn = conn
 	}
 	return b.conn.Object(service, path), nil
+}
+
+// running reports whether GNOME Shell owns its name on the bus.
+func (b *sessionBus) running() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn == nil {
+		conn, err := dbus.ConnectSessionBus()
+		if err != nil {
+			return false
+		}
+		b.conn = conn
+	}
+	var has bool
+	err := b.conn.BusObject().Call("org.freedesktop.DBus.NameHasOwner", 0, service).Store(&has)
+	return err == nil && has
+}
+
+func (b *sessionBus) close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn != nil {
+		b.conn.Close()
+		b.conn = nil
+	}
 }
 
 func (b *sessionBus) Call(ctx context.Context, method string, args []any, out ...any) error {

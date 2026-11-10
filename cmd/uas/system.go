@@ -87,6 +87,13 @@ func runSystem(ctx context.Context, w io.Writer, args []string) error {
 		}
 		fmt.Fprintf(w, "  %-9s %s\n", s, state)
 	}
+	if e.Extensions != nil {
+		state := "ready"
+		if v, err := e.Extensions.ShellVersion(ctx); err == nil {
+			state = "ready (GNOME Shell " + v + " installs them)"
+		}
+		fmt.Fprintf(w, "\nGNOME extensions: %s\n", state)
+	}
 	return nil
 }
 

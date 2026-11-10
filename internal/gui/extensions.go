@@ -67,6 +67,42 @@ func (a *App) shell(ctx *ui.Context) ui.QueryResult[shellState] {
 	}, ui.QueryStaleTime(5*time.Second))
 }
 
+// extensionsHint is a line for the app search page saying how many extensions match the search, with a way
+// to them: apps and extensions are searched apart, so "blur my shell" finds no app. It shows nothing when
+// none match, or outside GNOME.
+func (a *App) extensionsHint(ctx *ui.Context, q string) ui.Element {
+	if a.s.Extensions == nil || q == "" {
+		return ui.Div().Display(false)
+	}
+	return ui.Component(func(ctx *ui.Context) ui.Element {
+		t := ctx.Theme()
+		sh := a.shell(ctx)
+		res := ui.Query(ctx, a.key("ext-hint", q, sh.Data.major), func(c context.Context) (int, error) {
+			db, err := a.catalog(c)
+			if err != nil {
+				return 0, err
+			}
+			rs, err := db.Search(c, q, catalog.SearchOptions{Limit: 100, Extensions: true, Shell: sh.Data.major})
+			return len(rs), err
+		}, ui.QueryKeepPrevious(), ui.QueryStaleTime(time.Hour))
+		if sh.Loading || sh.Err != nil || res.Data == 0 {
+			return ui.Div().Display(false)
+		}
+		n := plural(res.Data, "GNOME extension matches", "GNOME extensions match")
+		if res.Data == 100 {
+			n = "100 or more GNOME extensions match"
+		}
+		return ui.Div().Row().Align(ui.Center).Gap(space2).Shrink(0).
+			Child(ui.Icon(icons.Puzzle).Size(15).Color(t.TextMuted)).
+			Child(muted(ctx, n+" “"+q+"”.")).
+			Child(linkButton(ctx, "Show extensions", icons.ArrowRight, func() {
+				a.goTo(view{page: pageExtensions})
+				a.extTab.Set(extBrowse)
+				a.listFilter.Set(q)
+			}))
+	}).Key("ext-hint")
+}
+
 // extensionUpdates are the extensions with an update GNOME Shell has downloaded, which it installs at the
 // next login.
 func (a *App) extensionUpdates(ctx *ui.Context) []shellext.Extension {
@@ -485,6 +521,12 @@ func (a *App) extBrowseList(ctx *ui.Context, info catalog.BuildInfo, sh ui.Query
 		return ui.Empty("No extensions in the catalog yet").Icon(icons.Puzzle).
 			Description("The app catalog on this computer was built before it listed extensions.").
 			Action(ui.Button("Check for a newer catalog").Secondary().OnClick(func() { a.checkCatalog(ctx, true) }))
+	case info.Extensions.Listings == 0 && info.Extensions.Error != "":
+		// The catalog's build could not reach extensions.gnome.org; the next one, hours later, tries again.
+		return ui.Empty("Extensions are missing from this catalog").Icon(icons.CloudOff).
+			Description("extensions.gnome.org could not be read when the catalog was built. The next catalog " +
+				"should have them.").
+			Action(ui.Button("Check for a newer catalog").Secondary().OnClick(func() { a.checkCatalog(ctx, true) }))
 	case sh.Loading:
 		// Which extensions to list depends on the version of GNOME, which the Shell says.
 		return skeleton()
@@ -637,8 +679,8 @@ func (a *App) extensionPage(ctx *ui.Context, id string) ui.Element {
 			{icons.Puzzle, shellRange(l.Shells), "Works with", t.TextMuted,
 				"The GNOME releases it has a version for"},
 			{icons.ShieldCheck, "By GNOME", "Reviewed", t.Success,
-				"GNOME's reviewers read every version before extensions.gnome.org lists it. Extensions still " +
-					"run inside GNOME Shell with all of your account's access; nothing sandboxes them"},
+				"extensions.gnome.org reviews every extension uploaded to it for malicious behavior. Extensions " +
+					"still run inside GNOME Shell with all of your account's access; nothing sandboxes them"},
 		}
 		if in, ok := sh.Data.find(l.Ref); ok && in.Version != "" {
 			stats = append(stats, stat{icons.Tag, in.Version, "Installed version", t.TextMuted, ""})

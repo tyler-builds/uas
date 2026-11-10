@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-	page := flag.String("page", "", "open on this page: updates, installed or settings")
+	page := flag.String("page", "", "open on this page: updates, installed, extensions or settings")
 	check := flag.Bool("check-updates", false, "check for updates, notify, and exit without opening a window")
 	flag.Parse()
 	catalogPath, err := paths.Catalog()

@@ -45,6 +45,10 @@ func runInstall(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if app.Kind == catalog.KindShellExtension && len(app.Listings) > 0 {
+		return fmt.Errorf("%s is a GNOME extension, which GNOME Shell installs: run \"uas extensions install %s\"",
+			app.Name, app.Listings[0].Ref)
+	}
 	choice, err := e.Choose(app, catalog.SourceID(*source))
 	if err != nil {
 		return err

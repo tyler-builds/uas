@@ -66,6 +66,7 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 	return fixed(page.
 		Child(pageHeader(ctx, "Search results", summary, busy)).
 		Child(controls).
+		Child(a.extensionsHint(ctx, q)).
 		Child(a.resultList(ctx, res, "Try other words, another source, or check the spelling.")))
 }
 

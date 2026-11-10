@@ -413,8 +413,12 @@ checked against plain patterns before they reach a command line.
 
 ### GNOME Shell extensions
 
-`internal/client/shellext`, in a GNOME session (`XDG_CURRENT_DESKTOP`), talks to the Shell's own D-Bus
-service, `org.gnome.Shell.Extensions`, as GNOME's Extensions app and the browser connector do. Extensions
+`internal/client/shellext`, in a GNOME session (`XDG_CURRENT_DESKTOP` names GNOME and `org.gnome.Shell` is on
+the session bus), talks to the Shell's own D-Bus interface, `org.gnome.Shell.Extensions`, as GNOME's
+Extensions app and the browser connector do. It calls the Shell itself (`org.gnome.Shell` at
+`/org/gnome/Shell`), not the helper service named like the interface: that is a separate program started on
+demand, which exits after two idle seconds and forwards each call with a 25 second limit, less than a user
+may take to answer the install dialog. Extensions
 aren't apps and have no backend: the Shell lists every extension it knows (`ListExtensions`: the user's under
 `~/.local/share/gnome-shell/extensions` and the system's under `/usr`, whoever installed them), installs one
 from extensions.gnome.org by UUID after asking the user in its own dialog (`InstallRemoteExtension`, which
@@ -431,7 +435,8 @@ Shell again every five seconds while it is on screen, so changes made in other a
 catalog's extensions that have a version for the running GNOME release, most downloaded first, and the top
 bar searches them. An extension's page shows its downloads, the releases it supports, its screenshot and
 description (plain text, as its author wrote it), and Install or its switch. uas doesn't ask before
-installing, since the Shell does. CLI: `uas extensions [list | search | install | remove | enable | disable |
+installing, since the Shell does. Apps and extensions are searched apart, so the app search page says when
+extensions match the search too ("9 GNOME extensions match “blur”") and leads to them. CLI: `uas extensions [list | search | install | remove | enable | disable |
 settings]`.
 
 **Updates.** The Shell can't swap a running extension's code, so nothing installs an extension update
