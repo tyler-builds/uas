@@ -185,12 +185,25 @@ func (s *Session) Migrate(ctx context.Context, m Migration, progress func(backen
 	return app, nil
 }
 
-// ClearLeftovers removes Gear Lever's records and icons of AppImages that are gone.
-func ClearLeftovers(leftovers []gearlever.Entry) error {
+// ClearLeftovers removes Gear Lever's records and icons of AppImages that are gone. Where uas now manages
+// the app a record was of, default-app settings that still name Gear Lever's launcher for it (which is gone
+// too) are pointed at uas's, so a browser that was the default stays the default.
+func (s *Session) ClearLeftovers(ctx context.Context, leftovers []gearlever.Entry) error {
 	var gone []gearlever.Entry
 	for _, e := range leftovers {
 		if e.Gone() { // checked again: only a record of a file that isn't there is removed
 			gone = append(gone, e)
+		}
+	}
+	if gh, ok := s.Backends[catalog.SourceGitHub].(*github.Backend); ok && len(gone) > 0 {
+		installed, _ := s.Installed(ctx)
+		for _, e := range gone {
+			for _, in := range installed {
+				mine := in.Source == catalog.SourceAppImage || in.Source.Releases()
+				if mine && in.Desktop != "" && e.Name != "" && strings.EqualFold(in.Name, e.Name) {
+					gh.RepointDefaultApps(gearlever.LauncherOf(e.Path), in.Desktop)
+				}
+			}
 		}
 	}
 	return gearlever.Forget(gone...)

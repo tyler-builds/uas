@@ -438,13 +438,20 @@ Downloads or on the desktop is listed for the user to pick.
 
 Migrating one is Add AppImage (`Session.AddAppImage`): the file moves into uas's folder and is deleted from
 where it was only once uas's copy is in place, uas writes its launcher and removes the other tool's, and
-GNOME's dock favorites point at the new one. Then the other tool's own notes are removed
+GNOME's dock favorites point at the new one. What the user set up around the app follows it
+(`github/carryover.go`, for Add AppImage too): default-app settings in `mimeapps.list` that named the old
+launcher name uas's, so a browser stays the default for web links; autostart entries that ran the old path
+run the new one; and the AppImage's portable folders (`<file>.home`, `<file>.config`, where an AppImage run
+that way keeps its data) move beside the new file. The app's ordinary data is in the home folder's usual
+places and is never touched. Launch arguments a user added in the other tool are not carried over: uas
+writes its launcher's `Exec` from the AppImage alone. Then the other tool's own notes are removed
 (`internal/client/gearlever`). Gear Lever keeps a section per AppImage in `gearlever.conf`
 (`[app.<md5>]` with `name` and `file_path`, plus sub-sections such as `update_manager`) and an icon in
 `<folder>/.icons/<file name>`; the section and icon of a migrated AppImage are removed, and the rest of the
 file is left byte for byte. Sections whose AppImage is already gone ("leftovers", as after AppImages were
 moved out of Gear Lever's folder by something else) are listed too and cleared when the user leaves that
-box ticked. Tested for real against Gear Lever 4.6.2 (Flatpak): an AppImage integrated with
+box ticked; default-app settings that still name Gear Lever's launcher for an app uas now manages are
+pointed at uas's launcher then. Tested for real against Gear Lever 4.6.2 (Flatpak): an AppImage integrated with
 `gearlever --integrate`, then migrated. AppImageLauncher's launchers (`appimagekit_*.desktop`) are recognised
 and replaced, but that path has not been tested against AppImageLauncher itself, and the icons it caches
 are left.

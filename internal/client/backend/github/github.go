@@ -38,6 +38,9 @@ type Dirs struct {
 	AppImages    string // ~/.local/share/uas/appimages
 	Icons        string // ~/.local/share/uas/icons
 	Applications string // ~/.local/share/applications
+	// Config is the user's config folder (~/.config), where default-app settings and autostart entries are.
+	// uas updates the ones that name an AppImage it takes over; empty leaves them alone.
+	Config string
 }
 
 // DefaultDirs returns the standard locations under $XDG_DATA_HOME.
@@ -46,10 +49,13 @@ func DefaultDirs() (Dirs, error) {
 	if err != nil {
 		return Dirs{}, err
 	}
+	// Without a config folder, default-app settings and autostart entries are left alone.
+	config, _ := os.UserConfigDir()
 	return Dirs{
 		AppImages:    filepath.Join(data, "uas", "appimages"),
 		Icons:        filepath.Join(data, "uas", "icons"),
 		Applications: filepath.Join(data, "applications"),
+		Config:       config,
 	}, nil
 }
 

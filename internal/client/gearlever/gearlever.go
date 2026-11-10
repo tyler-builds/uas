@@ -61,6 +61,12 @@ func IconOf(appImage string) string {
 	return filepath.Join(filepath.Dir(appImage), ".icons", base)
 }
 
+// LauncherOf is the file name of the launcher Gear Lever writes for an AppImage in its folder:
+// "helium.desktop" for "helium.appimage".
+func LauncherOf(appImage string) string {
+	return filepath.Base(IconOf(appImage)) + ".desktop"
+}
+
 var appSection = regexp.MustCompile(`^\[(app\.[0-9A-Za-z]+)(\.[A-Za-z0-9_]+)?\]\s*$`)
 
 // Entries reads the AppImages on record in the gearlever.conf files under home. A missing file has none.

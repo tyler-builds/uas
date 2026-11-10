@@ -178,6 +178,7 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 		return err
 	}
 	b.takeOver(ctx, others, p.desktopFile, progress)
+	b.carryOver(f.Path, p.path, progress)
 	report(progress, "Added "+p.name+"; it updates from github.com/"+l.Ref)
 	os.Remove(f.Path)
 	return nil
@@ -312,6 +313,7 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 		return backend.InstalledApp{}, err
 	}
 	l.GH.takeOver(ctx, others, p.desktopFile, progress)
+	l.GH.carryOver(f.Path, p.path, progress)
 	os.Remove(f.Path)
 	if f.Unreadable != nil {
 		report(progress, "uas couldn't read the app's own launcher and icon ("+f.Unreadable.Error()+

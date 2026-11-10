@@ -134,7 +134,8 @@ func (a *App) migrateDialog(ctx *ui.Context) ui.Element {
 		list = list.Child(ui.Div().Column().Gap(2).
 			Child(ui.Checkbox(label, p.leftovers).Key("migrate-leftovers")).
 			Child(ui.Div().PaddingLeft(space6).Child(ui.Text(strings.Join(names, ", ") +
-				". Only Gear Lever's notes and icons of them are removed.").FontSize(12).TextColor(t.TextMuted))))
+				". Only Gear Lever's notes and icons of them are removed, and default-app settings that still " +
+				"name its launchers point at uas's.").FontSize(12).TextColor(t.TextMuted))))
 	}
 
 	chosen := p.chosen()

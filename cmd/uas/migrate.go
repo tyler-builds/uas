@@ -100,7 +100,7 @@ func runMigrate(ctx context.Context, w io.Writer, args []string) error {
 		}
 	}
 	if len(scan.Leftovers) > 0 {
-		if err := session.ClearLeftovers(scan.Leftovers); err != nil {
+		if err := e.ClearLeftovers(ctx, scan.Leftovers); err != nil {
 			errs = append(errs, fmt.Errorf("Gear Lever's leftovers: %w", err))
 		} else {
 			fmt.Fprintf(w, "Cleared %d leftover Gear Lever records.\n", len(scan.Leftovers))

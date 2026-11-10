@@ -142,7 +142,7 @@ func New(s *session.Session) *App {
 			_, err := s.Migrate(ctx, m, p)
 			return err
 		},
-		clearLeftovers: session.ClearLeftovers,
+		clearLeftovers: func(l []gearlever.Entry) error { return s.ClearLeftovers(context.Background(), l) },
 		extTab:         ui.NewSignal(extInstalled),
 		extOrder:       ui.NewSignal(catalog.OrderPopular),
 		extSearchOrder: ui.NewSignal(catalog.OrderRelevance),

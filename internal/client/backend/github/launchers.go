@@ -134,7 +134,8 @@ func adoptLauncherDetails(info *appimage.Info, fls []foreignLauncher) string {
 	return wmclass
 }
 
-// takeOver removes launchers uas replaced and points the GNOME dock's favorites at uas's launcher instead.
+// takeOver removes launchers uas replaced and points the GNOME dock's favorites and the user's default-app
+// settings at uas's launcher instead.
 func (b *Backend) takeOver(ctx context.Context, fls []foreignLauncher, desktopFile string,
 	progress func(backend.Progress)) {
 	if len(fls) == 0 {
@@ -148,6 +149,9 @@ func (b *Backend) takeOver(ctx context.Context, fls []foreignLauncher, desktopFi
 		}
 	}
 	b.replaceFavorites(ctx, ids, filepath.Base(desktopFile))
+	if n := b.replaceDefaultApps(ids, filepath.Base(desktopFile)); n > 0 {
+		report(progress, "Kept it as the default app for what it opened")
+	}
 	b.refreshLaunchers(ctx)
 }
 

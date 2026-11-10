@@ -68,7 +68,7 @@ func TestMigrate(t *testing.T) {
 		"From Gear Lever, in ~/AppImages. uas will update it from curseforge.overwolf.com.",
 		"A file in ~/Downloads. It doesn't say where its updates come from, so uas can't update it.",
 		"Can't be migrated: uas already manages Ghostty 1.4.0.",
-		"T3 Code (Beta), Ghostty. Only Gear Lever's notes and icons of them are removed.",
+		"T3 Code (Beta), Ghostty. Only Gear Lever's notes and icons of them are removed, and default-app settings",
 	} {
 		if !strings.Contains(list, want) {
 			t.Errorf("the dialog doesn't say %q:\n%s", want, list)

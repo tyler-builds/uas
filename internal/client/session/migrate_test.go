@@ -28,7 +28,9 @@ func TestMigrateFromGearLever(t *testing.T) {
 	apps := filepath.Join(data, "applications")
 	folder := filepath.Join(home, "AppImages")
 	conf := gearlever.ConfPaths(home)[0]
-	for _, d := range []string{apps, filepath.Join(folder, ".icons"), filepath.Join(home, "Downloads"), filepath.Dir(conf)} {
+	config := filepath.Join(home, ".config")
+	for _, d := range []string{apps, filepath.Join(folder, ".icons"), filepath.Join(home, "Downloads"), filepath.Dir(conf),
+		filepath.Join(config, "autostart")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -47,6 +49,17 @@ func TestMigrateFromGearLever(t *testing.T) {
 	launcher := filepath.Join(apps, "helium.desktop")
 	write(launcher, []byte("[Desktop Entry]\nType=Application\nName=Helium\nIcon="+filepath.Join(folder, ".icons", "helium")+
 		"\nTryExec="+helium+"\nExec=env DESKTOPINTEGRATION=1 "+helium+" %U\nX-AppImage-Version=1.0\n"))
+	// What the user set up around it: it opens web links, starts at login, and keeps its data beside its file.
+	mimeapps := filepath.Join(config, "mimeapps.list")
+	write(mimeapps, []byte("[Default Applications]\nx-scheme-handler/https=helium.desktop\n"+
+		"text/html=helium.desktop;other.desktop;\nx-scheme-handler/mailto=mail.desktop\n\n[Added Associations]\n"+
+		"image/png=viewer.desktop;helium.desktop;\n"))
+	autostart := filepath.Join(config, "autostart", "helium.desktop")
+	write(autostart, []byte("[Desktop Entry]\nType=Application\nName=Helium\nExec="+helium+" --hidden\n"))
+	if err := os.MkdirAll(helium+".home", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(helium+".home", "profile"), []byte("the user's data"))
 	// Ghostty is on record too, but its file is gone: a leftover.
 	write(conf, []byte("[DEFAULT]\nfetch-updates-in-background = no\n\n[app.aaa111]\nname = Helium\nfile_path = "+helium+
 		"\n\n[app.aaa111.update_manager]\n\n[app.bbb222]\nname = Ghostty\nfile_path = "+filepath.Join(folder, "ghostty.appimage")+"\n"))
@@ -62,7 +75,7 @@ func TestMigrateFromGearLever(t *testing.T) {
 	}
 	gh := &github.Backend{State: state.Store{Path: filepath.Join(data, "uas", "state.json")},
 		Dirs: github.Dirs{AppImages: filepath.Join(data, "uas", "appimages"), Icons: filepath.Join(data, "uas", "icons"),
-			Applications: apps},
+			Applications: apps, Config: config},
 		Client: http.DefaultClient, Forge: catalog.SourceGitHub}
 	s := &Session{Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: catalogPath, Home: home,
 		Backends: map[catalog.SourceID]backend.Backend{catalog.SourceGitHub: gh, catalog.SourceAppImage: &github.Local{GH: gh}}}
@@ -115,6 +128,24 @@ func TestMigrateFromGearLever(t *testing.T) {
 	if _, err := os.Stat(installed[0].Desktop); err != nil || !strings.HasPrefix(filepath.Base(installed[0].Desktop), "uas-") {
 		t.Errorf("uas's launcher: %q, %v", installed[0].Desktop, err)
 	}
+	// What the user set up followed it: still the default for web links, still starting at login, and its
+	// data beside the file in its new place.
+	id := filepath.Base(installed[0].Desktop)
+	got, _ := os.ReadFile(mimeapps)
+	if want := "[Default Applications]\nx-scheme-handler/https=" + id + "\ntext/html=" + id + ";other.desktop;\n" +
+		"x-scheme-handler/mailto=mail.desktop\n\n[Added Associations]\nimage/png=viewer.desktop;" + id + ";\n"; string(got) != want {
+		t.Errorf("default apps after migrating:\n%s\nwant:\n%s", got, want)
+	}
+	moved := filepath.Join(gh.Dirs.AppImages, "file__org.example.App.AppImage")
+	if got, _ := os.ReadFile(autostart); !strings.Contains(string(got), "Exec="+moved+" --hidden\n") {
+		t.Errorf("autostart entry after migrating:\n%s", got)
+	}
+	if got, err := os.ReadFile(filepath.Join(moved+".home", "profile")); err != nil || string(got) != "the user's data" {
+		t.Errorf("portable data after migrating: %q, %v", got, err)
+	}
+	if _, err := os.Stat(helium + ".home"); err == nil {
+		t.Error("the portable folder was left behind")
+	}
 	// Gear Lever's record of Helium is gone; the leftover's stays until cleared.
 	left := gearlever.Entries(home)
 	if len(left) != 1 || left[0].Name != "Ghostty" {
@@ -145,8 +176,22 @@ func TestMigrateFromGearLever(t *testing.T) {
 		}
 	}
 
-	if err := ClearLeftovers(scan.Leftovers); err != nil {
+	// A leftover of an app uas manages now, as after a move that didn't carry default-app settings over: its
+	// record names an AppImage that is gone, and a setting still names Gear Lever's launcher for it.
+	raw, _ := os.ReadFile(conf)
+	write(conf, append(raw, []byte("\n[app.ccc333]\nname = Helium\nfile_path = "+filepath.Join(folder, "helium_old.appimage")+"\n")...))
+	raw, _ = os.ReadFile(mimeapps)
+	write(mimeapps, append(raw, []byte("x-scheme-handler/http=helium_old.desktop\nx-scheme-handler/ghostty=ghostty.desktop\n")...))
+	if scan, err = s.ScanMigrations(ctx); err != nil || len(scan.Leftovers) != 2 {
+		t.Fatalf("leftovers = %+v, %v", scan.Leftovers, err)
+	}
+	if err := s.ClearLeftovers(ctx, scan.Leftovers); err != nil {
 		t.Fatal(err)
+	}
+	// Helium's stale setting points at uas's launcher; Ghostty's stays, since uas has no Ghostty to point it at.
+	if got, _ := os.ReadFile(mimeapps); !strings.Contains(string(got), "x-scheme-handler/http="+id+"\n") ||
+		!strings.Contains(string(got), "x-scheme-handler/ghostty=ghostty.desktop\n") {
+		t.Errorf("default apps after clearing leftovers:\n%s", got)
 	}
 	if left := gearlever.Entries(home); len(left) != 0 {
 		t.Errorf("records after clearing = %+v", left)
