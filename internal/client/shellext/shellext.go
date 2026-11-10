@@ -7,9 +7,12 @@ package shellext
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -61,6 +64,8 @@ type Extension struct {
 	HasPrefs bool
 	// HasUpdate is whether the Shell has downloaded a newer version, which it installs at the next login.
 	HasUpdate bool
+	// UpdateVersion is that newer version, when it can be read from the download.
+	UpdateVersion string
 	// CanChange is false when the system's settings lock which extensions are on.
 	CanChange bool
 	// Error is why it failed to load, with StateError.
@@ -100,9 +105,59 @@ type Bus interface {
 // Manager manages the extensions of the running GNOME Shell.
 type Manager struct {
 	Bus Bus
+	// UpdatesDir is where the Shell unpacks the updates it downloads, one folder per UUID, until it installs
+	// them at the next login. Empty means the Shell's own: gnome-shell/extension-updates in the user's data
+	// folder.
+	UpdatesDir string
 
 	mu      sync.Mutex
 	version string
+}
+
+// updatesDir is where the Shell keeps downloaded updates.
+func (m *Manager) updatesDir() string {
+	if m.UpdatesDir != "" {
+		return m.UpdatesDir
+	}
+	data := os.Getenv("XDG_DATA_HOME")
+	if !filepath.IsAbs(data) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		data = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(data, "gnome-shell", "extension-updates")
+}
+
+// downloadedVersion reads the version of the update the Shell downloaded for an extension, or "".
+func (m *Manager) downloadedVersion(uuid string) string {
+	dir := m.updatesDir()
+	if dir == "" || checkUUID(uuid) != nil {
+		return ""
+	}
+	f, err := os.Open(filepath.Join(dir, uuid, "metadata.json"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	var meta struct {
+		Version     any    `json:"version"`
+		VersionName string `json:"version-name"`
+	}
+	if json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(&meta) != nil {
+		return ""
+	}
+	if v := strings.TrimSpace(meta.VersionName); v != "" {
+		return v
+	}
+	switch v := meta.Version.(type) {
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case string:
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 // Detect returns a manager when this session runs GNOME Shell, and nil otherwise. It doesn't connect until
@@ -186,6 +241,9 @@ func (m *Manager) List(ctx context.Context) ([]Extension, error) {
 		if e.Name == "" {
 			e.Name = e.UUID
 		}
+		if e.HasUpdate {
+			e.UpdateVersion = m.downloadedVersion(e.UUID)
+		}
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -195,6 +253,22 @@ func (m *Manager) List(ctx context.Context) ([]Extension, error) {
 		}
 		return out[i].UUID < out[j].UUID
 	})
+	return out, nil
+}
+
+// Updates returns the extensions with an update waiting: one the Shell has downloaded and installs the next
+// time the user logs in. The Shell can't swap a running extension's code, so nothing installs them sooner.
+func (m *Manager) Updates(ctx context.Context) ([]Extension, error) {
+	list, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []Extension
+	for _, e := range list {
+		if e.HasUpdate {
+			out = append(out, e)
+		}
+	}
 	return out, nil
 }
 
@@ -320,8 +394,10 @@ func (m *Manager) OpenPrefs(ctx context.Context, uuid string) error {
 	return m.Bus.Call(ctx, "OpenExtensionPrefs", []any{uuid, "", map[string]dbus.Variant{}})
 }
 
-// CheckUpdates asks the Shell to look for newer versions of the user's extensions now. It downloads what it
-// finds and installs it at the next login; Extension.HasUpdate then says which.
+// CheckUpdates asks the Shell to look for newer versions of the user's extensions now. The call returns at
+// once; the Shell asks extensions.gnome.org, downloads what it finds, and installs it at the next login.
+// Extension.HasUpdate then says which. It only checks the user's extensions: the system's update with the
+// system.
 func (m *Manager) CheckUpdates(ctx context.Context) error {
 	return m.Bus.Call(ctx, "CheckForUpdates", nil)
 }

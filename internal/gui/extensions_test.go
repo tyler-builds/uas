@@ -3,8 +3,10 @@ package gui
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -92,6 +94,38 @@ func (f *fakeShell) called(call string) bool {
 	return slices.Contains(f.calls, call)
 }
 
+// count is how many times a call was made.
+func (f *fakeShell) count(call string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		if c == call {
+			n++
+		}
+	}
+	return n
+}
+
+// set changes a field of an extension, as the Shell does when something happens to it.
+func (f *fakeShell) set(uuid, key string, value any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.extensions[uuid][key] = value
+}
+
+// writeUpdate puts a downloaded update for an extension in dir, as the Shell unpacks one.
+func writeUpdate(t testing.TB, dir, uuid, version string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, uuid), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, uuid, "metadata.json"), []byte(`{"version-name": "`+version+`"}`),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *fakeShell) has(uuid string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -144,7 +178,7 @@ func extTestApp(t *testing.T) (*App, *fakeShell) {
 		Backends:    map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: &fakeBackend{src: catalog.SourceFlathub}},
 		Telemetry:   telemetry.Nop{},
 		CatalogPath: path,
-		Extensions:  &shellext.Manager{Bus: shell},
+		Extensions:  &shellext.Manager{Bus: shell, UpdatesDir: filepath.Join(dir, "extension-updates")},
 	}
 	a := New(s)
 	a.icons.dir = filepath.Join(dir, "images")
@@ -260,5 +294,104 @@ func TestNoExtensionsOffGNOME(t *testing.T) {
 	u.WaitFor("the Notes row", func() bool { return u.Has("row:org.example.Notes") })
 	if u.HasName("Extensions") {
 		t.Error("an Extensions item without GNOME Shell")
+	}
+}
+
+// TestExtensionUpdatesWait checks that the Updates page lists an extension whose update GNOME Shell has
+// downloaded, as waiting for the next login, and that Refresh asks the Shell to look for more.
+func TestExtensionUpdatesWait(t *testing.T) {
+	a, shell := extTestApp(t)
+	a.goTo(view{page: pageUpdates})
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+
+	// Nothing waits yet. Opening the page asked the Shell to look.
+	u.WaitFor("an empty Updates page", func() bool { return u.HasName("Everything is up to date") })
+	u.WaitFor("the first check", func() bool { return shell.count("CheckForUpdates ") == 1 })
+	if u.Has("ext-update:dock@example.com") {
+		t.Fatal("an extension update listed before there is one")
+	}
+
+	// The Shell downloads an update for Dock. The page asks the Shell again by itself.
+	writeUpdate(t, a.s.Extensions.UpdatesDir, "dock@example.com", "111")
+	shell.set("dock@example.com", "hasUpdate", true)
+	u.Advance(6 * time.Second)
+	u.WaitFor("the waiting update", func() bool { return u.Has("ext-update:dock@example.com") })
+	waitText(t, u, "ext-update:dock@example.com", "Version 110 to 111")
+	waitText(t, u, "ext-update:dock@example.com", "At next login")
+	if u.HasName("Everything is up to date") {
+		t.Error("the page says everything is up to date with an extension update waiting")
+	}
+	// Nothing to press for it: Update all is for apps.
+	if u.HasRole(access.RoleButton, "Update 1 app") {
+		t.Error("an Update button for an extension, which only GNOME can update")
+	}
+
+	// Refresh asks the Shell to look again, whenever it last did.
+	clickButton(u, "Refresh")
+	u.WaitFor("the second check", func() bool { return shell.count("CheckForUpdates ") == 2 })
+
+	// The Extensions page says which version waits.
+	a.goTo(view{page: pageExtensions})
+	waitText(t, u, "ext:dock@example.com", "version 111 installs at next login")
+}
+
+// TestRestoreExtensions checks that restoring an export installs its extensions through GNOME Shell and
+// switches on the ones that are here but off.
+func TestRestoreExtensions(t *testing.T) {
+	a, shell := extTestApp(t)
+	ex := session.Export{Version: session.ExportVersion, System: "Bazzite", Extensions: []session.ExportedExtension{
+		{UUID: "clock@example.com", Name: "Clock", Enabled: true},                     // not here: install
+		{UUID: "caffeine@example.com", Name: "Caffeine", Enabled: true, System: true}, // here but off: switch on
+		{UUID: "dock@example.com", Name: "Dock", Enabled: true},                       // here and on
+		{UUID: "old@example.com", Name: "Old", Enabled: true},                         // not for GNOME 51
+	}}
+	path := filepath.Join(t.TempDir(), "export.json")
+	if err := writeExport(path, ex); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.planRestore(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.exts) != 4 || len(p.extTodo()) != 2 {
+		t.Fatalf("plan = %+v", p.exts)
+	}
+	a.goTo(view{page: pageInstalled})
+	a.restore.Set(p)
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+
+	const title = "Restore apps from Bazzite"
+	u.WaitFor("the restore dialog", func() bool { return u.HasRole(access.RoleAlertDialog, title) })
+	d := u.ByRole(access.RoleAlertDialog, title)
+	list := u.Get("restore-list").Text()
+	for _, want := range []string{"Clock · GNOME extension", "Caffeine · GNOME extension, here already: switch on",
+		"Old · GNOME extension (no version for GNOME 51)"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("the dialog doesn't list %q:\n%s", want, list)
+		}
+	}
+	if want := "0 apps to install, 0 already here. 2 extensions to restore; GNOME asks you about each one it installs."; !u.HasName(want) {
+		t.Errorf("the dialog doesn't say %q", want)
+	}
+	d.ByRole(access.RoleButton, "Restore").Click()
+	u.WaitFor("Clock to be installed", func() bool { return shell.has("clock@example.com") })
+	u.WaitFor("Caffeine to be switched on", func() bool { return shell.enabled("caffeine@example.com") })
+	if shell.has("old@example.com") {
+		t.Error("installed an extension this GNOME can't run")
+	}
+
+	// An export made here lists what a restore elsewhere needs: the user's, and the system's that are on.
+	got, err := a.s.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uuids []string
+	for _, e := range got.Extensions {
+		uuids = append(uuids, e.UUID)
+	}
+	if want := []string{"caffeine@example.com", "clock@example.com", "dock@example.com"}; !slices.Equal(uuids, want) {
+		t.Errorf("exported %q, want %q", uuids, want)
 	}
 }

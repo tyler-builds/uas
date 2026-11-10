@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/notify"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/run"
@@ -48,7 +50,8 @@ type Result struct {
 const selfKey = "uas"
 
 // Check refreshes the catalog (GitHub and Codeberg updates come from it) and lists the installed
-// apps that have updates, noting which weren't in the last notification. Only Notify remembers them.
+// apps that have updates, and the GNOME Shell extensions with one waiting for the next login, noting which
+// weren't in the last notification. Only Notify remembers them.
 func Check(ctx context.Context, s *session.Session) (Result, error) {
 	// A failed refresh still leaves the last catalog, which is good enough for Flathub and Homebrew.
 	_, _ = refresh.Refresh(ctx, session.RefreshOptions(s.CatalogPath))
@@ -65,6 +68,16 @@ func Check(ctx context.Context, s *session.Session) (Result, error) {
 		if _, ok := ups[in.Key()]; ok {
 			r.Updates = append(r.Updates, in.Key())
 			r.Names[in.Key()] = in.Name
+		}
+	}
+	// Extension updates GNOME Shell has downloaded. It installs them at the next login, so the Updates page
+	// lists them as waiting.
+	if exts, err := s.ExtensionUpdates(ctx); err == nil {
+		for _, e := range exts {
+			k := backend.UpdateKey(catalog.SourceGNOMEExtensions, "user", e.UUID)
+			r.Updates = append(r.Updates, k)
+			r.Names[k] = e.Name
+			ups[k] = e.UpdateVersion
 		}
 	}
 	// uas itself, for released builds.

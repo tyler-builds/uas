@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -74,7 +75,16 @@ func TestList(t *testing.T) {
 		"gone@example.com": variants(map[string]any{"uuid": "gone@example.com", "name": "Gone", "state": 99.0}),
 		"bad uuid":         variants(map[string]any{"name": "Bad"}),
 	}}
-	m := &Manager{Bus: bus}
+	// The update the Shell downloaded for Dash to Dock, as it unpacks it.
+	updates := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(updates, "dash-to-dock@micxgx.gmail.com"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(updates, "dash-to-dock@micxgx.gmail.com", "metadata.json"),
+		[]byte(`{"uuid": "dash-to-dock@micxgx.gmail.com", "version": 111}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Bus: bus, UpdatesDir: updates}
 	got, err := m.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +95,7 @@ func TestList(t *testing.T) {
 			HasPrefs: true, CanChange: true},
 		{UUID: "dash-to-dock@micxgx.gmail.com", Name: "Dash to Dock", Description: "A dock",
 			URL: "https://micheleg.github.io/dash-to-dock/", Version: "110", State: StateActive, Enabled: true,
-			HasPrefs: true, HasUpdate: true, CanChange: true},
+			HasPrefs: true, HasUpdate: true, UpdateVersion: "111", CanChange: true},
 		{UUID: "old@example.com", Name: "Old", State: StateOutOfDate, Enabled: true},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -96,6 +106,22 @@ func TestList(t *testing.T) {
 	}
 	if p := got[3].Problem(); p != "Not made for this version of GNOME" {
 		t.Errorf("Problem = %q", p)
+	}
+	ups, err := m.Updates(context.Background())
+	if err != nil || len(ups) != 1 || ups[0].UUID != "dash-to-dock@micxgx.gmail.com" || ups[0].UpdateVersion != "111" {
+		t.Errorf("Updates = %+v, %v", ups, err)
+	}
+	// A version name wins over the number, and a download that can't be read gives no version.
+	os.WriteFile(filepath.Join(updates, "dash-to-dock@micxgx.gmail.com", "metadata.json"),
+		[]byte(`{"version": 111, "version-name": "111.2"}`), 0o644)
+	if v := m.downloadedVersion("dash-to-dock@micxgx.gmail.com"); v != "111.2" {
+		t.Errorf("version name = %q", v)
+	}
+	if v := m.downloadedVersion("caffeine@patapon.info"); v != "" {
+		t.Errorf("version of no download = %q", v)
+	}
+	if v := m.downloadedVersion("../" + filepath.Base(updates)); v != "" {
+		t.Errorf("a path was read as a UUID: %q", v)
 	}
 }
 

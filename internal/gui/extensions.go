@@ -67,6 +67,90 @@ func (a *App) shell(ctx *ui.Context) ui.QueryResult[shellState] {
 	}, ui.QueryStaleTime(5*time.Second))
 }
 
+// extensionUpdates are the extensions with an update GNOME Shell has downloaded, which it installs at the
+// next login.
+func (a *App) extensionUpdates(ctx *ui.Context) []shellext.Extension {
+	if a.s.Extensions == nil {
+		return nil
+	}
+	var out []shellext.Extension
+	for _, e := range a.shell(ctx).Data.list {
+		if e.HasUpdate {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// checkExtensionUpdates asks GNOME Shell to look for newer versions of the user's extensions, at most once
+// an hour unless force is set: the Shell asks extensions.gnome.org each time, and looks once a day by
+// itself. The Shell downloads what it finds in its own time; the extensions query then shows it.
+func (a *App) checkExtensionUpdates(ctx context.Context, force bool) {
+	if a.s.Extensions == nil {
+		return
+	}
+	now := time.Now().UnixNano()
+	if last := a.extCheckedAt.Load(); !force && last != 0 && now-last < int64(time.Hour) {
+		return
+	}
+	a.extCheckedAt.Store(now)
+	_ = a.s.Extensions.CheckUpdates(ctx) // the Shell reports nothing; a failure shows on the Extensions page
+}
+
+// extUpdatesSection lists, on the Updates page, the extensions whose update waits for the next login. It
+// keeps asking GNOME Shell while the page is on screen, and shows nothing when there are none.
+func (a *App) extUpdatesSection(ctx *ui.Context) ui.Element {
+	if a.s.Extensions == nil {
+		return ui.Div().Display(false)
+	}
+	return ui.Component(func(ctx *ui.Context) ui.Element {
+		keepFresh(ctx)
+		waiting := a.extensionUpdates(ctx)
+		if len(waiting) == 0 {
+			return ui.Div().Display(false)
+		}
+		rows := make([]ui.Element, 0, len(waiting))
+		for _, e := range waiting {
+			rows = append(rows, a.extUpdateRow(ctx, e))
+		}
+		return ui.Div().Shrink(0).Child(section(sectionHeader(ctx, "Extensions",
+			"GNOME has downloaded these updates. It installs them the next time you log in, since a running "+
+				"extension can't be replaced."), settingsList(ctx, rows...)))
+	}).Key("ext-updates")
+}
+
+// extUpdateRow is one extension with an update waiting.
+func (a *App) extUpdateRow(ctx *ui.Context, e shellext.Extension) ui.Element {
+	return ui.Component(func(ctx *ui.Context) ui.Element {
+		t := ctx.Theme()
+		app := a.catalogExtension(ctx, e.UUID)
+		icon := ""
+		if app != nil {
+			icon = app.IconURL
+		}
+		versions := "A newer version"
+		switch {
+		case e.Version != "" && e.UpdateVersion != "":
+			versions = "Version " + e.Version + " to " + e.UpdateVersion
+		case e.UpdateVersion != "":
+			versions = "Version " + e.UpdateVersion
+		case e.Version != "":
+			versions = "Newer than version " + e.Version
+		}
+		text := ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Text(e.Name).FontSize(14).Medium().Truncate()).
+			Child(ui.Text(versions).FontSize(12).TextColor(t.TextSubtle).Truncate())
+		if app != nil {
+			text = text.Cursor(ui.CursorPointer).OnClick(func() { a.openExtension(app.ID) }).
+				Role(access.RoleLink).Label(e.Name + " details").TabIndex(0)
+		}
+		return ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(60)).PaddingX(space4).PaddingY(space2 + 2).
+			Child(a.extIcon(ctx, icon, 36, e.Name)).
+			Child(text).
+			Child(statusChip(ctx, "At next login", t.Warning))
+	}).Key("ext-update:" + e.UUID)
+}
+
 // refreshExtensions asks GNOME Shell again.
 func refreshExtensions(ctx *ui.Context) {
 	ui.InvalidateQueries(ctx, func(key string) bool { return key == extensionsKey })
@@ -254,7 +338,10 @@ func extNotes(e shellext.Extension) []string {
 	if e.Version != "" {
 		notes = append(notes, "Version "+e.Version)
 	}
-	if e.HasUpdate {
+	switch {
+	case e.HasUpdate && e.UpdateVersion != "":
+		notes = append(notes, "version "+e.UpdateVersion+" installs at next login")
+	case e.HasUpdate:
 		notes = append(notes, "update installs at next login")
 	}
 	return notes
@@ -677,7 +764,11 @@ func (a *App) extensionAction(ctx *ui.Context, app *catalog.App, l catalog.Listi
 			col = col.Child(ui.Alert("Not running").Danger().Description(p))
 		}
 		if in.HasUpdate {
-			col = col.Child(caption(ctx, "GNOME has a newer version ready. It installs the next time you log in."))
+			newer := "a newer version"
+			if in.UpdateVersion != "" {
+				newer = "version " + in.UpdateVersion
+			}
+			col = col.Child(caption(ctx, "GNOME has "+newer+" ready. It installs the next time you log in."))
 		}
 		if !sh.Data.allowed {
 			col = col.Child(caption(ctx, "GNOME's main switch for extensions is off, so it isn't running."))

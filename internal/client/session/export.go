@@ -19,8 +19,8 @@ import (
 // ExportVersion is the format version of an export file.
 const ExportVersion = 1
 
-// Export is a list of installed apps, saved to install the same apps on another machine (or this one, after
-// a reinstall). It carries no file paths or user names.
+// Export is a list of installed apps and GNOME Shell extensions, saved to install the same ones on another
+// machine (or this one, after a reinstall). It carries no file paths or user names.
 type Export struct {
 	Version    int       `json:"uas_export"`
 	ExportedAt time.Time `json:"exported_at"`
@@ -30,6 +30,9 @@ type Export struct {
 	Apps         []ExportedApp `json:"apps"`
 	// FlatpakOverrides are the user's Flatpak permission overrides, by app ID, as flatpak writes them.
 	FlatpakOverrides map[string]string `json:"flatpak_overrides,omitempty"`
+	// Extensions are the GNOME Shell extensions the user added or switched on (see PlanExtensions). Versions
+	// of uas from before extensions ignore them.
+	Extensions []ExportedExtension `json:"extensions,omitempty"`
 }
 
 // ExportedApp is one installed app.
@@ -42,7 +45,8 @@ type ExportedApp struct {
 	Scope   string           `json:"scope,omitempty"`
 }
 
-// Export lists the installed apps, and the user's Flatpak permission changes.
+// Export lists the installed apps, the user's Flatpak permission changes, and in a GNOME session the
+// extensions.
 func (s *Session) Export(ctx context.Context) (Export, error) {
 	apps, err := s.Installed(ctx)
 	if err != nil {
@@ -62,6 +66,11 @@ func (s *Session) Export(ctx context.Context) (Export, error) {
 			}
 		}
 	}
+	exts, err := s.exportExtensions(ctx)
+	if err != nil {
+		return Export{}, fmt.Errorf("extensions: %w", err)
+	}
+	ex.Extensions = exts
 	return ex, nil
 }
 

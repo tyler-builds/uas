@@ -98,6 +98,8 @@ type App struct {
 	startup sync.Once // the background catalog check at start
 	// checkedAt is when updates were last checked, in Unix nanoseconds.
 	checkedAt atomic.Int64
+	// extCheckedAt is when GNOME Shell was last asked to look for extension updates, in Unix nanoseconds.
+	extCheckedAt atomic.Int64
 }
 
 // New creates the app for a session.
@@ -536,6 +538,7 @@ func (a *App) showSearch() {
 // ten minutes; jobs and the Refresh button check again.
 func (a *App) updates(ctx *ui.Context) ui.QueryResult[map[string]string] {
 	return ui.Query(ctx, "updates", func(c context.Context) (map[string]string, error) {
+		a.checkExtensionUpdates(c, false)
 		ups, err := a.s.Updates(c)
 		if len(ups) > 0 || err == nil {
 			a.checkedAt.Store(time.Now().UnixNano())

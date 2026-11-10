@@ -34,6 +34,9 @@ func TestShots(t *testing.T) {
 	}
 	useBundledFont(t)
 	spotlightDay = func() int { return 0 } // the most popular app, so the shots don't change by the day
+	// The update GNOME Shell has downloaded for Dash to Dock.
+	updatesDir := t.TempDir()
+	writeUpdate(t, updatesDir, "dash-to-dock@micxgx.gmail.com", "111")
 	light, dark := Themes()
 	fp := &fakeBackend{src: catalog.SourceFlathub, installed: []backend.InstalledApp{
 		{Source: catalog.SourceFlathub, Ref: "app/org.mozilla.firefox/x86_64/stable", AppID: "org.mozilla.firefox", Name: "Firefox", Version: "159.0.1", Scope: "system"},
@@ -65,8 +68,8 @@ func TestShots(t *testing.T) {
 		{"search-narrow", func(a *App) { a.query.Set("discord"); a.search.Set("discord"); a.goTo(view{page: pageSearch}) },
 			800, "", 1180},
 		{"installed", func(a *App) { a.goTo(view{page: pageInstalled}) }, 640, "", 0},
-		{"restore", func(a *App) { a.goTo(view{page: pageInstalled}); a.restore.Set(shotRestorePlan()) }, 700, "", 0},
-		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 700, "", 0},
+		{"restore", func(a *App) { a.goTo(view{page: pageInstalled}); a.restore.Set(shotRestorePlan()) }, 760, "", 0},
+		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 760, "", 0},
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
 		// The system's own ujust commands, when this machine has them.
 		{"tools", func(a *App) { a.goTo(view{page: pageTools}) }, 1100, "", 0},
@@ -100,7 +103,7 @@ func TestShots(t *testing.T) {
 				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true}, Tools: ujust.Detect(),
 				SysApps: map[string]sysapps.App{"com.valvesoftware.Steam": {ID: "com.valvesoftware.Steam", Name: "Steam",
 					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
-				Extensions: &shellext.Manager{Bus: shotShell()},
+				Extensions: &shellext.Manager{Bus: shotShell(), UpdatesDir: updatesDir},
 				Backends: map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: fp,
 					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh}}
 			a := New(s)
@@ -199,6 +202,11 @@ func shotRestorePlan() *restorePlan {
 				Listing: catalog.Listing{Source: catalog.SourceFlathub}, Note: "from Flathub instead of Fedora"},
 			{App: app(catalog.SourceAppImage, "CurseForge"), Action: session.RestoreManual,
 				Note: "added from a file; add the AppImage again"},
+		},
+		exts: []session.ExtensionRestore{
+			{Ext: session.ExportedExtension{Name: "Vitals", Enabled: true}, Action: session.RestoreInstall},
+			{Ext: session.ExportedExtension{Name: "Caffeine", Enabled: true, System: true}, Action: session.RestoreEnable},
+			{Ext: session.ExportedExtension{Name: "Dash to Dock", Enabled: true}, Action: session.RestoreInstalled},
 		}}
 }
 

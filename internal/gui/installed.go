@@ -51,6 +51,8 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 			with = append(with, in)
 		}
 	}
+	// Extension updates wait for the next login, so they are listed apart and Update all leaves them be.
+	waiting := a.extensionUpdates(ctx)
 	actions := ui.Div().Row().Align(ui.Center).Gap(space2).
 		Child(checkedLabel(a.lastChecked(), ups.Fetching)).
 		Child(ui.If(len(with) > 0, ui.Button(updatesLabel(len(with))).Icon(icons.Download).Primary().Small().
@@ -63,11 +65,14 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 	switch {
 	case res.Loading || ups.Loading:
 		return scroll(page.Child(ui.Skeleton().Height(ui.Px(80))))
-	case len(with) == 0:
+	case len(with) == 0 && len(waiting) == 0:
 		return scroll(page.Child(ui.Empty("Everything is up to date").Icon(icons.CircleCheck).
-			Description("uas checks for updates every ten minutes while it runs.")))
+			Description("uas checks for updates every ten minutes while it runs.")).
+			Child(a.extUpdatesSection(ctx)))
+	case len(with) == 0:
+		return scroll(page.Child(a.extUpdatesSection(ctx)))
 	}
-	return fixed(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")))
+	return fixed(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")).Child(a.extUpdatesSection(ctx)))
 }
 
 // filteredList shows apps narrowed by the top bar's filter and the source chips, with a count. The chips
@@ -179,6 +184,11 @@ func (a *App) refreshButton(ctx *ui.Context, res ui.QueryResult[[]backend.Instal
 		OnClick(func() {
 			res.Refetch()
 			ups.Refetch()
+			// GNOME Shell looks for extension updates itself; ask it to look now.
+			go func() {
+				a.checkExtensionUpdates(context.Background(), true)
+				ctx.Post(func() { refreshExtensions(ctx) })
+			}()
 		})
 }
 

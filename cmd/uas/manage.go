@@ -303,8 +303,24 @@ func runUpdates(ctx context.Context, w io.Writer, args []string) error {
 		}
 	}
 	tw.Flush()
-	if n == 0 {
+	exts, extErr := e.ExtensionUpdates(ctx)
+	if n == 0 && len(exts) == 0 {
 		fmt.Fprintln(w, "Everything is up to date.")
+	}
+	if len(exts) > 0 {
+		if n > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintln(w, "GNOME extensions with an update downloaded. GNOME installs it the next time you log in:")
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "NAME\tUUID\tINSTALLED\tAVAILABLE")
+		for _, x := range exts {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", truncate(x.Name, 30), x.UUID, x.Version, x.UpdateVersion)
+		}
+		tw.Flush()
+	}
+	if extErr != nil {
+		checkErr = errors.Join(checkErr, fmt.Errorf("GNOME extensions: %w", extErr))
 	}
 	switch {
 	case e.Backends[catalog.SourceFedora] != nil && e.NeedsRestart(catalog.SourceFedora):

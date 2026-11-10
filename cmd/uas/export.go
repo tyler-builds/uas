@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/tyler-builds/uas/internal/client/session"
+	"github.com/tyler-builds/uas/internal/client/shellext"
 )
 
 // runExport writes the installed apps to a file (or standard output), for "uas restore" elsewhere.
@@ -42,8 +43,11 @@ func runExport(ctx context.Context, w io.Writer, args []string) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "Saved %d apps to %s. Install them elsewhere with \"uas restore %s\".\n",
-		len(ex.Apps), *out, *out)
+	what := fmt.Sprintf("%d apps", len(ex.Apps))
+	if n := len(ex.Extensions); n > 0 {
+		what += fmt.Sprintf(" and %d GNOME extensions", n)
+	}
+	fmt.Fprintf(os.Stderr, "Saved %s to %s. Install them elsewhere with \"uas restore %s\".\n", what, *out, *out)
 	return nil
 }
 
@@ -93,15 +97,44 @@ func runRestore(ctx context.Context, w io.Writer, args []string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t\n", it.App.Name, src, action)
 	}
 	tw.Flush()
+	exts, err := e.PlanExtensions(ctx, ex)
+	if err != nil {
+		return fmt.Errorf("extensions: %w", err)
+	}
+	var extTodo []session.ExtensionRestore
+	if len(exts) > 0 {
+		fmt.Fprintln(w)
+		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "GNOME EXTENSION\tUUID\tACTION\t")
+		for _, it := range exts {
+			action := string(it.Action)
+			switch it.Action {
+			case session.RestoreInstall, session.RestoreEnable:
+				extTodo = append(extTodo, it)
+				if it.Action == session.RestoreEnable {
+					action = "switch on"
+				}
+			}
+			if it.Note != "" {
+				action += ": " + it.Note
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t\n", it.Ext.Name, it.Ext.UUID, action)
+		}
+		tw.Flush()
+	}
 	if *dry {
 		return nil
 	}
-	if len(todo) == 0 && len(ex.FlatpakOverrides) == 0 {
+	if len(todo) == 0 && len(extTodo) == 0 && len(ex.FlatpakOverrides) == 0 {
 		fmt.Fprintln(w, "Nothing to install.")
 		return nil
 	}
-	if len(todo) > 0 && !*yes {
-		ok, err := confirm(fmt.Sprintf("Install %d apps?", len(todo)))
+	if len(todo)+len(extTodo) > 0 && !*yes {
+		q := fmt.Sprintf("Install %d apps?", len(todo))
+		if len(extTodo) > 0 {
+			q = fmt.Sprintf("Install %d apps and restore %d GNOME extensions?", len(todo), len(extTodo))
+		}
+		ok, err := confirm(q)
 		if err != nil || !ok {
 			return err
 		}
@@ -128,6 +161,20 @@ func runRestore(ctx context.Context, w io.Writer, args []string) error {
 			n = "1 app"
 		}
 		fmt.Fprintf(w, "Restored your Flatpak permission changes for %s.\n", n)
+	}
+	for _, it := range extTodo {
+		if it.Action == session.RestoreEnable {
+			fmt.Fprintf(w, "Switching on %s\n", it.Ext.Name)
+		} else {
+			fmt.Fprintf(w, "Installing the extension %s. Answer GNOME's dialog to continue.\n", it.Ext.Name)
+		}
+		switch err := e.RestoreExtension(ctx, it); {
+		case errors.Is(err, shellext.ErrCancelled):
+			fmt.Fprintln(w, "  skipped: you said no in GNOME's dialog")
+		case err != nil:
+			errs = append(errs, fmt.Errorf("%s: %w", it.Ext.Name, err))
+			fmt.Fprintln(w, "  failed:", err)
+		}
 	}
 	if restart {
 		fmt.Fprintln(w, "Restart your computer to finish.")

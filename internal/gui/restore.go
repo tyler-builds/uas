@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/session"
+	"github.com/tyler-builds/uas/internal/client/shellext"
 )
 
 // restorePlan is a restore waiting for the user's OK.
@@ -20,6 +21,19 @@ type restorePlan struct {
 	file  string
 	ex    session.Export
 	items []session.RestoreItem
+	// exts are the export's GNOME Shell extensions.
+	exts []session.ExtensionRestore
+}
+
+// extTodo are the extensions to install or switch on.
+func (p *restorePlan) extTodo() []session.ExtensionRestore {
+	var out []session.ExtensionRestore
+	for _, it := range p.exts {
+		if it.Action == session.RestoreInstall || it.Action == session.RestoreEnable {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func (p *restorePlan) todo() []session.RestoreItem {
@@ -36,7 +50,7 @@ func (p *restorePlan) todo() []session.RestoreItem {
 func (a *App) backupMenu(ctx *ui.Context) ui.Element {
 	_, busy := a.running("restore")
 	trigger := ui.Button("Back up").IconEnd(icons.ChevronDown).Secondary().Small().
-		Loading(busy).Tooltip("Save the list of installed apps, or install the apps of a saved list")
+		Loading(busy).Tooltip("Save the list of installed apps and GNOME extensions, or install the ones of a saved list")
 	return ui.DropdownMenu(trigger, func() []ui.MenuItem {
 		return []ui.MenuItem{
 			{Label: "Export installed apps…", Icon: icons.FileDown, OnClick: func() { a.exportApps(ctx) }},
@@ -69,8 +83,12 @@ func (a *App) exportApps(ctx *ui.Context) {
 						ctx.Toast(ui.ToastError, errText(err)).Title("Could not export")
 						return
 					}
+					what := plural(len(ex.Apps), "app", "apps")
+					if n := len(ex.Extensions); n > 0 {
+						what += " and " + plural(n, "extension", "extensions")
+					}
 					ctx.Toast(ui.ToastSuccess, "Restore them on another computer with Back up → Restore.").
-						Title(fmt.Sprintf("Exported %s", plural(len(ex.Apps), "app", "apps")))
+						Title("Exported " + what)
 				})
 			}()
 		})
@@ -129,7 +147,11 @@ func (a *App) planRestore(ctx context.Context, path string) (*restorePlan, error
 	if err != nil {
 		return nil, err
 	}
-	return &restorePlan{file: path, ex: ex, items: items}, nil
+	exts, err := a.s.PlanExtensions(ctx, ex)
+	if err != nil {
+		return nil, fmt.Errorf("extensions: %w", err)
+	}
+	return &restorePlan{file: path, ex: ex, items: items, exts: exts}, nil
 }
 
 // restoreDialog lists what restoring an export does with each app, and installs the missing ones.
@@ -140,7 +162,7 @@ func (a *App) restoreDialog(ctx *ui.Context) ui.Element {
 	}
 	t := ctx.Theme()
 	todo := p.todo()
-	list := ui.Div().Column().Gap(space1).MaxHeight(ui.Px(320)).ScrollY()
+	list := ui.Div().Column().Gap(space1).MaxHeight(ui.Px(320)).ScrollY().Key("restore-list")
 	counts := map[session.RestoreAction]int{}
 	for _, it := range p.items {
 		counts[it.Action]++
@@ -163,10 +185,41 @@ func (a *App) restoreDialog(ctx *ui.Context) ui.Element {
 		}
 		list = list.Child(infoRow(ctx, mark, color, text))
 	}
+	// The extensions, after the apps.
+	extTodo := p.extTodo()
+	installs := 0
+	for _, it := range p.exts {
+		var mark *icons.Icon
+		color := t.TextMuted
+		text := it.Ext.Name + " · GNOME extension"
+		switch it.Action {
+		case session.RestoreInstall:
+			mark, color = icons.Download, brandColor(t)
+			installs++
+		case session.RestoreEnable:
+			mark, color = icons.Power, brandColor(t)
+			text += ", here already: switch on"
+		case session.RestoreInstalled:
+			mark = icons.Check
+		default:
+			mark = icons.TriangleAlert
+		}
+		if it.Note != "" {
+			text += " (" + it.Note + ")"
+		}
+		list = list.Child(infoRow(ctx, mark, color, text))
+	}
 	summary := fmt.Sprintf("%s to install, %d already here.", plural(len(todo), "app", "apps"),
 		counts[session.RestoreInstalled]+counts[session.RestoreSkip])
 	if n := counts[session.RestoreUnavailable] + counts[session.RestoreManual]; n > 0 {
 		summary += fmt.Sprintf(" %d can't be installed here.", n)
+	}
+	switch {
+	case installs > 0:
+		summary += fmt.Sprintf(" %s to restore; GNOME asks you about each one it installs.",
+			plural(len(extTodo), "extension", "extensions"))
+	case len(extTodo) > 0:
+		summary += fmt.Sprintf(" %s to switch on.", plural(len(extTodo), "extension", "extensions"))
 	}
 	if len(p.ex.FlatpakOverrides) > 0 {
 		summary += " Your Flatpak permission changes are restored too."
@@ -177,9 +230,9 @@ func (a *App) restoreDialog(ctx *ui.Context) ui.Element {
 	}
 	d := ui.AlertDialog(title, summary).Body(list).Width(ui.Px(520)).
 		Cancel("", func() { a.restore.Set(nil) })
-	if len(todo) > 0 || len(p.ex.FlatpakOverrides) > 0 {
+	if len(todo) > 0 || len(extTodo) > 0 || len(p.ex.FlatpakOverrides) > 0 {
 		label := "Restore"
-		if len(todo) > 0 {
+		if len(todo) > 0 && len(extTodo) == 0 {
 			label = "Install " + plural(len(todo), "app", "apps")
 		}
 		d = d.Confirm(label, func() {
@@ -190,14 +243,23 @@ func (a *App) restoreDialog(ctx *ui.Context) ui.Element {
 	return d
 }
 
-// runRestore installs the apps of a plan one after another, then restores permission changes.
+// runRestore installs the apps of a plan one after another, restores permission changes, then installs and
+// switches on its extensions.
 func (a *App) runRestore(ctx *ui.Context, p *restorePlan) {
 	todo := p.todo()
+	extTodo := p.extTodo()
+	title, done := "Restoring "+plural(len(todo), "app", "apps"), "Apps restored"
+	if len(extTodo) > 0 {
+		title, done = "Restoring apps and extensions", "Apps and extensions restored"
+		if len(todo) == 0 {
+			title, done = "Restoring "+plural(len(extTodo), "extension", "extensions"), "Extensions restored"
+		}
+	}
 	restart := false
 	for _, it := range todo {
 		restart = restart || a.s.NeedsRestart(it.Listing.Source)
 	}
-	a.startJob(ctx, "restore", "Restoring "+plural(len(todo), "app", "apps"), restart, "Apps restored",
+	a.startJob(ctx, "restore", title, restart, done,
 		func(c context.Context, prog func(backend.Progress)) error {
 			var errs []error
 			for i, it := range todo {
@@ -208,6 +270,17 @@ func (a *App) runRestore(ctx *ui.Context, p *restorePlan) {
 			}
 			if _, err := session.RestoreOverrides(p.ex); err != nil {
 				errs = append(errs, err)
+			}
+			for i, it := range extTodo {
+				msg := fmt.Sprintf("Switching on %s (%d of %d)", it.Ext.Name, i+1, len(extTodo))
+				if it.Action == session.RestoreInstall {
+					msg = fmt.Sprintf("GNOME is asking whether to install %s (%d of %d)", it.Ext.Name, i+1, len(extTodo))
+				}
+				prog(backend.Progress{Message: msg})
+				// A no in GNOME's dialog skips that extension; the rest go on.
+				if err := a.s.RestoreExtension(c, it); err != nil && !errors.Is(err, shellext.ErrCancelled) {
+					errs = append(errs, fmt.Errorf("%s: %w", it.Ext.Name, err))
+				}
 			}
 			return errors.Join(errs...)
 		})
