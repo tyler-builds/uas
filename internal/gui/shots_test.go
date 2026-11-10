@@ -75,6 +75,9 @@ func TestShots(t *testing.T) {
 		{"restore", func(a *App) { a.goTo(view{page: pageInstalled}); a.restore.Set(shotRestorePlan()) }, 760, "", 0},
 		{"updates", func(a *App) { a.goTo(view{page: pageUpdates}) }, 760, "", 0},
 		{"settings", func(a *App) { a.goTo(view{page: pageSettings}) }, 1100, "", 0},
+		// Migrate, after its scan.
+		{"migrate", func(a *App) { a.goTo(view{page: pageSettings}); a.migrate.Set(newMigratePlan(shotMigrations(), nil)) },
+			900, "", 0},
 		// The system's own ujust commands, when this machine has them.
 		{"tools", func(a *App) { a.goTo(view{page: pageTools}) }, 1100, "", 0},
 		// An app that came with the system image.

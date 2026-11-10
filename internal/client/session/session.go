@@ -56,6 +56,9 @@ type Session struct {
 	// first use; tests set it.
 	SysApps map[string]sysapps.App
 	sysOnce sync.Once
+	// Home is the user's home folder, where a migration scan looks for AppImages. Empty means the real one;
+	// tests set it.
+	Home string
 }
 
 // SystemApps returns the apps installed with the system rather than by a uas backend, such as Steam on

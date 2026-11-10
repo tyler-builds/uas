@@ -39,7 +39,8 @@ COPR packages, searched and installed from one place.
   installs anything on its own.
 - **Back up and restore.** Export the list of installed apps and GNOME extensions and install them on
   another computer, from whatever source fits it, with your Flatpak permission changes.
-- **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu.
+- **AppImages too.** Add one you downloaded and uas keeps it updated and in your app menu. Settings → Migrate
+  finds the AppImages that Gear Lever, AppImageLauncher or you set up and hands the ones you pick over to uas.
 - **A signed catalog,** rebuilt every 6 hours and verified before use.
 - **Updates itself** from signed releases.
 - **Native tools underneath.** uas installs through flatpak, brew, snap and your system's package manager (rpm-ostree, dnf, apt or
@@ -163,6 +164,7 @@ uas install org.mozilla.firefox
 | `export [-o file]` | Save the list of installed apps |
 | `restore <file>` | Install the apps of an export that aren't installed yet |
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
+| `migrate [-n] [-y] [-all]` | Hand AppImages that other tools or you set up over to uas |
 | `extensions [list \| search <words> \| install\|remove\|enable\|disable\|settings <uuid>]` | List and manage GNOME Shell extensions |
 | `self-update` | Update uas to the latest signed release |
 | `version` | Show uas's version |

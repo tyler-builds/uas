@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/gearlever"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/shellext"
@@ -83,6 +84,13 @@ type App struct {
 	restore  *ui.Signal[*restorePlan] // a restore waiting for the user's OK
 	whatsNew *ui.Signal[*whatsNew]    // an open "What's new" dialog
 
+	migrate *ui.Signal[*migratePlan] // an open Migrate dialog
+	// scanMigrations, migrateOne and clearLeftovers do the dialog's work: the session's, unless a test
+	// replaces them.
+	scanMigrations func(context.Context) (session.MigrationScan, error)
+	migrateOne     func(context.Context, session.Migration, func(backend.Progress)) error
+	clearLeftovers func([]gearlever.Entry) error
+
 	// updatedTo is the version of uas a self-update installed while this window was open, which a restart
 	// starts; "" until then.
 	updatedTo *ui.Signal[string]
@@ -128,6 +136,13 @@ func New(s *session.Session) *App {
 		restore:        ui.NewSignal[*restorePlan](nil),
 		whatsNew:       ui.NewSignal[*whatsNew](nil),
 		updatedTo:      ui.NewSignal(""),
+		migrate:        ui.NewSignal[*migratePlan](nil),
+		scanMigrations: s.ScanMigrations,
+		migrateOne: func(ctx context.Context, m session.Migration, p func(backend.Progress)) error {
+			_, err := s.Migrate(ctx, m, p)
+			return err
+		},
+		clearLeftovers: session.ClearLeftovers,
 		extTab:         ui.NewSignal(extInstalled),
 		extOrder:       ui.NewSignal(catalog.OrderPopular),
 		extSearchOrder: ui.NewSignal(catalog.OrderRelevance),
@@ -273,6 +288,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.restoreDialog(ctx)).
 		Child(a.whatsNewDialog(ctx)).
 		Child(a.extRemoveDialog(ctx)).
+		Child(a.migrateDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
 }
 

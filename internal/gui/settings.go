@@ -38,7 +38,7 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 					return
 				}
 				ctx.Toast(ui.ToastSuccess, "Settings saved")
-			})))
+			})), a.migrateRow(ctx))
 
 		checks := a.updateChecksRow(ctx)
 

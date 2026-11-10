@@ -418,6 +418,37 @@ Console, Konsole and so on), since many ask questions or for a password, and the
 Enter so the output can be read. Everything but a `status` option asks first. Recipe names and options are
 checked against plain patterns before they reach a command line.
 
+### Migrating AppImages from other tools
+
+Settings → Migrate apps to uas, and `uas migrate [-n] [-y] [-all] [-keep-leftovers]`
+(`session/migrate.go`). Only AppImages migrate: Flatpaks, Homebrew formulae and packages are already handled
+through their own tools whoever installed them, and an app installed by hand has no uninstaller uas could
+trust.
+
+A scan (`github.Backend.Strays`) lists the AppImage files uas doesn't manage: the ones launchers of other
+tools run, wherever they are (the launchers in the user's applications folder that uas didn't write and whose
+`TryExec` or `Exec` is an `.AppImage`), and the files on the top level of `~/AppImages`, `~/Applications`,
+Gear Lever's folder, `~/Apps`, `~/.local/bin`, `~/bin`, `~/Desktop` and `~/Downloads`. A file counts only if
+it starts like an AppImage (the ELF header with the `AI\x02` magic). Each is read without being run, as Add
+AppImage does, to say what migrating it does: whether it becomes the catalog's GitHub listing of the app or
+updates from its own update information, or can't update. An AppImage of an app uas already manages is
+listed but can't be migrated, since adding it would replace uas's copy, which may be newer. The ones
+another tool set up or that sit in an AppImage folder are offered selected; a file that merely sits in
+Downloads or on the desktop is listed for the user to pick.
+
+Migrating one is Add AppImage (`Session.AddAppImage`): the file moves into uas's folder and is deleted from
+where it was only once uas's copy is in place, uas writes its launcher and removes the other tool's, and
+GNOME's dock favorites point at the new one. Then the other tool's own notes are removed
+(`internal/client/gearlever`). Gear Lever keeps a section per AppImage in `gearlever.conf`
+(`[app.<md5>]` with `name` and `file_path`, plus sub-sections such as `update_manager`) and an icon in
+`<folder>/.icons/<file name>`; the section and icon of a migrated AppImage are removed, and the rest of the
+file is left byte for byte. Sections whose AppImage is already gone ("leftovers", as after AppImages were
+moved out of Gear Lever's folder by something else) are listed too and cleared when the user leaves that
+box ticked. Tested for real against Gear Lever 4.6.2 (Flatpak): an AppImage integrated with
+`gearlever --integrate`, then migrated. AppImageLauncher's launchers (`appimagekit_*.desktop`) are recognised
+and replaced, but that path has not been tested against AppImageLauncher itself, and the icons it caches
+are left.
+
 ### GNOME Shell extensions
 
 `internal/client/shellext`, in a GNOME session (`XDG_CURRENT_DESKTOP` names GNOME and `org.gnome.Shell` is on
@@ -562,6 +593,7 @@ uas/
 │   │   └── publish/         # build db, compress, sign, upload
 │   ├── client/
 │   │   ├── appimage/        # reads .desktop and icon from an AppImage; writes the launcher
+│   │   ├── gearlever/       # Gear Lever's records of its AppImages, for migrating them
 │   │   ├── paths/
 │   │   ├── platform/
 │   │   ├── refresh/         # download, verify and install the catalog
