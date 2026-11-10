@@ -148,6 +148,16 @@ All endpoints below need confirming during the first spike.
   4,500, most of them unmaintained. An
   unverified snap that shares a reviewed app's name is hidden as an unofficial copy; a verified one joins it.
 
+- **GNOME Shell extensions** (`fetch/gnome`): extensions.gnome.org's v1 API
+  (`/api/v1/extensions/?shell_version=N`), 100 a page. The list doesn't say which GNOME releases an extension
+  supports, so the fetcher asks once per release, from GNOME 45 (the first whose extensions still load: 45
+  changed the extension format) up to the first release with none, and records the releases each extension
+  turned up under (`Listing.Shells`). In November 2026 that is GNOME 45 to 51, about 90 pages. The site
+  publishes no rate limit and its Django settings set no throttle, so pages are read one a second and the
+  result is cached like GitHub's. Every version on the site is reviewed by GNOME's reviewers before it is
+  listed, so all are kept. Listings are `Kind` `shell-extension` with the UUID as their ref; icons and the
+  one screenshot link to the site.
+
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
 Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
@@ -168,6 +178,9 @@ cases (Fedora's `ardour8` and `ardour9`) stay separate, while Neovim on Flathub,
 one app. Bare forge
 hosts such as `github.com` don't count as a homepage. With Flathub and Fedora 44/45, 581 apps merge. Each merge records why it happened,
 so wrong merges can be debugged and overridden with a manual overrides file in the repo.
+
+Shell extensions are never merged, into apps or each other: GSConnect the extension shares a name and a repo
+with nothing it should become a source of. Each becomes its own app, `gnome-extensions:<uuid>`.
 
 **Unofficial copies** (`merge/copies.go`). GitHub and COPR are where anyone can publish anything, so next to an
 app from a reviewed source (Flathub, Fedora, Homebrew) a copy is shown only if it comes from the app's own
@@ -235,6 +248,13 @@ apps across sources themselves. The signed manifest names every edition's file (
 and falls back to `other` when there is none for its release (a new Debian, say). The hash of the installed
 file is kept beside it (`catalog.db.sha256`), so a client whose system changes edition downloads the new
 one. Catalogs of the last few runs are kept for clients mid-download.
+
+**Extensions in the catalog.** Shell extensions are rows of the same `apps` and `listings` tables, in every
+edition, but with their own search index (`extensions_fts`), and `Search` and `Browse` return either apps or
+extensions, never both. They are also kept out of the build info's `sources` and app count (they have their
+own `extensions` entry). Together that hides them from versions of uas from before extensions, which would
+otherwise show them in app searches with no way to install them, so adding them needed no schema version
+change.
 
 **Free-tier fit:** R2's free tier (10 GB, no egress fees) holds this easily: the Flathub-only catalog is
 5.4 MB compressed (27 MB uncompressed). The Worker's free tier allows 100,000 requests a day, and each client
@@ -391,6 +411,32 @@ Console, Konsole and so on), since many ask questions or for a password, and the
 Enter so the output can be read. Everything but a `status` option asks first. Recipe names and options are
 checked against plain patterns before they reach a command line.
 
+### GNOME Shell extensions
+
+`internal/client/shellext`, in a GNOME session (`XDG_CURRENT_DESKTOP`), talks to the Shell's own D-Bus
+service, `org.gnome.Shell.Extensions`, as GNOME's Extensions app and the browser connector do. Extensions
+aren't apps and have no backend: the Shell lists every extension it knows (`ListExtensions`: the user's under
+`~/.local/share/gnome-shell/extensions` and the system's under `/usr`, whoever installed them), installs one
+from extensions.gnome.org by UUID after asking the user in its own dialog (`InstallRemoteExtension`, which
+answers `successful` or `cancelled`), removes the user's (`UninstallExtension`), switches them
+(`EnableExtension`, `DisableExtension`), opens their settings (`OpenExtensionPrefs`) and checks for updates
+(`CheckForUpdates`), which it downloads and installs at the next login. uas never unpacks an extension itself,
+and nothing but a UUID (letters, digits and `-@._`) reaches the bus. The Shell is written in JavaScript, so
+its numbers arrive as doubles.
+
+The desktop app's Extensions page (in the sidebar on GNOME only) has two tabs. Installed lists what the Shell
+reports, the user's and then the system's ("Included with Bazzite", which can be switched but not removed),
+each with its switch, settings and removal, matched to the catalog by UUID for an icon and a page; it asks the
+Shell again every five seconds while it is on screen, so changes made in other apps show up. Browse lists the
+catalog's extensions that have a version for the running GNOME release, most downloaded first, and the top
+bar searches them. An extension's page shows its downloads, the releases it supports, its screenshot and
+description (plain text, as its author wrote it), and Install or its switch. uas doesn't ask before
+installing, since the Shell does. CLI: `uas extensions [list | search | install | remove | enable | disable |
+settings]`.
+
+Not yet: extensions aren't in exports, and the Updates page doesn't list them (the Shell applies their
+updates itself, at login).
+
 ### Back up and restore
 
 `session/export.go`. An export is JSON: each installed app's source, ref, app ID, package and name, the
@@ -478,7 +524,8 @@ uas/
 │   │   │   ├── fedora/
 │   │   │   ├── copr/
 │   │   │   ├── homebrew/
-│   │   │   └── github/
+│   │   │   ├── github/
+│   │   │   └── gnome/       # extensions.gnome.org
 │   │   ├── merge/           # dedupe and linking
 │   │   ├── trust/           # scoring
 │   │   └── publish/         # build db, compress, sign, upload
@@ -493,6 +540,7 @@ uas/
 │   │   ├── jobs/
 │   │   ├── session/         # engine shared by CLI and GUI
 │   │   ├── settings/
+│   │   ├── shellext/        # GNOME Shell extensions, over the Shell's D-Bus service
 │   │   ├── telemetry/      # Event, Sink interface, no-op sink
 │   │   └── backend/
 │   │       ├── backend.go   # interface

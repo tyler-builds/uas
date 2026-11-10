@@ -30,6 +30,9 @@ COPR packages, searched and installed from one place.
   shows what it brings since your version, where the source publishes notes (most Flathub apps, GitHub
   and Codeberg releases, and distribution packages' AppStream data).
 - **Flatpak permissions.** Turn an app's network, file, device or sound access on or off, as Flatseal does.
+- **GNOME extensions.** On GNOME, an Extensions page lists every extension on the system, whichever app
+  installed it, with its switch, settings and removal, and searches the ones extensions.gnome.org has for
+  your version of GNOME. GNOME Shell does the installing.
 - **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
   Waydroid, audio tweaks…) are listed by group and run in a terminal window.
 - **Update notifications.** Optionally, uas checks once a day and tells you when updates are ready. It never
@@ -69,6 +72,14 @@ COPR packages, searched and installed from one place.
     <td align="center">What's new</td>
     <td align="center">Updates</td>
   </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/extensions.png" alt="GNOME Shell extensions on the system, the user's and the system's, each with its switch, settings and removal"></td>
+    <td width="50%"><img src="docs/screenshots/extensions-browse.png" alt="The most downloaded extensions for this version of GNOME, with Install"></td>
+  </tr>
+  <tr>
+    <td align="center">Extensions</td>
+    <td align="center">Browse extensions</td>
+  </tr>
 </table>
 
 ## Compatibility
@@ -85,6 +96,7 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | Arch packages | `pacman`, `pkexec` | Arch and systems built on it (EndeavourOS, CachyOS…), x86_64 |
 | Snap Store | `snap` with snapd running | Any distro with snapd |
 | COPR | `rpm-ostree`, or `dnf` and `pkexec` | Fedora Atomic (layered), or package-based Fedora |
+| GNOME Shell extensions | A GNOME session | GNOME 45 and newer |
 
 The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
@@ -151,6 +163,7 @@ uas install org.mozilla.firefox
 | `export [-o file]` | Save the list of installed apps |
 | `restore <file>` | Install the apps of an export that aren't installed yet |
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
+| `extensions [list \| search <words> \| install\|remove\|enable\|disable\|settings <uuid>]` | List and manage GNOME Shell extensions |
 | `self-update` | Update uas to the latest signed release |
 | `version` | Show uas's version |
 
@@ -191,6 +204,7 @@ No. It downloads the catalog and app icons, and talks to the sources you install
 ```
  Flathub · Homebrew · Snap · GitHub · Codeberg
  Fedora · Debian · Ubuntu · Arch · COPR
+ extensions.gnome.org
                     │
             uas-indexer (every 6h)        merge, rank, score, sign
                     │
