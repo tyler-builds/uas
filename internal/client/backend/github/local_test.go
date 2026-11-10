@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/appimage"
 	"github.com/tyler-builds/uas/internal/client/appimage/appimagetest"
 	"github.com/tyler-builds/uas/internal/client/backend"
 )
@@ -383,7 +384,7 @@ func TestLauncherWMClass(t *testing.T) {
 	desktop := filepath.Join(b.Dirs.Applications, "uas-file__org.example.App.desktop")
 	got, _ := os.ReadFile(desktop)
 	if !strings.Contains(string(got), "StartupWMClass=org.example.App\n") ||
-		!strings.Contains(string(got), "X-UAS-Launcher=2\n") {
+		!strings.Contains(string(got), fmt.Sprintf("X-UAS-Launcher=%d\n", appimage.LauncherVersion)) {
 		t.Fatalf("launcher:\n%s", got)
 	}
 
@@ -510,5 +511,106 @@ func TestRepairTakesOverBrokenLaunchers(t *testing.T) {
 	st, _ := b.State.Load()
 	if st.AppImages[0].WMClass != "org.example.Real" {
 		t.Errorf("state = %+v", st.AppImages[0])
+	}
+}
+
+// TestLaunchArgsKept checks that a launcher keeps the app's own launch arguments, that an AppImage uas can't
+// read keeps the ones of the launcher uas takes over, through an update of its launcher, and that arguments
+// recorded elsewhere can be restored for one that has none.
+func TestLaunchArgsKept(t *testing.T) {
+	ctx := context.Background()
+	b := newBackend(t, files{}, catalog.Listing{})
+	l := &Local{GH: b}
+	exec := func(id string) string {
+		t.Helper()
+		got, err := os.ReadFile(filepath.Join(b.Dirs.Applications, "uas-file__"+id+".desktop"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(got), "\n") {
+			if v, ok := strings.CutPrefix(line, "Exec="); ok {
+				_, args, _ := strings.Cut(v, `" `)
+				return args
+			}
+		}
+		return ""
+	}
+
+	// An AppImage uas can read: its own entry's arguments, whatever the other tool's launcher had.
+	img := buildAppImage(t, "Example App", "1.0", "", "org.example.App.desktop",
+		"[Desktop Entry]\nType=Application\nName=Example App\nExec=AppRun --no-sandbox %U\nIcon=app\n")
+	src := writeDownload(t, img)
+	os.MkdirAll(b.Dirs.Applications, 0o755)
+	os.WriteFile(filepath.Join(b.Dirs.Applications, "example.desktop"), []byte("[Desktop Entry]\nType=Application\n"+
+		"Name=Example App\nTryExec="+src+"\nExec=env DESKTOPINTEGRATION=1 "+src+" --custom %U\n"), 0o644)
+	f, err := ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Add(ctx, f, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := exec("org.example.App"); got != "--no-sandbox %U" {
+		t.Errorf("a readable AppImage's launcher runs it with %q", got)
+	}
+	if st, _ := b.State.Load(); st.AppImages[0].ExecArgs != "" {
+		t.Errorf("recorded %q for an AppImage that says its own", st.AppImages[0].ExecArgs)
+	}
+
+	// One uas can't read (its files are in a DwarFS image): the arguments of the launcher it takes over.
+	dwarf := buildAppImage(t, "Ghostty", "1.4", "")
+	off := bytes.Index(dwarf, []byte("hsqs"))
+	dwarf = append(dwarf[:off:off], []byte("DWARFS\x02\x05not really dwarfs")...)
+	copy(dwarf[8:], "AI\x02")
+	gsrc := filepath.Join(t.TempDir(), "ghostty.appimage")
+	os.WriteFile(gsrc, dwarf, 0o755)
+	os.WriteFile(filepath.Join(b.Dirs.Applications, "ghostty.desktop"), []byte("[Desktop Entry]\nType=Application\n"+
+		"Name=Ghostty\nTryExec="+gsrc+"\nExec=env DESKTOPINTEGRATION=1 "+gsrc+" --gtk-single-instance=true\n"), 0o644)
+	if f, err = ReadFile(gsrc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Add(ctx, f, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := exec("ghostty"); got != "--gtk-single-instance=true" {
+		t.Errorf("an unreadable AppImage's launcher runs it with %q", got)
+	}
+	// They are recorded, so a rewrite of the launcher (an update, a newer uas) keeps them.
+	st, _ := b.State.Load()
+	a, _ := st.FindAppImage("ghostty")
+	if a.ExecArgs != "--gtk-single-instance=true" {
+		t.Fatalf("recorded arguments = %q", a.ExecArgs)
+	}
+	if err := b.repairLaunchers(ctx, map[string]bool{a.DesktopFile: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := exec("ghostty"); got != "--gtk-single-instance=true" {
+		t.Errorf("after a rewrite the launcher runs it with %q", got)
+	}
+
+	// One taken over before uas kept arguments has none recorded: they can be restored from what another tool
+	// recorded, but only for an AppImage uas can't read, and only once.
+	a.ExecArgs = ""
+	st.PutAppImage(a)
+	b.State.Save(st)
+	b.repairLaunchers(ctx, map[string]bool{a.DesktopFile: true})
+	if got := exec("ghostty"); got != "" {
+		t.Fatalf("launcher without recorded arguments runs it with %q", got)
+	}
+	if b.RestoreLaunchArgs(ctx, "Example App", "--other") {
+		t.Error("restored arguments over an AppImage's own")
+	}
+	// Unsafe arguments reduce to nothing, so nothing is restored.
+	if b.RestoreLaunchArgs(ctx, "ghostty", "--gtk-single-instance=true; rm -rf ~") || exec("ghostty") != "" {
+		t.Errorf("restored unsafe arguments: %q", exec("ghostty"))
+	}
+	if !b.RestoreLaunchArgs(ctx, "ghostty", "--gtk-single-instance=true") {
+		t.Fatal("did not restore the arguments")
+	}
+	if got := exec("ghostty"); got != "--gtk-single-instance=true" {
+		t.Errorf("after restoring the launcher runs it with %q", got)
+	}
+	if b.RestoreLaunchArgs(ctx, "Ghostty", "--something-else") || exec("ghostty") != "--gtk-single-instance=true" {
+		t.Errorf("restored over recorded arguments: %q", exec("ghostty"))
 	}
 }

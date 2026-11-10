@@ -186,8 +186,9 @@ func (s *Session) Migrate(ctx context.Context, m Migration, progress func(backen
 }
 
 // ClearLeftovers removes Gear Lever's records and icons of AppImages that are gone. Where uas now manages
-// the app a record was of, default-app settings that still name Gear Lever's launcher for it (which is gone
-// too) are pointed at uas's, so a browser that was the default stays the default.
+// the app a record was of, what an earlier move left behind is put right first: default-app settings that
+// still name Gear Lever's launcher for it (which is gone too) are pointed at uas's, so a browser that was the
+// default stays the default, and an app uas can't read gets the launch arguments Gear Lever recorded.
 func (s *Session) ClearLeftovers(ctx context.Context, leftovers []gearlever.Entry) error {
 	var gone []gearlever.Entry
 	for _, e := range leftovers {
@@ -203,6 +204,11 @@ func (s *Session) ClearLeftovers(ctx context.Context, leftovers []gearlever.Entr
 				if mine && in.Desktop != "" && e.Name != "" && strings.EqualFold(in.Name, e.Name) {
 					gh.RepointDefaultApps(gearlever.LauncherOf(e.Path), in.Desktop)
 				}
+			}
+			// An app whose own launcher uas can't read lost its launch arguments when uas took it over before
+			// it kept them; Gear Lever's record still has them.
+			if e.Name != "" {
+				gh.RestoreLaunchArgs(ctx, e.Name, e.Args)
 			}
 		}
 	}

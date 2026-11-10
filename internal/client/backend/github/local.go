@@ -164,8 +164,12 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 	if wmclass == "" {
 		wmclass = old.WMClass
 	}
+	args := adoptedArgs(f.Info, others)
+	if args == "" {
+		args = old.ExecArgs
+	}
 	p, err := b.place(ctx, tmp, k, launcher{name: l.Name, summary: l.Summary, source: "github:" + l.Ref,
-		oldIcon: old.IconFile, wmclass: wmclass, info: f.Info})
+		oldIcon: old.IconFile, wmclass: wmclass, args: args, info: f.Info})
 	if err != nil {
 		return err
 	}
@@ -173,7 +177,8 @@ func (b *Backend) Adopt(ctx context.Context, f *File, l catalog.Listing, progres
 		b.uninstallBundle(ctx, old.FlatpakRef, progress)
 	}
 	st.Put(state.GitHubInstall{Repo: l.Ref, Name: p.name, Version: version, Asset: asset, SHA256: sum.SHA256,
-		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, WMClass: wmclass, InstalledAt: b.now()})
+		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, WMClass: wmclass, ExecArgs: args,
+		InstalledAt: b.now()})
 	if err := b.State.Save(st); err != nil {
 		return err
 	}
@@ -296,8 +301,12 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 	if wmclass == "" {
 		wmclass = old.WMClass
 	}
+	args := adoptedArgs(f.Info, others)
+	if args == "" {
+		args = old.ExecArgs
+	}
 	p, err := l.GH.place(ctx, tmp, k, launcher{name: name, source: "file:" + id, oldIcon: old.IconFile,
-		wmclass: wmclass, info: f.Info})
+		wmclass: wmclass, args: args, info: f.Info})
 	if err != nil {
 		return backend.InstalledApp{}, err
 	}
@@ -307,7 +316,7 @@ func (l *Local) Add(ctx context.Context, f *File, progress func(backend.Progress
 	}
 	a := state.FileAppImage{ID: id, Name: p.name, Version: fileVersion(f.Info), Update: update,
 		SHA256: sum.SHA256, SHA512: sum.SHA512, SHA1: sum.SHA1, Path: p.path, DesktopFile: p.desktopFile,
-		IconFile: p.iconFile, WMClass: wmclass, InstalledAt: l.GH.now()}
+		IconFile: p.iconFile, WMClass: wmclass, ExecArgs: args, InstalledAt: l.GH.now()}
 	st.PutAppImage(a)
 	if err := l.GH.State.Save(st); err != nil {
 		return backend.InstalledApp{}, err
@@ -439,7 +448,7 @@ func (l *Local) Update(ctx context.Context, app backend.InstalledApp, progress f
 		return fmt.Errorf("the new %s is not an AppImage uas can read: %w", f.Name, err)
 	}
 	p, err := l.GH.place(ctx, tmp, k, launcher{name: a.Name, source: "file:" + a.ID, oldIcon: a.IconFile,
-		wmclass: a.WMClass, info: info})
+		wmclass: a.WMClass, args: a.ExecArgs, info: info})
 	if err != nil {
 		return err
 	}

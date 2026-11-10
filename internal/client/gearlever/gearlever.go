@@ -6,6 +6,7 @@
 // in gearlever.conf as a section:
 //
 //	[app.<md5>]
+//	default_exec_arguments = %U
 //	name = Helium
 //	file_path = /home/me/AppImages/helium.appimage
 //
@@ -41,6 +42,9 @@ type Entry struct {
 	Section string // "app.<md5>"
 	Name    string
 	Path    string // the AppImage, as an absolute path
+	// Args are the arguments Gear Lever starts it with (default_exec_arguments), which it takes from the
+	// app's own launcher: "--no-sandbox %U".
+	Args string
 }
 
 // Gone reports whether the entry's AppImage is no longer there.
@@ -106,6 +110,8 @@ func Entries(home string) []Entry {
 				cur.Name = strings.TrimSpace(v)
 			case "file_path":
 				cur.Path = expand(strings.TrimSpace(v), home)
+			case "default_exec_arguments":
+				cur.Args = strings.TrimSpace(v)
 			}
 		}
 		flush()

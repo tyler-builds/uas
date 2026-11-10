@@ -443,15 +443,27 @@ GNOME's dock favorites point at the new one. What the user set up around the app
 launcher name uas's, so a browser stays the default for web links; autostart entries that ran the old path
 run the new one; and the AppImage's portable folders (`<file>.home`, `<file>.config`, where an AppImage run
 that way keeps its data) move beside the new file. The app's ordinary data is in the home folder's usual
-places and is never touched. Launch arguments a user added in the other tool are not carried over: uas
-writes its launcher's `Exec` from the AppImage alone. Then the other tool's own notes are removed
+places and is never touched. Launch arguments come from the AppImage itself (below), so ones a user added in the other tool
+are not carried over, except for an AppImage uas can't read, whose arguments are taken from the launcher it
+replaces. Then the other tool's own notes are removed
 (`internal/client/gearlever`). Gear Lever keeps a section per AppImage in `gearlever.conf`
 (`[app.<md5>]` with `name` and `file_path`, plus sub-sections such as `update_manager`) and an icon in
 `<folder>/.icons/<file name>`; the section and icon of a migrated AppImage are removed, and the rest of the
 file is left byte for byte. Sections whose AppImage is already gone ("leftovers", as after AppImages were
 moved out of Gear Lever's folder by something else) are listed too and cleared when the user leaves that
 box ticked; default-app settings that still name Gear Lever's launcher for an app uas now manages are
-pointed at uas's launcher then. Tested for real against Gear Lever 4.6.2 (Flatpak): an AppImage integrated with
+pointed at uas's launcher then, and an app uas can't read gets the launch arguments Gear Lever recorded
+(`default_exec_arguments`), if uas has none for it.
+
+**Launch arguments.** A launcher uas writes always runs the AppImage, never the command of the AppImage's own
+entry, but it keeps that entry's arguments (`appimage.LaunchArgs`): what the app starts itself with, such as
+`--no-sandbox` for Electron apps packed without a sandbox helper or `--gtk-single-instance=true`, and one
+file or URL placeholder. Arguments are kept only when every one is plain (letters, digits and `_=.,:/+@-`),
+so nothing needs quoting and nothing can be more than an argument; otherwise only the placeholder is kept.
+Until launcher version 3 uas kept only the placeholder, which started CurseForge without `--no-sandbox`.
+For an AppImage uas can't read (DwarFS), the arguments of the launcher it takes over are recorded in the
+state file (`exec_args`) and reused on every rewrite. Launchers from older versions are rewritten when uas
+starts. Tested for real against Gear Lever 4.6.2 (Flatpak): an AppImage integrated with
 `gearlever --integrate`, then migrated. AppImageLauncher's launchers (`appimagekit_*.desktop`) are recognised
 and replaced, but that path has not been tested against AppImageLauncher itself, and the icons it caches
 are left.

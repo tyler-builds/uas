@@ -29,7 +29,10 @@ type GitHubInstall struct {
 	DesktopFile string `json:"desktop_file,omitempty"`
 	IconFile    string `json:"icon_file,omitempty"`
 	// WMClass is the launcher's StartupWMClass when it came from a launcher uas took over, not the AppImage.
-	WMClass     string    `json:"wm_class,omitempty"`
+	WMClass string `json:"wm_class,omitempty"`
+	// ExecArgs are the launcher's launch arguments when they came from a launcher uas took over, because the
+	// AppImage's own launcher couldn't be read to take them from.
+	ExecArgs    string    `json:"exec_args,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 
@@ -57,7 +60,8 @@ type FileAppImage struct {
 	Path        string    `json:"path"`
 	DesktopFile string    `json:"desktop_file,omitempty"`
 	IconFile    string    `json:"icon_file,omitempty"`
-	WMClass     string    `json:"wm_class,omitempty"` // as GitHubInstall.WMClass
+	WMClass     string    `json:"wm_class,omitempty"`  // as GitHubInstall.WMClass
+	ExecArgs    string    `json:"exec_args,omitempty"` // as GitHubInstall.ExecArgs
 	InstalledAt time.Time `json:"installed_at"`
 }
 

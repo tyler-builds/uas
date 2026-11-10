@@ -20,6 +20,7 @@ type foreignLauncher struct {
 	icon    []byte
 	iconExt string
 	target  string // the AppImage it runs
+	args    string // what it starts the AppImage with, after its path
 }
 
 // foreignLaunchers lists the launchers in Dirs.Applications that run an AppImage and weren't written by uas.
@@ -47,7 +48,8 @@ func (b *Backend) foreignLaunchers() []foreignLauncher {
 		if target == "" {
 			continue
 		}
-		fl := foreignLauncher{file: path, name: d["Name"], wmclass: d["StartupWMClass"], target: target}
+		fl := foreignLauncher{file: path, name: d["Name"], wmclass: d["StartupWMClass"], target: target,
+			args: argsAfter(d["Exec"], target)}
 		if icon := d["Icon"]; filepath.IsAbs(icon) {
 			if b, err := readLimited(icon, 4<<20); err == nil {
 				if ext := appimage.IconExt(b); ext != "" {
@@ -77,6 +79,32 @@ func appImageTarget(d map[string]string) string {
 			return tok
 		}
 		break
+	}
+	return ""
+}
+
+// argsAfter returns what a launcher's Exec passes to the AppImage at target: the words after its path.
+func argsAfter(exec, target string) string {
+	toks := strings.Fields(exec)
+	for i, tok := range toks {
+		if strings.Trim(tok, `"'`) == target {
+			return strings.Join(toks[i+1:], " ")
+		}
+	}
+	return ""
+}
+
+// adoptedArgs returns the launch arguments to keep from the launchers uas takes over: theirs, when the
+// AppImage's own launcher couldn't be read to say what the app starts itself with. An AppImage uas can read
+// is asked instead (see appimage.LaunchArgs).
+func adoptedArgs(info *appimage.Info, fls []foreignLauncher) string {
+	if strings.TrimSpace(info.Desktop["Exec"]) != "" {
+		return ""
+	}
+	for _, fl := range fls {
+		if a := appimage.SafeArgs(fl.args); a != "" {
+			return a
+		}
 	}
 	return ""
 }

@@ -64,7 +64,8 @@ func TestEntriesAndForget(t *testing.T) {
 		helium.Icon() != filepath.Join(folder, ".icons", "helium") {
 		t.Errorf("helium = %+v", helium)
 	}
-	if curse.Path != filepath.Join(folder, "curseforge.appimage") || !curse.Gone() { // "~" is the home folder
+	if curse.Path != filepath.Join(folder, "curseforge.appimage") || !curse.Gone() || // "~" is the home folder
+		curse.Args != "--no-sandbox %U" || helium.Args != "%U" || remote.Args != "" {
 		t.Errorf("curseforge = %+v", curse)
 	}
 	if remote.Name != "Bazzite Remote" || remote.Gone() {
