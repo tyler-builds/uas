@@ -61,6 +61,17 @@ func runInstall(ctx context.Context, args []string) error {
 		fmt.Printf("%s is already installed (%s).\n", app.Name, a.Scope)
 		return nil
 	}
+	if installed, err := e.Installed(ctx); err == nil && *source == "" {
+		if in, ok := session.AddedCopy(installed, app); ok {
+			which := "the AppImage you added"
+			if in.Version != "" {
+				which += ", version " + in.Version
+			}
+			fmt.Printf("%s is already installed (%s). To install a copy from %s as well, run:\n"+
+				"  uas install --source %s %s\n", app.Name, which, l.Source.Name(), l.Source, ids[0])
+			return nil
+		}
+	}
 	if _, ok := e.SystemApp(app); ok && *source == "" {
 		fmt.Printf("%s is already on this system (%s). To install a copy from %s as well, run:\n  uas install --source %s %s\n",
 			app.Name, strings.ToLower(e.SystemAppLabel()[:1])+e.SystemAppLabel()[1:], l.Source.Name(), l.Source, ids[0])

@@ -417,6 +417,26 @@ func (d *DB) Resolve(ctx context.Context, name string) (*App, error) {
 	return nil, &AmbiguousError{Name: name, IDs: ids}
 }
 
+// Named returns the IDs of the apps (not shell extensions) with a name, whatever its case.
+func (d *DB) Named(ctx context.Context, name string) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT id FROM apps
+		WHERE lower(name) = lower(?1) AND kind != 'shell-extension' ORDER BY popularity DESC, id LIMIT 20`,
+		strings.TrimSpace(name))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // App returns one app with all its listings.
 func (d *DB) App(ctx context.Context, id string) (*App, error) {
 	a := App{ID: id}

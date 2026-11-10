@@ -47,6 +47,10 @@ func TestShots(t *testing.T) {
 	hb := &fakeBackend{src: catalog.SourceHomebrew, installed: []backend.InstalledApp{
 		{Source: catalog.SourceHomebrew, Ref: "htop", AppID: "htop", Name: "htop", Version: "3.5.3", Scope: "user"}}}
 	gh := &fakeBackend{src: catalog.SourceGitHub}
+	// An AppImage added from a file, which the catalog has from Flathub.
+	files := &fakeBackend{src: catalog.SourceAppImage, installed: []backend.InstalledApp{
+		{Source: catalog.SourceAppImage, Ref: "curseforge", AppID: "curseforge", Name: "CurseForge",
+			Version: "1.325.0", Scope: "user", Origin: "curseforge.overwolf.com"}}}
 	shots := []struct {
 		name     string
 		setup    func(a *App)
@@ -75,6 +79,8 @@ func TestShots(t *testing.T) {
 		{"tools", func(a *App) { a.goTo(view{page: pageTools}) }, 1100, "", 0},
 		// An app that came with the system image.
 		{"detail-system", func(a *App) {}, 900, "com.valvesoftware.Steam", 0},
+		// An app installed as an AppImage the user added, which none of its sources describes.
+		{"detail-added", func(a *App) {}, 900, "com.overwolf.curseforge", 0},
 		// The notes of an update, opened from the app page.
 		{"whats-new", func(a *App) { a.whatsNew.Set(shotWhatsNew(a, "org.gimp.GIMP")) }, 900, "org.gimp.GIMP", 0},
 		// GNOME Shell extensions: the ones on the system, the catalog's, a search, and one's page.
@@ -108,7 +114,7 @@ func TestShots(t *testing.T) {
 					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
 				Extensions: &shellext.Manager{Bus: shotShell(), UpdatesDir: updatesDir},
 				Backends: map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: fp,
-					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh}}
+					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh, catalog.SourceAppImage: files}}
 			a := New(s)
 			a.icons.dir = filepath.Join(os.TempDir(), "uas-shot-images")
 			a.startup.Do(func() {})

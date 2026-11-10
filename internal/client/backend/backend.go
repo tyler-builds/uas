@@ -4,6 +4,7 @@ package backend
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/tyler-builds/uas/internal/catalog"
 )
@@ -37,6 +38,37 @@ func (a InstalledApp) Matches(l catalog.Listing) bool {
 		return false
 	}
 	return a.Ref == l.Ref || (l.Package != "" && a.Package == l.Package)
+}
+
+// SameApp reports whether a, an AppImage the user added from a file, is the app the catalog knows by name
+// and ids: the app's ID, its listings' AppStream IDs, and the repos of its release listings. An AppImage
+// names itself by its AppStream ID when it ships metainfo ("io.github.openpane.OpenPane"), which is the
+// app whatever its name; otherwise by its launcher's file name ("curseforge"), which fits the last part of
+// an ID ("com.overwolf.curseforge", "github:pingdotgg/t3code") and counts when the names agree too.
+func (a InstalledApp) SameApp(name string, ids ...string) bool {
+	if a.Source != catalog.SourceAppImage || a.AppID == "" {
+		return false
+	}
+	sameName := name != "" && strings.EqualFold(strings.TrimSpace(a.Name), strings.TrimSpace(name))
+	for _, id := range ids {
+		id = strings.TrimSuffix(id, ".desktop")
+		if id == "" {
+			continue
+		}
+		if strings.Contains(id, ".") && strings.EqualFold(a.AppID, id) {
+			return true
+		}
+		if sameName && strings.EqualFold(a.AppID, IDTail(id)) {
+			return true
+		}
+	}
+	return false
+}
+
+// IDTail is the last part of an app ID: "curseforge" of "com.overwolf.curseforge", "t3code" of
+// "github:pingdotgg/t3code".
+func IDTail(id string) string {
+	return id[strings.LastIndexAny(id, "./:")+1:]
 }
 
 // Progress is a status update from a running job.

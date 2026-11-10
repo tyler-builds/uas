@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/recommend"
+	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/sysapps"
 )
 
@@ -75,9 +76,15 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			}
 		}
 
+		// The figures are the picked source's, or those of the user's own AppImage when that is the copy
+		// installed: its version, and no publisher check, which is the source's and not that file's.
+		figures := listing
+		if in, ok := a.addedCopy(ctx, app, listing); ok {
+			figures = catalog.Listing{Version: in.Version}
+		}
 		page = page.
 			Child(a.detailHeader(ctx, app, available, chosen, listing, chooseErr)).
-			Child(statsStrip(ctx, app, listing))
+			Child(statsStrip(ctx, app, figures))
 
 		main := ui.Div().Column().Gap(space6).MinWidth(ui.Px(0))
 		if len(app.Screenshots) > 0 {
@@ -191,6 +198,12 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 			copy = &in
 		}
 	}
+	// An AppImage the user added from a file is a copy too, though no listing describes it. It counts when
+	// the picked source's copy isn't installed, and then the source picker has nothing to pick for it.
+	added := false
+	if in, ok := a.addedCopy(ctx, app, listing); ok {
+		copy, added = &in, true
+	}
 	job, busy := a.running(app.ID)
 	big := ui.ButtonStyle{Root: ui.Style{Height: ui.Px(34), FontSize: 14, Radius: radiusS}}
 	// A copy that came with the system counts when no source's copy is installed.
@@ -234,7 +247,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	}
 	picker := ui.Select(chosen, opts...).Label("Install from").Small().Width(ui.Full).
 		RenderValue(withMark).RenderOption(withMark)
-	col := ui.Div().Column().Gap(space2).Width(ui.Px(230)).Shrink(0).Child(action).Child(picker)
+	col := ui.Div().Column().Gap(space2).Width(ui.Px(230)).Shrink(0).Child(action).Child(ui.If(!added, picker))
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
@@ -249,6 +262,18 @@ type stat struct {
 	value, label string
 	color        ui.Color
 	tip          string
+}
+
+// addedCopy returns the AppImage the user added from a file that is this app, when the picked source's own
+// copy isn't installed: the copy the page then manages (see session.AddedCopy).
+func (a *App) addedCopy(ctx *ui.Context, app *catalog.App, listing catalog.Listing) (backend.InstalledApp, bool) {
+	installed := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	for _, in := range installed.Data {
+		if in.Matches(listing) {
+			return backend.InstalledApp{}, false
+		}
+	}
+	return session.AddedCopy(installed.Data, app)
 }
 
 // statsStrip is the row of key figures under the header, split by dividers.
@@ -332,7 +357,13 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 			Child(ui.Div().Row().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(value)))
 	}
 	value := func(s string) *ui.TextElement { return ui.Text(s).FontSize(13).Medium().Truncate() }
-	if listing.Source != "" {
+	// With the user's own AppImage installed, the panel is about that copy, not a source they didn't use.
+	added, isAdded := a.addedCopy(ctx, app, listing)
+	if isAdded {
+		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).Tooltip(sourceTips[catalog.SourceAppImage]).
+			Child(ui.Icon(sourceIcons[catalog.SourceAppImage]).Size(14).Color(sourceColor(ctx, catalog.SourceAppImage))).
+			Child(value("Your AppImage")))
+	} else if listing.Source != "" {
 		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).
 			Child(ui.Icon(sourceIcons[listing.Source]).Size(14).Color(sourceColor(ctx, listing.Source))).
 			Child(value(listing.Source.Name())))
@@ -354,7 +385,17 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 
 	// The notes, the "Why" toggle and the links share one row style: an icon in a fixed column, then text.
 	notes := ui.Div().Column().Gap(space1)
-	if choice.Reason != "" {
+	if isAdded {
+		how := "It doesn't say where its updates come from, so uas can't update it."
+		if added.Origin != "" {
+			how = "uas updates it from " + added.Origin + "."
+		}
+		notes = notes.Child(infoRow(ctx, icons.FileBox, t.TextSubtle, "You added this app as an AppImage file. "+how))
+		if listing.Source != "" {
+			notes = notes.Child(infoRow(ctx, icons.Info, t.TextSubtle, "It is also on "+listing.Source.Name()+
+				". To switch, remove the AppImage, then install it from there."))
+		}
+	} else if choice.Reason != "" {
 		if recommended {
 			notes = notes.Child(infoRow(ctx, icons.Sparkles, brandColor(t), "Recommended: "+choice.Reason+"."))
 		} else {
@@ -362,11 +403,13 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 				listingLabel(choice.Listing)+": "+choice.Reason+"."))
 		}
 	}
-	for _, n := range a.s.InstallNotes(listing) {
-		notes = notes.Child(infoRow(ctx, icons.Info, t.TextSubtle, n))
+	if !isAdded {
+		for _, n := range a.s.InstallNotes(listing) {
+			notes = notes.Child(infoRow(ctx, icons.Info, t.TextSubtle, n))
+		}
+		notes = notes.Child(a.whyPanel(ctx, app, listing))
 	}
-	panel = panel.Child(ui.Div().Height(ui.Px(1)).Background(t.Border)).
-		Child(notes.Child(a.whyPanel(ctx, app, listing)))
+	panel = panel.Child(ui.Div().Height(ui.Px(1)).Background(t.Border)).Child(notes)
 
 	bugs := ""
 	for _, l := range app.Listings {
@@ -482,6 +525,13 @@ func (a *App) installedAction(ctx *ui.Context, in backend.InstalledApp, app *cat
 	if in.Version != "" && notes == nil {
 		// With an update's notes to open, the installed version is in them instead, to leave room.
 		status = "Version " + in.Version
+	}
+	if in.Source == catalog.SourceAppImage {
+		// Not one of the sources the page lists: say what the installed copy is.
+		status = strings.TrimSpace("Your AppImage · " + in.Version)
+		if in.Version == "" || notes != nil {
+			status = "Your AppImage"
+		}
 	}
 	line := ui.Div().Row().Align(ui.Center).Gap(space2).
 		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).

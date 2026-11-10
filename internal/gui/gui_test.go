@@ -251,3 +251,67 @@ func (f *fakeBackend) Permissions(context.Context, string) ([]backend.Permission
 
 func (f *fakeBackend) SetPermission(context.Context, string, string, bool) error { return nil }
 func (f *fakeBackend) ResetPermissions(context.Context, string) error            { return nil }
+
+// TestAddedAppImageCountsAsInstalled checks that an AppImage the user added from a file shows as the
+// installed copy of the catalog's app, which no listing describes it as: on the app's page, in lists and on
+// the Installed page.
+func TestAddedAppImageCountsAsInstalled(t *testing.T) {
+	a, _, _ := testApp(t)
+	files := &fakeBackend{src: catalog.SourceAppImage, installed: []backend.InstalledApp{
+		{Source: catalog.SourceAppImage, Ref: "notes", AppID: "notes", Name: "Notes", Version: "2.0", Scope: "user"}}}
+	a.s.Backends[catalog.SourceAppImage] = files
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+
+	// A search result says it is installed, with nothing to install.
+	u.WaitFor("the search field", func() bool { return u.HasRole(access.RoleTextField, "Search apps") })
+	u.ByRole(access.RoleTextField, "Search apps").Type("notes")
+	u.WaitFor("the row to say installed", func() bool {
+		return u.Has("row:org.example.Notes") && u.Get("row:org.example.Notes").HasRole(access.RoleButton, "Installed")
+	})
+	if u.Get("row:org.example.Notes").HasRole(access.RoleButton, "Install") {
+		t.Error("the row offers to install an app that is installed")
+	}
+
+	// Its page manages that copy instead of offering Install from Flathub.
+	u.Get("row:org.example.Notes").ByRole(access.RoleLink, "Notes details").Click()
+	u.WaitFor("the app page", func() bool { return u.Has("detail:org.example.Notes") })
+	waitText(t, u, "detail:org.example.Notes", "Your AppImage · 2.0")
+	// The side panel is about that copy, not about Flathub, which the user didn't install it from.
+	waitText(t, u, "detail:org.example.Notes", "You added this app as an AppImage file.")
+	waitText(t, u, "detail:org.example.Notes", "It is also on Flathub.")
+	if strings.Contains(u.Get("detail:org.example.Notes").Text(), "Recommended:") {
+		t.Error("the page recommends a source for an app that is installed another way")
+	}
+	if u.HasRole(access.RoleButton, "Install") {
+		t.Error("the page offers to install an app that is installed")
+	}
+	clickButton(u, "Remove")
+	u.WaitFor("the remove dialog", func() bool { return u.HasRole(access.RoleAlertDialog, "Remove Notes?") })
+	u.ByRole(access.RoleAlertDialog, "Remove Notes?").ByRole(access.RoleButton, "Remove").Click()
+	u.WaitFor("the AppImage's removal", func() bool {
+		files.mu.Lock()
+		defer files.mu.Unlock()
+		return len(files.removed) == 1 && files.removed[0] == "notes"
+	})
+	// With it gone, the page offers the app's sources again.
+	u.WaitFor("Install to come back", func() bool { return u.HasRole(access.RoleButton, "Install") })
+	waitText(t, u, "detail:org.example.Notes", "Recommended:")
+}
+
+// TestAddedAppImageOnInstalledPage checks that the Installed page shows an added AppImage as the catalog's
+// app and opens its page.
+func TestAddedAppImageOnInstalledPage(t *testing.T) {
+	a, _, _ := testApp(t)
+	a.s.Backends[catalog.SourceAppImage] = &fakeBackend{src: catalog.SourceAppImage, installed: []backend.InstalledApp{
+		{Source: catalog.SourceAppImage, Ref: "notes", AppID: "notes", Name: "Notes", Version: "2.0", Scope: "user"}}}
+	a.goTo(view{page: pageInstalled})
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+	row := "installed:appimage|user|notes"
+	u.WaitFor("the row", func() bool { return u.Has(row) })
+	// The catalog's summary, and a link to its page.
+	waitText(t, u, row, "Take notes")
+	u.Get(row).ByRole(access.RoleLink, "Notes details").Click()
+	u.WaitFor("the app page", func() bool { return u.Has("detail:org.example.Notes") })
+}

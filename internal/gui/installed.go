@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/session"
 )
 
 // installedPage lists everything installed, from every source.
@@ -254,17 +255,15 @@ func (a *App) updateAll(ctx *ui.Context, apps []backend.InstalledApp) {
 func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[string]string, first bool) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
-		match := ui.Query(ctx, a.key("resolve", in.AppID), func(c context.Context) (*catalog.App, error) {
-			db, err := a.catalog(c)
-			if err != nil {
-				return nil, err
-			}
-			app, err := db.Resolve(c, in.AppID)
-			if err != nil {
-				return nil, nil // not in the catalog; the row shows what the source reports
-			}
-			return app, nil
-		}, ui.QueryStaleTime(time.Hour))
+		match := ui.Query(ctx, a.key("resolve", string(in.Source), in.AppID, in.Name),
+			func(c context.Context) (*catalog.App, error) {
+				db, err := a.catalog(c)
+				if err != nil {
+					return nil, err
+				}
+				// Nil when it is not in the catalog; the row then shows what the source reports.
+				return session.CatalogApp(c, db, in)
+			}, ui.QueryStaleTime(time.Hour))
 		name, icon, appID, summary := in.Name, in.Icon, in.AppID, ""
 		if app := match.Data; app != nil {
 			name, appID, summary = app.Name, app.ID, app.Summary

@@ -349,7 +349,14 @@ type Backend interface {
   downloaded whole; zsync's partial downloads aren't used. Release lookups are unauthenticated, which
   GitHub limits to 60 an hour, so results are kept for an hour. The user's file is copied first and deleted
   only once the add succeeds. On btrfs the copy shares the file's data. An AppImage with no update information
-  is listed with "doesn't update itself". Launchers another tool (such as Gear Lever) wrote for the added
+  is listed with "doesn't update itself". An added AppImage that stays a file install can still be an app the
+  catalog has from another source (CurseForge from its site, with CurseForge on Flathub). No listing
+  describes that copy, so it is matched to the app by what it calls itself (`backend.InstalledApp.SameApp`):
+  its AppStream ID when it ships metainfo, else its launcher's file name against the last part of the app's ID
+  or repo (`curseforge` for `com.overwolf.curseforge`, `t3code` for `pingdotgg/t3code`) together with the
+  same name. The app's page then manages that copy (Open, Update, Remove, "Your AppImage") instead of
+  offering Install, lists mark it installed, the Installed page shows it as the catalog's app, and
+  `uas install` says it is there. Launchers another tool (such as Gear Lever) wrote for the added
   file are taken over: their window class and icon fill in what uas can't read, they are removed, and GNOME's
   dock favorites point at uas's launcher instead. Every launcher has a `StartupWMClass` (the app's own, else
   its desktop entry's name), since uas renames launchers and the dock matches windows to them by it.

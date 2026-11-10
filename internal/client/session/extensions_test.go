@@ -229,3 +229,59 @@ func TestExtensionUpdates(t *testing.T) {
 		t.Errorf("without GNOME: %+v, %v", ups, err)
 	}
 }
+
+// TestCatalogAppOfAddedAppImage checks that an AppImage added from a file is matched to the catalog's app,
+// and the app to it, when their names and IDs fit.
+func TestCatalogAppOfAddedAppImage(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	apps := []catalog.App{
+		{ID: "com.overwolf.curseforge", Kind: catalog.KindDesktopApp, Name: "CurseForge",
+			Listings: []catalog.Listing{{Source: catalog.SourceFlathub, Ref: "app/com.overwolf.curseforge/x86_64/stable",
+				AppStreamID: "com.overwolf.curseforge", Name: "CurseForge"}}},
+		{ID: "github:pingdotgg/t3code", Kind: catalog.KindDesktopApp, Name: "T3 Code (Beta)",
+			Listings: []catalog.Listing{{Source: catalog.SourceGitHub, Ref: "pingdotgg/t3code", Name: "T3 Code (Beta)"}}},
+		// Two apps called Notes; neither is the AppImage "notes-app".
+		{ID: "org.example.Notes", Kind: catalog.KindDesktopApp, Name: "Notes",
+			Listings: []catalog.Listing{{Source: catalog.SourceFlathub, Ref: "app/org.example.Notes/x86_64/stable",
+				AppStreamID: "org.example.Notes", Name: "Notes"}}},
+		{ID: "org.other.Notes", Kind: catalog.KindDesktopApp, Name: "Notes",
+			Listings: []catalog.Listing{{Source: catalog.SourceFlathub, Ref: "app/org.other.Notes/x86_64/stable",
+				AppStreamID: "org.other.Notes", Name: "Notes"}}},
+	}
+	if err := catalog.Write(ctx, path, apps, catalog.BuildInfo{BuiltAt: time.Now(), Apps: len(apps)}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := catalog.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	added := func(id, name string) backend.InstalledApp {
+		return backend.InstalledApp{Source: catalog.SourceAppImage, Ref: id, AppID: id, Name: name, Version: "1.0"}
+	}
+	installed := []backend.InstalledApp{added("curseforge", "CurseForge"), added("t3code", "T3 Code (Beta)"),
+		added("notes-app", "Notes"),
+		{Source: catalog.SourceFlathub, Ref: "app/org.example.Notes/x86_64/stable", AppID: "org.example.Notes", Name: "Notes"}}
+	for i, want := range []string{"com.overwolf.curseforge", "github:pingdotgg/t3code", "", "org.example.Notes"} {
+		app, err := CatalogApp(ctx, db, installed[i])
+		got := ""
+		if app != nil {
+			got = app.ID
+		}
+		if err != nil || got != want {
+			t.Errorf("CatalogApp(%s) = %q, %v; want %q", installed[i].AppID, got, err, want)
+		}
+	}
+	for id, want := range map[string]string{"com.overwolf.curseforge": "curseforge", "github:pingdotgg/t3code": "t3code",
+		"org.example.Notes": "", "org.other.Notes": ""} {
+		app, err := db.App(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in, ok := AddedCopy(installed, app)
+		if in.AppID != want || ok != (want != "") {
+			t.Errorf("AddedCopy(%s) = %q, %v; want %q", id, in.AppID, ok, want)
+		}
+	}
+}

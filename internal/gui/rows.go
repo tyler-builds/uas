@@ -26,6 +26,10 @@ func (a *App) installedApps(ctx *ui.Context) installedIndex {
 		if in.Package != "" {
 			idx[string(in.Source)+"|pkg:"+in.Package] = in
 		}
+		if in.Source == catalog.SourceAppImage {
+			// An AppImage added from a file, which no listing describes: by its own ID (see find).
+			idx["added|"+strings.ToLower(in.AppID)] = in
+		}
 	}
 	// Apps that came with the system, by AppStream ID, which a merged app's ID is.
 	for id, sa := range a.s.SystemApps() {
@@ -52,6 +56,20 @@ func (idx installedIndex) find(r catalog.SearchResult) (backend.InstalledApp, bo
 	}
 	if in, ok := idx["sys|"+r.ID]; ok {
 		return in, true
+	}
+	// An AppImage the user added from a file that is this app (see backend.InstalledApp.SameApp).
+	ids := []string{r.ID}
+	for _, ref := range r.Refs {
+		if ref.Source.Releases() {
+			ids = append(ids, ref.Ref)
+		}
+	}
+	for _, id := range ids {
+		for _, key := range []string{id, backend.IDTail(id)} {
+			if in, ok := idx["added|"+strings.ToLower(key)]; ok && in.SameApp(r.Name, id) {
+				return in, true
+			}
+		}
 	}
 	return backend.InstalledApp{}, false
 }
