@@ -18,6 +18,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/session"
+	"github.com/tyler-builds/uas/internal/client/shellext"
 )
 
 // Pages. A view is a page and its argument: the category key, the source, or the app ID.
@@ -32,6 +33,9 @@ const (
 	pageUpdates   = "updates"
 	pageSettings  = "settings"
 	pageTools     = "tools"
+	// pageExtensions lists GNOME Shell extensions; pageExtension is one extension, by its catalog ID.
+	pageExtensions = "extensions"
+	pageExtension  = "extension"
 )
 
 // view is one place in the app.
@@ -40,14 +44,17 @@ type view struct {
 	arg  string
 }
 
-// isList reports whether the view is Installed or Updates, whose lists the top bar filters.
+// isList reports whether the view is one whose own lists the top bar filters, such as Installed and Updates.
 func (v view) isList() bool {
-	return v.page == pageInstalled || v.page == pageUpdates || v.page == pageTools
+	return v.page == pageInstalled || v.page == pageUpdates || v.page == pageTools || v.page == pageExtensions
 }
+
+// isDetail reports whether the view is one app's or extension's page, which the sidebar has no item for.
+func (v view) isDetail() bool { return v.page == pageApp || v.page == pageExtension }
 
 // navKey is the sidebar key of a view, such as "category:Game".
 func (v view) navKey() string {
-	if v.arg != "" && v.page != pageApp {
+	if v.arg != "" && !v.isDetail() {
 		return v.page + ":" + v.arg
 	}
 	return v.page
@@ -76,6 +83,12 @@ type App struct {
 	restore  *ui.Signal[*restorePlan] // a restore waiting for the user's OK
 	whatsNew *ui.Signal[*whatsNew]    // an open "What's new" dialog
 
+	extTab   *ui.Signal[string]        // the Extensions page's tab: extInstalled or extBrowse
+	extOrder *ui.Signal[catalog.Order] // how its Browse tab is sorted
+	// extSearchOrder is how its Browse tab is sorted while the top bar has a search.
+	extSearchOrder *ui.Signal[catalog.Order]
+	extRemoving    *ui.Signal[*shellext.Extension] // an extension's removal waiting for the user's OK
+
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
 	mu         sync.Mutex
@@ -90,23 +103,27 @@ type App struct {
 // New creates the app for a session.
 func New(s *session.Session) *App {
 	return &App{
-		s:            s,
-		history:      ui.NewSignal([]view{{page: pageHome}}),
-		navSel:       ui.NewSignal(pageHome),
-		query:        ui.NewSignal(""),
-		search:       ui.NewSignal(""),
-		listFilter:   ui.NewSignal(""),
-		listSource:   ui.NewSignal[catalog.SourceID](""),
-		searchSource: ui.NewSignal[catalog.SourceID](""),
-		searchOrder:  ui.NewSignal(catalog.OrderRelevance),
-		browseOrder:  ui.NewSignal(catalog.OrderPopular),
-		jobs:         ui.NewSignal(map[string]job{}),
-		confirm:      ui.NewSignal[*pending](nil),
-		removing:     ui.NewSignal[*removal](nil),
-		restore:      ui.NewSignal[*restorePlan](nil),
-		whatsNew:     ui.NewSignal[*whatsNew](nil),
-		catalogGen:   ui.NewSignal(0),
-		icons:        newIconLoader(),
+		s:              s,
+		history:        ui.NewSignal([]view{{page: pageHome}}),
+		navSel:         ui.NewSignal(pageHome),
+		query:          ui.NewSignal(""),
+		search:         ui.NewSignal(""),
+		listFilter:     ui.NewSignal(""),
+		listSource:     ui.NewSignal[catalog.SourceID](""),
+		searchSource:   ui.NewSignal[catalog.SourceID](""),
+		searchOrder:    ui.NewSignal(catalog.OrderRelevance),
+		browseOrder:    ui.NewSignal(catalog.OrderPopular),
+		jobs:           ui.NewSignal(map[string]job{}),
+		confirm:        ui.NewSignal[*pending](nil),
+		removing:       ui.NewSignal[*removal](nil),
+		restore:        ui.NewSignal[*restorePlan](nil),
+		whatsNew:       ui.NewSignal[*whatsNew](nil),
+		extTab:         ui.NewSignal(extInstalled),
+		extOrder:       ui.NewSignal(catalog.OrderPopular),
+		extSearchOrder: ui.NewSignal(catalog.OrderRelevance),
+		extRemoving:    ui.NewSignal[*shellext.Extension](nil),
+		catalogGen:     ui.NewSignal(0),
+		icons:          newIconLoader(),
 	}
 }
 
@@ -123,7 +140,7 @@ func (a *App) open(v view) {
 		return
 	}
 	a.history.Set(append(slices.Clone(h), v))
-	if v.page != pageApp {
+	if !v.isDetail() {
 		a.navSel.Set(v.navKey())
 	}
 }
@@ -150,7 +167,7 @@ func (a *App) back() {
 	h = h[:len(h)-1]
 	a.history.Set(slices.Clone(h))
 	for i := len(h) - 1; i >= 0; i-- {
-		if h[i].page != pageApp {
+		if !h[i].isDetail() {
 			a.navSel.Set(h[i].navKey())
 			break
 		}
@@ -245,6 +262,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.removeDialog(ctx)).
 		Child(a.restoreDialog(ctx)).
 		Child(a.whatsNewDialog(ctx)).
+		Child(a.extRemoveDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
 }
 
@@ -270,6 +288,10 @@ func (a *App) page(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		return a.settingsPage(ctx, info)
 	case pageTools:
 		return a.toolsPage(ctx)
+	case pageExtensions:
+		return a.extensionsPage(ctx, info)
+	case pageExtension:
+		return a.extensionPage(ctx, v.arg)
 	}
 	return a.homePage(ctx, info)
 }
@@ -326,6 +348,9 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 		ui.SidebarItem{Key: pageInstalled, Label: "Installed", Icon: icons.Download, Badge: len(installed.Data)},
 		ui.SidebarItem{Key: pageUpdates, Label: "Updates", Icon: icons.RefreshCw, Badge: len(a.updates(ctx).Data)},
 	)
+	if a.s.Extensions != nil {
+		items = append(items, ui.SidebarItem{Key: pageExtensions, Label: "Extensions", Icon: icons.Puzzle})
+	}
 	if a.s.Tools != nil {
 		items = append(items, ui.SidebarItem{Key: pageTools, Label: a.toolsTitle(), Icon: icons.SquareTerminal})
 	}
@@ -374,8 +399,14 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 			placeholder = "Filter updates…"
 		case pageTools:
 			placeholder = "Filter commands…"
+		case pageExtensions:
+			placeholder = "Search extensions…"
 		}
-		search = ui.TextInput(a.listFilter).Label("Filter apps").Placeholder(placeholder).Icon(icons.ListFilter).
+		label := "Filter apps"
+		if v.page == pageExtensions {
+			label = "Search extensions"
+		}
+		search = ui.TextInput(a.listFilter).Label(label).Placeholder(placeholder).Icon(icons.ListFilter).
 			Small().Clearable().Width(ui.Full).Key("list-filter")
 	} else {
 		search = ui.TextInput(a.query).Label("Search apps").Placeholder("Search apps…").Icon(icons.Search).
@@ -420,11 +451,13 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 			return "Settings"
 		case pageTools:
 			return a.toolsTitle()
+		case pageExtensions:
+			return "Extensions"
 		}
 		return ""
 	}
 	row := ui.Div().Row().Align(ui.Center).Gap(6).MinWidth(ui.Px(0))
-	if v.page == pageApp {
+	if v.isDetail() {
 		// The app's name comes from the query its page runs, so it is usually there already.
 		res := ui.Query(ctx, a.key("app", v.arg), func(c context.Context) (*catalog.App, error) {
 			db, err := a.catalog(c)
@@ -474,6 +507,8 @@ func crumbIcon(v view) *icons.Icon {
 		return icons.Settings
 	case pageTools:
 		return icons.SquareTerminal
+	case pageExtensions:
+		return icons.Puzzle
 	}
 	return icons.LayoutGrid
 }
@@ -540,10 +575,15 @@ func errText(err error) string {
 	return msg
 }
 
-// StartOn opens the app on a page by name: "updates", "installed" or "settings". Others are ignored.
+// StartOn opens the app on a page by name: "updates", "installed", "settings" or "extensions". Others are
+// ignored.
 func (a *App) StartOn(page string) {
 	switch page {
 	case pageUpdates, pageInstalled, pageSettings:
 		a.goTo(view{page: page})
+	case pageExtensions:
+		if a.s.Extensions != nil {
+			a.goTo(view{page: page})
+		}
 	}
 }

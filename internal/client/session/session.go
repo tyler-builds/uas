@@ -29,6 +29,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/run"
 	"github.com/tyler-builds/uas/internal/client/selfupdate"
 	"github.com/tyler-builds/uas/internal/client/settings"
+	"github.com/tyler-builds/uas/internal/client/shellext"
 	"github.com/tyler-builds/uas/internal/client/state"
 	"github.com/tyler-builds/uas/internal/client/sysapps"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
@@ -48,6 +49,9 @@ type Session struct {
 	CatalogPath  string
 	// Tools are the system's ujust recipes, on Universal Blue images; nil elsewhere.
 	Tools *ujust.Tools
+	// Extensions manages GNOME Shell extensions, in a GNOME session; nil elsewhere. Extensions aren't apps:
+	// the Shell installs and runs them, so they have no backend and aren't in Installed.
+	Extensions *shellext.Manager
 	// SysApps are the apps that came with the system, by AppStream ID (see SystemApps). Nil reads them on
 	// first use; tests set it.
 	SysApps map[string]sysapps.App
@@ -114,6 +118,7 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		Telemetry:    telemetry.ForSettings(st.Telemetry),
 		CatalogPath:  catalogPath,
 		Tools:        ujust.Detect(),
+		Extensions:   shellext.Detect(),
 	}
 	p := s.Platform
 	gh, ghErr := s.releaseBackend(catalog.SourceGitHub)

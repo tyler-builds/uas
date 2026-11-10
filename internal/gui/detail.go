@@ -243,15 +243,17 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 	return col
 }
 
+// stat is one figure of a stats strip.
+type stat struct {
+	icon         *icons.Icon
+	value, label string
+	color        ui.Color
+	tip          string
+}
+
 // statsStrip is the row of key figures under the header, split by dividers.
 func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.Element {
 	t := ctx.Theme()
-	type stat struct {
-		icon         *icons.Icon
-		value, label string
-		color        ui.Color
-		tip          string
-	}
 	var stats []stat
 	switch {
 	case app.Popularity > 0:
@@ -285,6 +287,12 @@ func statsStrip(ctx *ui.Context, app *catalog.App, listing catalog.Listing) ui.E
 			stats = append(stats, stat{icons.LayoutGrid, c, "Category", t.TextMuted, ""})
 		}
 	}
+	return statRow(ctx, stats)
+}
+
+// statRow lays out a stats strip.
+func statRow(ctx *ui.Context, stats []stat) ui.Element {
+	t := ctx.Theme()
 	row := ui.Div().Row().Align(ui.Stretch).BorderEdges(ui.Edges{Top: 1, Bottom: 1}, t.Border)
 	for i, s := range stats {
 		cell := ui.Div().Column().Gap(space1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).

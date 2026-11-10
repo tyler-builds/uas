@@ -71,6 +71,19 @@ CREATE VIRTUAL TABLE apps_fts USING fts5(
 	description,
 	tokenize = 'porter unicode61 remove_diacritics 2'
 );
+
+-- Shell extensions (apps.kind = 'shell-extension') are indexed here instead of in apps_fts, so a search for
+-- apps never returns them. That also keeps them from versions of uas from before extensions, which is why
+-- adding this table did not change the schema version.
+CREATE VIRTUAL TABLE extensions_fts USING fts5(
+	app_id UNINDEXED,
+	name,
+	keywords,
+	summary,
+	developer,
+	description,
+	tokenize = 'porter unicode61 remove_diacritics 2'
+);
 `
 
 // Write builds a catalog database at path from apps. It writes to a temporary file first and renames it into
@@ -143,6 +156,11 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 	if err != nil {
 		return err
 	}
+	insExtFTS, err := tx.PrepareContext(ctx, `INSERT INTO extensions_fts
+		(app_id, name, keywords, summary, developer, description) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
 
 	for i := range apps {
 		a := &apps[i]
@@ -175,7 +193,11 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 		// Firefox and "web browser" finds apps in the WebBrowser category.
 		keywords := strings.Join(append(append(append([]string{}, a.Keywords...), a.ID),
 			categoryWords(a.Categories)...), " ")
-		if _, err := insFTS.ExecContext(ctx, a.ID, a.Name, keywords, a.Summary, a.Developer,
+		fts := insFTS
+		if a.Kind == KindShellExtension {
+			fts = insExtFTS
+		}
+		if _, err := fts.ExecContext(ctx, a.ID, a.Name, keywords, a.Summary, a.Developer,
 			a.Description); err != nil {
 			return err
 		}
@@ -184,7 +206,8 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 		return err
 	}
 
-	for _, stmt := range []string{`INSERT INTO apps_fts (apps_fts) VALUES ('optimize')`, "VACUUM"} {
+	for _, stmt := range []string{`INSERT INTO apps_fts (apps_fts) VALUES ('optimize')`,
+		`INSERT INTO extensions_fts (extensions_fts) VALUES ('optimize')`, "VACUUM"} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return err
 		}

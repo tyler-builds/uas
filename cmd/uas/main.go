@@ -41,6 +41,7 @@ commands:
   self-update [-check]  update uas itself to the latest release
   version              show this uas's version
   permissions <app-id> show or change what a Flatpak app may reach (network, files, devices…)
+  extensions [command] list and manage GNOME Shell extensions (list, search, install, remove, enable, disable)
 
 Run "uas <command> -h" for a command's flags.
 `
@@ -89,6 +90,8 @@ func main() {
 		return
 	case "permissions":
 		err = runPermissions(ctx, os.Stdout, args)
+	case "extensions", "extension":
+		err = runExtensions(ctx, os.Stdout, args)
 	case "help", "-h", "-help", "--help":
 		fmt.Print(usage)
 		return

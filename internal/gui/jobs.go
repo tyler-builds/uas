@@ -2,12 +2,14 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"strings"
 
 	"github.com/tyler-builds/jamb/ui"
 
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/shellext"
 )
 
 // job is an install, update or removal running in the background.
@@ -44,7 +46,10 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 		ctx.Post(func() {
 			a.setJob(id, job{title: title, done: true})
 			ctx.DismissToast(toastID)
-			if err != nil {
+			if errors.Is(err, shellext.ErrCancelled) {
+				// The user said no in GNOME's own dialog: nothing failed.
+				ctx.Toast(ui.ToastInfo, "Nothing was changed.").Title(title + " was cancelled")
+			} else if err != nil {
 				ctx.Toast(ui.ToastError, errText(err)).Title(title + " failed")
 			} else {
 				t := ctx.Toast(ui.ToastSuccess, success)
@@ -52,7 +57,9 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 					t.Title("Restart to finish")
 				}
 			}
-			ui.InvalidateQueries(ctx, func(key string) bool { return key == "installed" || key == "updates" })
+			ui.InvalidateQueries(ctx, func(key string) bool {
+				return key == "installed" || key == "updates" || key == extensionsKey
+			})
 		})
 	}()
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/tyler-builds/uas/internal/indexer/fetch/flathub"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/forge"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/github"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/gnome"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/homebrew"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/snap"
 	"github.com/tyler-builds/uas/internal/indexer/publish"
@@ -44,7 +45,8 @@ func main() {
 	slowCacheFor := flag.Duration("slow-cache-for", 20*time.Hour,
 		"reuse results of slow sources (GitHub, COPR) younger than this")
 	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
-	sources := flag.String("sources", "flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap",
+	sources := flag.String("sources",
+		"flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap,gnome-extensions",
 		"comma-separated sources to index (github needs $GITHUB_TOKEN)")
 	codebergMinStars := flag.Int("codeberg-min-stars", forge.DefaultCodebergMinStars,
 		"check Codeberg repos with at least this many stars")
@@ -141,6 +143,10 @@ func main() {
 	available["snap"] = &fetch.Cached{Fetcher: &snap.Fetcher{Client: client, Arch: *arch, Log: log},
 		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
 		Key: fmt.Sprintf("schema=%d arch=%s v=3", catalog.SchemaVersion, *arch)}
+	// extensions.gnome.org is read a page a second (about 90 pages), so it is cached too.
+	available["gnome-extensions"] = &fetch.Cached{Fetcher: &gnome.Fetcher{Client: client, Log: log},
+		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: fmt.Sprintf("schema=%d first=%d v=1", catalog.SchemaVersion, gnome.FirstShell)}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {
 		f, ok := available[strings.TrimSpace(name)]

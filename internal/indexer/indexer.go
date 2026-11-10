@@ -96,6 +96,10 @@ func (f *Fetched) Write(ctx context.Context, out string, keep func(catalog.Listi
 			continue
 		}
 		st.Listings = count[st.Source]
+		if st.Source == catalog.SourceGNOMEExtensions {
+			info.Extensions = &st // apart from the app sources; see catalog.BuildInfo
+			continue
+		}
 		info.Sources = append(info.Sources, st)
 	}
 	apps, hidden := merge.Merge(ls)
@@ -105,7 +109,11 @@ func (f *Fetched) Write(ctx context.Context, out string, keep func(catalog.Listi
 	if len(hidden) > 0 {
 		log.Info("unofficial copies hidden", "listings", len(hidden))
 	}
-	info.Apps = len(apps)
+	for _, a := range apps {
+		if a.Kind != catalog.KindShellExtension {
+			info.Apps++
+		}
+	}
 	if err := catalog.Write(ctx, out, apps, info); err != nil {
 		return info, fmt.Errorf("write catalog: %w", err)
 	}

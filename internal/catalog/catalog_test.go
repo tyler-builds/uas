@@ -418,3 +418,82 @@ func TestSearchGenericByPopularity(t *testing.T) {
 		t.Errorf("results = %v, %v; want %v", ids, err, want)
 	}
 }
+
+// TestExtensionsApart checks that shell extensions are listed and searched only when asked for, and by
+// GNOME release.
+func TestExtensionsApart(t *testing.T) {
+	ext := func(uuid, name, summary string, downloads int, shells ...string) App {
+		l := Listing{Source: SourceGNOMEExtensions, Ref: uuid, Kind: KindShellExtension, Name: name,
+			Summary: summary, Installs: downloads, Shells: shells}
+		return App{ID: ExtensionAppID(uuid), Kind: KindShellExtension, Name: name, Summary: summary,
+			Popularity: downloads, Listings: []Listing{l}}
+	}
+	apps := append(testApps(),
+		ext("editor-tweaks@example.com", "Editor Tweaks", "Tweaks for a text editor panel", 500, "48", "51"),
+		ext("dock@example.com", "Dock", "A dock for the desktop", 9000, "45", "46"),
+		ext("clock@example.com", "Clock", "Move the clock", 20, "51"))
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	info := BuildInfo{BuiltAt: time.Unix(1770000000, 0).UTC(), Apps: 3,
+		Extensions: &SourceStatus{Source: SourceGNOMEExtensions, Listings: 3}}
+	if err := Write(context.Background(), path, apps, info); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	ids := func(rs []SearchResult, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rs {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+	want := func(what string, got []string, ids ...string) {
+		t.Helper()
+		if !slices.Equal(got, ids) {
+			t.Errorf("%s = %q, want %q", what, got, ids)
+		}
+	}
+
+	if got := db.Info(); got.Apps != 3 || got.Extensions == nil || got.Extensions.Listings != 3 {
+		t.Errorf("Info = %+v", got)
+	}
+	// Apps never include extensions, by search, short search or browsing.
+	want("app search", ids(db.Search(ctx, "editor", SearchOptions{})), "org.example.Editor", "org.example.EditorPlus")
+	want("app search for an extension", ids(db.Search(ctx, "dock", SearchOptions{})))
+	want("short app search", ids(db.Search(ctx, "do", SearchOptions{})))
+	want("app browse", ids(db.Browse(ctx, BrowseQuery{Order: OrderName})),
+		"org.example.Editor", "org.example.EditorPlus", "org.example.Browser")
+	// Extensions never include apps.
+	want("extension search", ids(db.Search(ctx, "editor", SearchOptions{Extensions: true})),
+		"gnome-extensions:editor-tweaks@example.com")
+	want("short extension search", ids(db.Search(ctx, "do", SearchOptions{Extensions: true})),
+		"gnome-extensions:dock@example.com")
+	want("extension browse", ids(db.Browse(ctx, BrowseQuery{Extensions: true})),
+		"gnome-extensions:dock@example.com", "gnome-extensions:editor-tweaks@example.com",
+		"gnome-extensions:clock@example.com")
+	// Only the ones for a GNOME release.
+	want("extensions for GNOME 51", ids(db.Browse(ctx, BrowseQuery{Extensions: true, Shell: "51"})),
+		"gnome-extensions:editor-tweaks@example.com", "gnome-extensions:clock@example.com")
+	want("extension search for GNOME 51", ids(db.Search(ctx, "dock", SearchOptions{Extensions: true, Shell: "51"})))
+	want("short extension search for GNOME 46", ids(db.Search(ctx, "do", SearchOptions{Extensions: true, Shell: "46"})),
+		"gnome-extensions:dock@example.com")
+	want("extension search for GNOME 48", ids(db.Search(ctx, "tweaks", SearchOptions{Extensions: true, Shell: "48"})),
+		"gnome-extensions:editor-tweaks@example.com")
+
+	a, err := db.App(ctx, ExtensionAppID("dock@example.com"))
+	if err != nil || a.Kind != KindShellExtension || !slices.Equal(a.Listings[0].Shells, []string{"45", "46"}) {
+		t.Errorf("App = %+v, %v", a, err)
+	}
+	// A catalog from before extensions has none to find, and no index to search.
+	old := writeTestCatalog(t)
+	old.extensions = false
+	want("extension search of an older catalog", ids(old.Search(ctx, "editor", SearchOptions{Extensions: true})))
+}

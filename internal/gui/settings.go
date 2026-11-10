@@ -51,6 +51,15 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 			}
 			catRows = append(catRows, settingsRow(ctx, sourceIcon(ctx, src.Source), src.Source.Name(), "", right))
 		}
+		if ext := info.Extensions; ext != nil {
+			// Extensions aren't apps, so the catalog counts them apart from its sources.
+			right := ui.Element(muted(ctx, compactThousands(ext.Listings)+" extensions"))
+			if ext.Error != "" {
+				right = ui.Div().Tooltip(ext.Error).Child(statusPill(ctx, false, "Unavailable at build time"))
+			}
+			catRows = append(catRows, settingsRow(ctx, ui.Icon(icons.Puzzle).Size(18).Color(t.TextMuted),
+				ext.Source.Name(), "", right))
+		}
 		cat := section(sectionHeader(ctx, "App catalog", fmt.Sprintf("%s apps, built %s",
 			compactThousands(info.Apps), ui.FormatRelative(info.BuiltAt, time.Now())),
 			ui.Button("Check for updates").Icon(icons.RefreshCw).Small().Secondary().Loading(refreshing).
@@ -80,6 +89,10 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 			}
 			sysRows = append(sysRows, settingsRow(ctx, sourceIcon(ctx, src), src.Name(), note,
 				statusPill(ctx, b != nil, label)))
+		}
+		if a.s.Extensions != nil {
+			sysRows = append(sysRows, settingsRow(ctx, ui.Icon(icons.Puzzle).Size(18).Color(t.TextMuted),
+				catalog.SourceGNOMEExtensions.Name(), "Installed and run by GNOME Shell", statusPill(ctx, true, "Ready")))
 		}
 		system := section(sectionHeader(ctx, "This system", fmt.Sprintf("%s on %s", p.PrettyName, p.Arch)),
 			settingsList(ctx, sysRows...))

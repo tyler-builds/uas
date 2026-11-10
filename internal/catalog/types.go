@@ -35,6 +35,10 @@ const (
 	SourceSnap SourceID = "snap"
 	// SourceAppImage is AppImages the user added from files. The catalog has no listings from it.
 	SourceAppImage SourceID = "appimage"
+	// SourceGNOMEExtensions is extensions.gnome.org. Its listings are GNOME Shell extensions
+	// (KindShellExtension), not apps: their ref is the extension's UUID, the Shell installs them itself, and
+	// they are listed and searched apart from apps. It is not in SourcePrecedence.
+	SourceGNOMEExtensions SourceID = "gnome-extensions"
 )
 
 // Name is the source's name for people, such as "Flathub".
@@ -62,6 +66,8 @@ func (s SourceID) Name() string {
 		return "Snap Store"
 	case SourceAppImage:
 		return "AppImage"
+	case SourceGNOMEExtensions:
+		return "GNOME Extensions"
 	}
 	return string(s)
 }
@@ -110,6 +116,9 @@ type Kind string
 const (
 	KindDesktopApp Kind = "desktop-application"
 	KindConsoleApp Kind = "console-application"
+	// KindShellExtension is a GNOME Shell extension. Extensions are in the catalog's app tables but have their
+	// own search index, and Search and Browse return them only when asked (see SearchOptions.Extensions).
+	KindShellExtension Kind = "shell-extension"
 )
 
 // Screenshot is one screenshot of an app.
@@ -128,15 +137,19 @@ type Listing struct {
 	AppStreamID string `json:"appstream_id,omitempty"`
 	Kind        Kind   `json:"kind"`
 
-	Name        string `json:"name"`
-	Summary     string `json:"summary,omitempty"`
-	Description string `json:"description,omitempty"` // Markdown
+	Name    string `json:"name"`
+	Summary string `json:"summary,omitempty"`
+	// Description is Markdown, except for a shell extension's, which is the plain text its author wrote.
+	Description string `json:"description,omitempty"`
 	Developer   string `json:"developer,omitempty"`
 	License     string `json:"license,omitempty"`
 
 	Homepage   string `json:"homepage,omitempty"`
 	VCSURL     string `json:"vcs_url,omitempty"`
 	BugTracker string `json:"bugtracker,omitempty"`
+	// StoreURL is the listing's own page on its source's site, for sources uas links to
+	// (extensions.gnome.org).
+	StoreURL string `json:"store_url,omitempty"`
 
 	IconURL     string       `json:"icon_url,omitempty"`
 	Screenshots []Screenshot `json:"screenshots,omitempty"`
@@ -155,7 +168,8 @@ type Listing struct {
 	Runtime string `json:"runtime,omitempty"`
 
 	// Installs is a yearly install count, where the source publishes one (Homebrew: installs on request in the
-	// past year; Flathub: last month's installs times 12). It ranks search results and browsing.
+	// past year; Flathub: last month's installs times 12). It ranks search results and browsing. For a shell
+	// extension it is the downloads extensions.gnome.org counts, over all time.
 	Installs int `json:"installs,omitempty"`
 
 	// Stars is the GitHub repository's star count, for GitHub listings.
@@ -170,6 +184,9 @@ type Listing struct {
 	// Classic is true for a snap with classic confinement, which runs without the snap sandbox and installs
 	// with "snap install --classic".
 	Classic bool `json:"classic,omitempty"`
+	// Shells are the GNOME Shell releases a shell extension has a version for, by major version ("48", "51"),
+	// oldest first.
+	Shells []string `json:"shells,omitempty"`
 
 	// Changelog is what changed in the newest releases, newest first, where the source publishes release notes:
 	// AppStream release descriptions, or a code forge's release notes.
@@ -234,6 +251,9 @@ type TrustSignal struct {
 	Max    int    `json:"max"`
 }
 
+// ExtensionAppID returns the catalog ID of the shell extension with a UUID.
+func ExtensionAppID(uuid string) string { return string(SourceGNOMEExtensions) + ":" + uuid }
+
 // FedoraDistro returns the Distro value for a Fedora release.
 func FedoraDistro(release int) string { return fmt.Sprintf("fedora-%d", release) }
 
@@ -282,10 +302,14 @@ type SourceStatus struct {
 
 // BuildInfo describes one catalog build.
 type BuildInfo struct {
-	SchemaVersion int            `json:"schema_version"`
-	BuiltAt       time.Time      `json:"built_at"`
-	Apps          int            `json:"apps"`
-	Sources       []SourceStatus `json:"sources"`
+	SchemaVersion int       `json:"schema_version"`
+	BuiltAt       time.Time `json:"built_at"`
+	// Apps counts the apps, without shell extensions.
+	Apps    int            `json:"apps"`
+	Sources []SourceStatus `json:"sources"`
+	// Extensions is how fetching shell extensions went, with their count. It is kept out of Sources because
+	// versions of uas from before extensions list every source there and know nothing about this one.
+	Extensions *SourceStatus `json:"extensions,omitempty"`
 }
 
 // SearchResult is one row of search output.

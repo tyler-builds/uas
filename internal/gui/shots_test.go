@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/settings"
+	"github.com/tyler-builds/uas/internal/client/shellext"
 	"github.com/tyler-builds/uas/internal/client/sysapps"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
 	"github.com/tyler-builds/uas/internal/client/ujust"
@@ -73,6 +74,22 @@ func TestShots(t *testing.T) {
 		{"detail-system", func(a *App) {}, 900, "com.valvesoftware.Steam", 0},
 		// The notes of an update, opened from the app page.
 		{"whats-new", func(a *App) { a.whatsNew.Set(shotWhatsNew(a, "org.gimp.GIMP")) }, 900, "org.gimp.GIMP", 0},
+		// GNOME Shell extensions: the ones on the system, the catalog's, a search, and one's page.
+		{"extensions", func(a *App) { a.goTo(view{page: pageExtensions}) }, 700, "", 0},
+		{"extensions-browse", func(a *App) { a.goTo(view{page: pageExtensions}); a.extTab.Set(extBrowse) }, 900, "", 0},
+		{"extensions-search", func(a *App) {
+			a.goTo(view{page: pageExtensions})
+			a.extTab.Set(extBrowse)
+			a.listFilter.Set("clipboard")
+		}, 900, "", 0},
+		{"detail-extension", func(a *App) {
+			a.goTo(view{page: pageExtensions})
+			a.openExtension(catalog.ExtensionAppID("blur-my-shell@aunetx"))
+		}, 1000, "", 0},
+		{"detail-extension-new", func(a *App) {
+			a.goTo(view{page: pageExtensions})
+			a.openExtension(catalog.ExtensionAppID("Vitals@CoreCoding.com"))
+		}, 1000, "", 0},
 	}
 	for _, theme := range []struct {
 		name string
@@ -83,6 +100,7 @@ func TestShots(t *testing.T) {
 				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true}, Tools: ujust.Detect(),
 				SysApps: map[string]sysapps.App{"com.valvesoftware.Steam": {ID: "com.valvesoftware.Steam", Name: "Steam",
 					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
+				Extensions: &shellext.Manager{Bus: shotShell()},
 				Backends: map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: fp,
 					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh}}
 			a := New(s)
@@ -129,6 +147,40 @@ func useBundledFont(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("FONTCONFIG_FILE", conf)
+}
+
+// shotShell is a GNOME 51 with a few well-known extensions: two the user added and three that came with the
+// system, one of each state.
+func shotShell() *fakeShell {
+	ext := func(uuid, name, desc string, system, on bool, more map[string]any) map[string]any {
+		kind, state := 2.0, 6.0
+		if system {
+			kind = 1.0
+		}
+		if on {
+			state = 1.0
+		}
+		e := map[string]any{"uuid": uuid, "name": name, "description": desc, "type": kind, "state": state,
+			"enabled": on, "hasPrefs": true, "canChange": true}
+		for k, v := range more {
+			e[k] = v
+		}
+		return e
+	}
+	return &fakeShell{version: "51.1", answer: "successful", extensions: map[string]map[string]any{
+		"dash-to-dock@micxgx.gmail.com": ext("dash-to-dock@micxgx.gmail.com", "Dash to Dock",
+			"A dock for the Gnome Shell.", false, true, map[string]any{"version": 110.0, "hasUpdate": true}),
+		"clipboard-indicator@tudmotu.com": ext("clipboard-indicator@tudmotu.com", "Clipboard Indicator",
+			"The most popular clipboard manager for GNOME.", false, true,
+			map[string]any{"version": 72.0, "state": 3.0, "error": "SyntaxError: unexpected token"}),
+		"blur-my-shell@aunetx": ext("blur-my-shell@aunetx", "Blur my Shell",
+			"Adds a blur look to different parts of the GNOME Shell.", true, true, map[string]any{"version": 76.0}),
+		"caffeine@patapon.info": ext("caffeine@patapon.info", "Caffeine",
+			"Disable the screensaver and auto suspend.", true, false, map[string]any{"version": 61.0}),
+		"gsconnect@andyholmes.github.io": ext("gsconnect@andyholmes.github.io", "GSConnect",
+			"KDE Connect for GNOME: share files, notifications and more with your phone.", true, true,
+			map[string]any{"version": 73.0}),
+	}}
 }
 
 // shotRestorePlan is a restore with one app of each kind.

@@ -25,6 +25,9 @@ var ErrSchema = errors.New("catalog format not supported")
 type DB struct {
 	db   *sql.DB
 	info BuildInfo
+	// extensions is whether the catalog has the shell extensions' search index; catalogs built before
+	// extensions were added don't.
+	extensions bool
 }
 
 // Open opens the catalog at path read-only and checks its schema version.
@@ -67,6 +70,11 @@ func (d *DB) loadMeta() error {
 	if err := d.db.QueryRow(`SELECT value FROM meta WHERE key = 'build'`).Scan(&build); err != nil {
 		return fmt.Errorf("read build info: %w", err)
 	}
+	var n int
+	if err := d.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'extensions_fts'`).Scan(&n); err != nil {
+		return fmt.Errorf("read tables: %w", err)
+	}
+	d.extensions = n > 0
 	return json.Unmarshal([]byte(build), &d.info)
 }
 
@@ -112,6 +120,26 @@ type SearchOptions struct {
 	// Source, if set, keeps only apps with a listing from that source.
 	Source SourceID
 	Limit  int
+	// Extensions searches GNOME Shell extensions instead of apps. A search never mixes the two.
+	Extensions bool
+	// Shell, with Extensions, keeps only the extensions that have a version for this GNOME Shell release, by
+	// major version ("51").
+	Shell string
+}
+
+// table is the search index the options search.
+func (o SearchOptions) table() string {
+	if o.Extensions {
+		return "extensions_fts"
+	}
+	return "apps_fts"
+}
+
+// shellFilter is a WHERE term that keeps the apps a with a listing for the GNOME Shell release bound to
+// param ("?6"), or everything when that is empty.
+func shellFilter(param string) string {
+	return `(` + param + ` = '' OR EXISTS (SELECT 1 FROM listings l, json_each(l.data, '$.shells') s
+		WHERE l.app_id = a.id AND s.value = ` + param + `))`
 }
 
 // Search finds apps matching query. All words must match; if that finds nothing, any word may match. Each
@@ -119,7 +147,7 @@ type SearchOptions struct {
 // see search.
 func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]SearchResult, error) {
 	words := queryWords(query)
-	if len(words) == 0 {
+	if len(words) == 0 || (opt.Extensions && !d.extensions) {
 		return nil, nil
 	}
 	if len(words) == 1 && len([]rune(words[0])) <= 2 && synonyms[words[0]] == nil && orderBy(opt.Order) == "" {
@@ -172,14 +200,16 @@ func wholeWordQuery(words []string, op string) string {
 // matches them somewhere, so ranking by text relevance means scoring the whole catalog (30 to 50 ms) for
 // little use. Instead it matches names that start with them and puts the most popular first (about 3 ms).
 func (d *DB) searchShort(ctx context.Context, word string, opt SearchOptions) ([]SearchResult, error) {
+	fts := opt.table()
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT `+resultColumns+`
-		FROM apps_fts
-		JOIN apps a ON a.id = apps_fts.app_id
-		WHERE apps_fts MATCH ?1
+		FROM `+fts+`
+		JOIN apps a ON a.id = `+fts+`.app_id
+		WHERE `+fts+` MATCH ?1
 		  AND (?4 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?4))
+		  AND `+shellFilter("?5")+`
 		ORDER BY lower(a.name) = ?2 DESC, a.popularity DESC, a.stars DESC, lower(a.name)
-		LIMIT ?3`, `name : "`+word+`"*`, word, limitOr(opt.Limit), string(opt.Source))
+		LIMIT ?3`, `name : "`+word+`"*`, word, limitOr(opt.Limit), string(opt.Source), opt.Shell)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -188,6 +218,7 @@ func (d *DB) searchShort(ctx context.Context, word string, opt SearchOptions) ([
 
 func (d *DB) search(ctx context.Context, match string, r ranking, opt SearchOptions) ([]SearchResult, error) {
 	// bm25 weights, one per FTS column: app_id, name, keywords, summary, developer, description.
+	fts := opt.table()
 	sort := orderBy(opt.Order)
 	if sort == "" {
 		sort = "lower(a.name) = ?2 DESC, "
@@ -198,17 +229,18 @@ func (d *DB) search(ctx context.Context, match string, r ranking, opt SearchOpti
 			sort += "a.id IN whole DESC, CASE WHEN a.id IN whole THEN a.popularity END DESC, " +
 				"CASE WHEN a.id IN whole THEN a.stars END DESC, "
 		}
-		sort += "bm25(apps_fts, 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
+		sort += "bm25(" + fts + ", 0, 10.0, 5.0, 2.0, 1.0, 0.5) * a.boost"
 	}
 	rows, err := d.db.QueryContext(ctx, `
-		WITH whole AS (SELECT app_id FROM apps_fts WHERE ?5 != '' AND apps_fts MATCH ?5)
+		WITH whole AS (SELECT app_id FROM `+fts+` WHERE ?5 != '' AND `+fts+` MATCH ?5)
 		SELECT `+resultColumns+`
-		FROM apps_fts
-		JOIN apps a ON a.id = apps_fts.app_id
-		WHERE apps_fts MATCH ?1
+		FROM `+fts+`
+		JOIN apps a ON a.id = `+fts+`.app_id
+		WHERE `+fts+` MATCH ?1
 		  AND (?4 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?4))
+		  AND `+shellFilter("?6")+`
 		ORDER BY `+sort+`
-		LIMIT ?3`, match, r.exactName, limitOr(opt.Limit), string(opt.Source), r.wholeWords)
+		LIMIT ?3`, match, r.exactName, limitOr(opt.Limit), string(opt.Source), r.wholeWords, opt.Shell)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -226,6 +258,11 @@ type BrowseQuery struct {
 	// AppsOnly keeps desktop apps with an icon, for browsing pages; source pages list everything.
 	AppsOnly bool
 	Limit    int
+	// Extensions lists GNOME Shell extensions instead of apps. A list never mixes the two.
+	Extensions bool
+	// Shell, with Extensions, keeps only the extensions that have a version for this GNOME Shell release, by
+	// major version ("51").
+	Shell string
 }
 
 // Browse lists apps without a search.
@@ -241,8 +278,11 @@ func (d *DB) Browse(ctx context.Context, q BrowseQuery) ([]SearchResult, error) 
 		  AND (?2 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?2))
 		  AND a.popularity >= ?3
 		  AND (?4 = 0 OR (a.kind = 'desktop-application' AND a.icon_url != ''))
+		  AND (a.kind = 'shell-extension') = ?6
+		  AND `+shellFilter("?7")+`
 		ORDER BY `+sort+`
-		LIMIT ?5`, q.Category, string(q.Source), q.MinPopularity, q.AppsOnly, limitOr(q.Limit))
+		LIMIT ?5`, q.Category, string(q.Source), q.MinPopularity, q.AppsOnly, limitOr(q.Limit), q.Extensions,
+		q.Shell)
 	if err != nil {
 		return nil, fmt.Errorf("browse: %w", err)
 	}

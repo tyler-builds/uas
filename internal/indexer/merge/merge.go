@@ -26,6 +26,7 @@ import (
 func Merge(listings []catalog.Listing) ([]catalog.App, []Hidden) {
 	groups := map[string][]catalog.Listing{}
 	var order []string
+	var extensions []catalog.Listing
 	refs := map[string]bool{}
 	for _, l := range listings {
 		// A source can list the same ref twice; keep the first.
@@ -34,6 +35,12 @@ func Merge(listings []catalog.Listing) ([]catalog.App, []Hidden) {
 			continue
 		}
 		refs[ref] = true
+		if l.Kind == catalog.KindShellExtension {
+			// An extension is never an app's other source, even when it shares the app's name and repo
+			// (GSConnect, say), so each stays on its own.
+			extensions = append(extensions, l)
+			continue
+		}
 		key := groupKey(l)
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
@@ -48,10 +55,16 @@ func Merge(listings []catalog.Listing) ([]catalog.App, []Hidden) {
 	order = linkGroups(groups, order, nameAnd(func(l catalog.Listing) string { return l.VCSURL }))
 	order, hidden := sortCopies(groups, order)
 
-	apps := make([]catalog.App, 0, len(groups))
+	apps := make([]catalog.App, 0, len(groups)+len(extensions))
 	seen := map[string]bool{}
+	built := make([]catalog.App, 0, len(groups)+len(extensions))
 	for _, key := range order {
-		a := build(groups[key])
+		built = append(built, build(groups[key]))
+	}
+	for _, l := range extensions {
+		built = append(built, build([]catalog.Listing{l}))
+	}
+	for _, a := range built {
 		// Group keys are unique, so app IDs should be too; guard anyway, since a duplicate primary key
 		// would fail the whole build.
 		for base, n := a.ID, 2; seen[a.ID]; n++ {

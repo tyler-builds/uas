@@ -89,3 +89,26 @@ func TestMergeByNameAndURL(t *testing.T) {
 		t.Errorf("apps = %v", ids)
 	}
 }
+
+// TestExtensionsStayApart checks that a shell extension is never merged into the app whose name and repo it
+// shares.
+func TestExtensionsStayApart(t *testing.T) {
+	apps, _ := Merge([]catalog.Listing{
+		{Source: catalog.SourceFlathub, Ref: "app/org.example.Connect/x86_64/stable", AppStreamID: "org.example.Connect",
+			Name: "Connect", Homepage: "https://github.com/example/connect", VCSURL: "https://github.com/example/connect"},
+		{Source: catalog.SourceGNOMEExtensions, Ref: "connect@example.github.io", Kind: catalog.KindShellExtension,
+			Name: "Connect", Homepage: "https://github.com/example/connect", VCSURL: "https://github.com/example/connect",
+			Installs: 5000, Shells: []string{"50", "51"}},
+	})
+	if len(apps) != 2 {
+		t.Fatalf("got %d apps, want 2: %+v", len(apps), apps)
+	}
+	ext, app := apps[0], apps[1]
+	if ext.ID != catalog.ExtensionAppID("connect@example.github.io") || ext.Kind != catalog.KindShellExtension ||
+		ext.Popularity != 5000 || len(ext.Listings) != 1 {
+		t.Errorf("extension = %+v", ext)
+	}
+	if app.ID != "org.example.Connect" || len(app.Listings) != 1 {
+		t.Errorf("app = %+v", app)
+	}
+}
