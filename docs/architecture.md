@@ -512,8 +512,11 @@ newer than the published one, and the Worker refuses to replace a published arch
 **Self-update** (`internal/client/selfupdate`): `uas self-update`, Settings → About, and the background check
 (which lists "uas 0.3.0" with app updates) read `latest.json`, verify it, and compare versions. Installing
 downloads the archive, checks its size and SHA-256 against the signed values, writes both programs beside
-the running one, then renames them into place, only if that folder is the user's. Builds from source report
-version `dev` and never update themselves. A Homebrew tap can come later.
+the running one, then renames them into place, only if that folder is the user's. The window still runs the
+old program, so in the desktop app the Update button then becomes Restart (disabled while an install or
+removal runs, which it would cut off): the app quits and, once it has shut down, the same process becomes
+the program now at its path (`exec`), opened on Settings. Builds from source report version `dev` and never
+update themselves. A Homebrew tap can come later.
 
 ### Telemetry
 

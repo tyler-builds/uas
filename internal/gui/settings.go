@@ -207,12 +207,38 @@ func (a *App) updateChecksRow(ctx *ui.Context) ui.Element {
 		"Once a day, with a notification when updates are ready. Nothing installs without you.", sw))
 }
 
-// aboutRow shows this uas's version, with an update to the latest release when there is one.
+// working names a job that is running (an install, an update, a removal), or "" when none is.
+func (a *App) working() string {
+	for _, j := range a.jobs.Get() {
+		if !j.done {
+			return j.title
+		}
+	}
+	return ""
+}
+
+// aboutRow shows this uas's version, with an update to the latest release when there is one. Once the update
+// is installed its button becomes Restart, since the window still runs the old version.
 func (a *App) aboutRow(ctx *ui.Context) ui.Element {
 	icon := ui.Div().Size(ui.Px(18), ui.Px(18)).Child(brandMark(ctx, 18))
 	if !version.Release() {
 		return settingsList(ctx, settingsRow(ctx, icon, "uas (built from source)",
 			"Builds from source don't update themselves.", nil))
+	}
+	if v := a.updatedTo.Get(); v != "" {
+		// The new programs are in place, but this window still runs the old one until it restarts.
+		var right ui.Element
+		if a.Restart != nil {
+			working := a.working()
+			tip := "Close uas and open the new version"
+			if working != "" {
+				tip = "Wait for “" + working + "” to finish first; restarting would stop it"
+			}
+			right = ui.Button("Restart").Icon(icons.RotateCw).Primary().Small().Disabled(working != "").
+				Tooltip(tip).OnClick(a.Restart)
+		}
+		return settingsList(ctx, settingsRow(ctx, icon, "uas "+version.Version,
+			"uas "+v+" is installed. Restart uas to start using it.", right))
 	}
 	res := ui.Query(ctx, "self-update", func(c context.Context) (*selfupdate.Available, error) {
 		return a.s.SelfUpdater().Check(c)
@@ -235,7 +261,12 @@ func (a *App) aboutRow(ctx *ui.Context) ui.Element {
 			Loading(busy).OnClick(func() {
 			a.startJob(ctx, "self-update", "Updating uas", false, "Restart uas to use the new version",
 				func(c context.Context, p func(backend.Progress)) error {
-					return a.s.SelfUpdater().Install(c, avail, func(msg string) { p(backend.Progress{Message: msg}) })
+					err := a.s.SelfUpdater().Install(c, avail, func(msg string) { p(backend.Progress{Message: msg}) })
+					if err == nil {
+						// The button becomes Restart.
+						ctx.Post(func() { a.updatedTo.Set(avail.Release.Version) })
+					}
+					return err
 				})
 		})
 	}

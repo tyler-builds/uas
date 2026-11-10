@@ -83,6 +83,13 @@ type App struct {
 	restore  *ui.Signal[*restorePlan] // a restore waiting for the user's OK
 	whatsNew *ui.Signal[*whatsNew]    // an open "What's new" dialog
 
+	// updatedTo is the version of uas a self-update installed while this window was open, which a restart
+	// starts; "" until then.
+	updatedTo *ui.Signal[string]
+	// Restart closes the app and starts it again, as its installed program now is. The program that runs the
+	// app sets it; without it the About row only says to restart.
+	Restart func()
+
 	extTab   *ui.Signal[string]        // the Extensions page's tab: extInstalled or extBrowse
 	extOrder *ui.Signal[catalog.Order] // how its Browse tab is sorted
 	// extSearchOrder is how its Browse tab is sorted while the top bar has a search.
@@ -120,6 +127,7 @@ func New(s *session.Session) *App {
 		removing:       ui.NewSignal[*removal](nil),
 		restore:        ui.NewSignal[*restorePlan](nil),
 		whatsNew:       ui.NewSignal[*whatsNew](nil),
+		updatedTo:      ui.NewSignal(""),
 		extTab:         ui.NewSignal(extInstalled),
 		extOrder:       ui.NewSignal(catalog.OrderPopular),
 		extSearchOrder: ui.NewSignal(catalog.OrderRelevance),

@@ -1,7 +1,7 @@
 // Command uas-gui is the uas desktop app.
 //
 //	uas-gui                    open the app
-//	uas-gui --page updates     open it on a page: updates, installed or settings
+//	uas-gui --page updates     open it on a page: updates, installed, extensions or settings
 //	uas-gui --check-updates    check for updates and notify, without opening a window (run by the
 //	                           background check's systemd timer)
 package main
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -46,6 +47,17 @@ func main() {
 	}
 	g := gui.New(s)
 	g.StartOn(*page)
+	// After an update of uas itself, Settings offers to restart: the window closes, and once the app has shut
+	// down this process becomes the new program, opened on Settings again. The path is read now, while the
+	// program at it is still the one running.
+	exe, exeErr := os.Executable()
+	var restart atomic.Bool
+	if exeErr == nil {
+		g.Restart = func() {
+			restart.Store(true)
+			app.Quit()
+		}
+	}
 	light, dark := gui.Themes()
 	// The app ID is the Wayland app ID, which the desktop matches to packaging/linux's .desktop file for the
 	// name and icon in the dock.
@@ -63,6 +75,11 @@ func main() {
 		DarkTheme:  dark,
 		Root:       g.Root,
 	})
+	if restart.Load() {
+		err := syscall.Exec(exe, []string{exe, "--page", "settings"}, os.Environ())
+		fmt.Fprintln(os.Stderr, "uas-gui: could not restart:", err) // Exec only returns when it fails
+		os.Exit(1)
+	}
 }
 
 // checkUpdates runs one background check: a notification for new updates, which opens this app on its
