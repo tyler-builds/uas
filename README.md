@@ -253,7 +253,8 @@ Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The 
 ## Acknowledgements
 
 Built with [jamb](https://github.com/tyler-builds/jamb). Interface font: [Inter](https://rsms.me/inter/)
-(SIL Open Font License). Source logos: [Simple Icons](https://simpleicons.org/).
+(SIL Open Font License). Source logos: [Simple Icons](https://simpleicons.org/). Release archives carry the
+licenses and notices of everything in the binaries in `licenses/`.
 
 ## License
 
