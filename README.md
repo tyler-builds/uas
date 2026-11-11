@@ -254,3 +254,11 @@ Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The 
 
 Built with [jamb](https://github.com/tyler-builds/jamb). Interface font: [Inter](https://rsms.me/inter/)
 (SIL Open Font License). Source logos: [Simple Icons](https://simpleicons.org/).
+
+## License
+
+uas is licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Tyler Carr.
+
+Release builds use the `no_gpl` build tag, which leaves out the GPL-2.0 LZO decompressor that the SquashFS
+library would otherwise include; uas then can't read the rare AppImage compressed with LZO. A build without
+the tag, such as `go install` from source, includes that GPL-2.0 code.
