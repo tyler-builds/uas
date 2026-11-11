@@ -275,14 +275,16 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		content = a.page(ctx, res.Data)
 	}
 
-	// The pages sit on an inset panel, a step off the sidebar, with a hairline border.
+	// The window has no system title bar: the app's own runs above the pages, with the window's buttons at its
+	// end. The pages sit below it on an inset panel, a step off the sidebar, with a hairline border.
 	return ui.Div().Row().Size(ui.Full, ui.Full).Background(t.Panel).TextColor(t.Text).
 		Child(a.sidebar(ctx, res.Data, !res.Loading && res.Err == nil)).
 		Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			MarginTop(space2).MarginRight(space2).MarginBottom(space2).
-			Radius(radiusXL).Border(1, t.Border).Background(t.Background).ClipContent().
-			Child(a.topBar(ctx)).
-			Child(content)).
+			Child(a.titleBar(ctx)).
+			Child(ui.Div().Column().Grow(1).Basis(ui.Px(0)).MinHeight(ui.Px(0)).
+				MarginRight(space2).MarginBottom(space2).
+				Radius(radiusXL).Border(1, t.Border).Background(t.Background).ClipContent().
+				Child(content))).
 		Child(a.confirmDialog(ctx)).
 		Child(a.removeDialog(ctx)).
 		Child(a.restoreDialog(ctx)).
@@ -383,7 +385,9 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 	// The selected item's fill marks it; no bar beside it.
 	return ui.Sidebar(a.navSel, items...).Label("uas").Width(ui.Px(sidebarWidth)).NoIndicator().
 		OnChange(func(key string) { a.goTo(navView(key)) }).
-		Header(ui.Div().Row().Align(ui.Center).Gap(space2 + 2).PaddingX(space2).PaddingTop(space2).PaddingBottom(space3).
+		// The header lines up with the title bar beside it (titleBarHeight), and moves the window like it.
+		Header(ui.Div().Row().Align(ui.Center).Gap(space2 + 2).PaddingX(space2).PaddingTop(space1).PaddingBottom(space3).
+			WindowArea(ui.WindowAreaDrag).
 			Child(brandMark(ctx, 24)).
 			Child(ui.Text("uas").FontSize(15).Semibold())).
 		Footer(a.sidebarFooter(ctx, info, ready))
@@ -407,15 +411,18 @@ func (a *App) sidebarFooter(ctx *ui.Context, info catalog.BuildInfo, ready bool)
 		Child(caption(ctx, status))
 }
 
-// topBar holds the back button and where you are, the search field and the settings button.
-func (a *App) topBar(ctx *ui.Context) ui.Element {
-	t := ctx.Theme()
-	left := ui.Div().Row().Align(ui.Center).Gap(space2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))
+// titleBarHeight is the height of the window's title bar. The sidebar's header, beside it, is as high: the
+// sidebar's 8 px padding, 4 px above the mark, the 24 px mark and 12 px below it.
+const titleBarHeight = 48
+
+// titleBar is the window's own title bar, above the pages: the back button and where you are, then the search
+// field, the settings button and the window's buttons (minimize, maximize and close, as the desktop sets
+// them). Its empty parts move the window, and a double-click maximizes it.
+func (a *App) titleBar(ctx *ui.Context) ui.Element {
+	var back ui.Element
 	if len(a.history.Get()) > 1 {
-		left = left.Child(ui.IconButton(icons.ArrowLeft).Ghost().Small().Label("Back").Tooltip("Back").
-			OnClick(a.back))
+		back = ui.IconButton(icons.ArrowLeft).Ghost().Small().Label("Back").Tooltip("Back").OnClick(a.back)
 	}
-	left = left.Child(a.crumbs(ctx))
 	var search ui.Element
 	if v := a.current(); v.isList() {
 		// Installed and Updates filter their own list instead of searching the catalog.
@@ -443,13 +450,19 @@ func (a *App) topBar(ctx *ui.Context) ui.Element {
 				a.showSearch()
 			})
 	}
-	settings := ui.IconButton(icons.Settings).Ghost().Label("Settings").Tooltip("Settings").
+	settings := ui.IconButton(icons.Settings).Ghost().Small().Label("Settings").Tooltip("Settings").
 		OnClick(func() { a.goTo(view{page: pageSettings}) })
-	return ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).Height(ui.Px(52)).Shrink(0).
-		BorderEdges(ui.Edges{Bottom: 1}, t.Border).
-		Child(left).
-		Child(ui.Div().Width(ui.Px(340)).Shrink(1).MinWidth(ui.Px(160)).Child(search)).
-		Child(settings)
+	return ui.TitleBar().Height(ui.Px(titleBarHeight)).
+		Styles(ui.TitleBarStyle{Bar: ui.Style{Padding: ui.Edges{Left: space4}}}).
+		Child(back).Child(a.crumbs(ctx)).
+		Trailing(ui.Div().Width(ui.Px(searchWidth(ctx))).Child(search), settings)
+}
+
+// searchWidth is the width of the title bar's search field: 340 px, narrower in a narrow window, so that where
+// you are keeps room beside it.
+func searchWidth(ctx *ui.Context) float32 {
+	w, _ := ctx.WindowSize()
+	return min(max(w-sidebarWidth-520, 180), 340)
 }
 
 // crumbs names the page on screen, after the page it was opened from when that helps.
@@ -482,7 +495,7 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 		}
 		return ""
 	}
-	row := ui.Div().Row().Align(ui.Center).Gap(6).MinWidth(ui.Px(0))
+	row := ui.Div().Row().Align(ui.Center).Gap(6).Shrink(1).MinWidth(ui.Px(0))
 	if v.isDetail() {
 		// The app's name comes from the query its page runs, so it is usually there already.
 		res := ui.Query(ctx, a.key("app", v.arg), func(c context.Context) (*catalog.App, error) {

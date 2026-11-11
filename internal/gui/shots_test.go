@@ -129,7 +129,9 @@ func TestShots(t *testing.T) {
 			if w == 0 {
 				w = 1440
 			}
-			u := uitest.New(t, a.Root, uitest.Size(w, sh.h), uitest.Theme(theme.t))
+			// The window's buttons as GNOME draws them, which is where uas runs.
+			u := uitest.New(t, a.Root, uitest.Size(w, sh.h), uitest.Theme(theme.t),
+				uitest.Settings(ui.SystemSettings{RoundCaptionButtons: true}))
 			for i := 0; i < 40; i++ {
 				u.Advance(100 * time.Millisecond)
 				time.Sleep(60 * time.Millisecond)

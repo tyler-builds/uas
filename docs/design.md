@@ -12,9 +12,14 @@ near-black neutral surfaces, hairline borders, a small type scale, and one accen
   one has a neutral fill and no bar.
 - **Content panel:** the pages sit on an inset panel with a 12px radius and a hairline border, a step lighter
   than the sidebar.
-- **Top bar:** 52px with a hairline under it. On the left, Back (an arrow) when there is somewhere to go back
-  to, and where you are: the page's icon and name, or on an app page the page it was opened from and the
-  app (`Home / darktable`). On the right, a compact search field (typing opens the search page) and Settings.
+- **Window:** no system title bar (`app.ChromeCustom`) and rounded corners; on GNOME jamb draws them with a
+  shadow and an outline, square while maximized or snapped.
+- **Title bar:** 48px on the sidebar's surface, above the content panel, as a jamb `ui.TitleBar`. On the left,
+  Back (an arrow) when there is somewhere to go back to, and where you are: the page's icon and name, or on
+  an app page the page it was opened from and the app (`Home / darktable`). On the right, a compact search
+  field (typing opens the search page; 340px, down to 180px in a narrow window), Settings, and the window's
+  buttons as the desktop sets them. Its empty parts and the sidebar's header move the window, and a
+  double-click maximizes it.
 - **Navigation:** a stack of views (`app.go`): opening an app or a list pushes, Back pops, and the sidebar
   starts over.
 

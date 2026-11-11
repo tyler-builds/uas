@@ -74,6 +74,8 @@ func main() {
 		LightTheme: light,
 		DarkTheme:  dark,
 		Root:       g.Root,
+		Chrome:     app.ChromeCustom, // the app's title bar carries the window's buttons (gui's titleBar)
+		Corners:    app.CornersRound,
 	})
 	if restart.Load() {
 		err := syscall.Exec(exe, []string{exe, "--page", "settings"}, os.Environ())
