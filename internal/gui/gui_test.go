@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyler-builds/jamb/access"
+	"github.com/tyler-builds/jamb/ui"
 	"github.com/tyler-builds/jamb/ui/uitest"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -193,6 +194,35 @@ func TestMinimumWindowSize(t *testing.T) {
 	u.Settle()
 	if w := u.Runtime().ContentWidth(); w > 760 {
 		t.Errorf("the app page is %v px wide at the minimum window width of 760", w)
+	}
+}
+
+// The window has no system title bar: the app's own holds the search field, Settings and the window's buttons in
+// one row at the top, at the narrowest window too, with Back before where you are once there is somewhere to go.
+func TestTitleBarHoldsWindowButtons(t *testing.T) {
+	a, _, _ := testApp(t)
+	u := uitest.New(t, a.Root, uitest.Size(760, 520), uitest.Settings(ui.SystemSettings{RoundCaptionButtons: true}))
+	defer u.Close()
+	u.WaitFor("the Notes row", func() bool { return u.Has("row:org.example.Notes") })
+	a.openApp("org.example.Notes")
+	u.WaitFor("the app page", func() bool { return u.Has("detail:org.example.Notes") })
+	u.Settle()
+	controls := []*uitest.Element{u.ByRole(access.RoleButton, "Back"), u.ByRole(access.RoleTextField, "Search apps"),
+		u.ByRole(access.RoleButton, "Settings"), u.ByRole(access.RoleButton, "Minimize"),
+		u.ByRole(access.RoleButton, "Maximize"), u.ByRole(access.RoleButton, "Close")}
+	right := float32(0)
+	for _, c := range controls {
+		b := c.Bounds()
+		if mid := b.Y + b.H/2; mid < titleBarHeight/2-2 || mid > titleBarHeight/2+2 {
+			t.Errorf("%s is centered at y %v, not in the title bar's middle (%v)", c.Name(), mid, titleBarHeight/2)
+		}
+		if b.X < right {
+			t.Errorf("%s starts at x %v, over the control before it (which ends at %v)", c.Name(), b.X, right)
+		}
+		right = b.X + b.W
+	}
+	if right > 760 {
+		t.Errorf("the title bar's controls end at x %v, past the window's 760 px", right)
 	}
 }
 
