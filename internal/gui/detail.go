@@ -40,13 +40,7 @@ const detailMaxWidth = 1240
 // detailPage shows one app.
 func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
-		res := ui.Query(ctx, a.key("app", id), func(c context.Context) (*catalog.App, error) {
-			db, err := a.catalog(c)
-			if err != nil {
-				return nil, err
-			}
-			return db.Resolve(c, id)
-		})
+		res := a.appQuery(ctx, id)
 		page := pageBody(detailMaxWidth).Gap(space6)
 		switch {
 		case res.Loading:
@@ -76,15 +70,23 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			}
 		}
 
+		// An app read from a link has one listing, shown (with its trust score and release notes) even when
+		// there is nothing in it to install, so the page says what the project is and why.
+		shown := listing
+		if app.Live() && shown.Source == "" {
+			shown = app.Listings[0]
+		}
 		// The figures are the picked source's, or those of the user's own AppImage when that is the copy
 		// installed: its version, and no publisher check, which is the source's and not that file's.
-		figures := listing
+		figures := shown
 		if in, ok := a.addedCopy(ctx, app, listing); ok {
 			figures = catalog.Listing{Version: in.Version}
 		}
-		page = page.
-			Child(a.detailHeader(ctx, app, available, chosen, listing, chooseErr)).
-			Child(statsStrip(ctx, app, figures))
+		page = page.Child(a.detailHeader(ctx, app, available, chosen, listing, chooseErr))
+		if app.Live() {
+			page = page.Child(a.liveNotice(ctx, app.Listings[0]))
+		}
+		page = page.Child(statsStrip(ctx, app, figures))
 
 		main := ui.Div().Column().Gap(space6).MinWidth(ui.Px(0))
 		if len(app.Screenshots) > 0 {
@@ -112,11 +114,11 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 			main = main.Child(ui.Div().Column().Gap(space1).Child(heading("About")).
 				Child(markdown.View(app.Description).Key("desc:" + app.ID).Label("Description").OnLink(openURL)))
 		}
-		if notes := changelogSection(ctx, app, listing); notes != nil {
+		if notes := changelogSection(ctx, app, shown); notes != nil {
 			main = main.Child(notes)
 		}
-		if listing.Trust != nil {
-			main = main.Child(trustPanel(ctx, listing))
+		if shown.Trust != nil {
+			main = main.Child(trustPanel(ctx, shown))
 		}
 		if id := a.installedFlatpak(ctx, app); id != "" {
 			main = main.Child(a.permissionsPanel(ctx, id))
@@ -135,6 +137,18 @@ func (a *App) detailPage(ctx *ui.Context, id string) ui.Element {
 		}
 		return scroll(page)
 	}).Key("detail:" + id)
+}
+
+// appQuery reads the app with an ID, for its page and the top bar's crumbs, which share it. An app the catalog
+// doesn't have is read from its repo when the ID names one (Install from URL).
+func (a *App) appQuery(ctx *ui.Context, id string) ui.QueryResult[*catalog.App] {
+	return ui.Query(ctx, a.key("app", id), func(c context.Context) (*catalog.App, error) {
+		db, err := a.catalog(c)
+		if err != nil {
+			return nil, err
+		}
+		return a.s.ResolveApp(c, db, id)
+	})
 }
 
 // installedFlatpak returns the Flatpak app ID of the app's installed Flathub copy, or "".
@@ -170,7 +184,10 @@ func (a *App) detailHeader(ctx *ui.Context, app *catalog.App, available []catalo
 	var install ui.Element
 	if len(available) == 0 {
 		msg := "None of this app's sources can be installed on this system."
-		if chooseErr != nil {
+		switch {
+		case app.Live():
+			msg = "Nothing in its latest release can be installed here; see below."
+		case chooseErr != nil:
 			msg = chooseErr.Error()
 		}
 		install = ui.Div().Width(ui.Px(220)).Child(ui.Alert("Not available here").Warning().Description(msg))
@@ -403,13 +420,16 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 				listingLabel(choice.Listing)+": "+choice.Reason+"."))
 		}
 	}
-	if !isAdded {
+	if !isAdded && listing.Source != "" {
 		for _, n := range a.s.InstallNotes(listing) {
 			notes = notes.Child(infoRow(ctx, icons.Info, t.TextSubtle, n))
 		}
 		notes = notes.Child(a.whyPanel(ctx, app, listing))
 	}
-	panel = panel.Child(ui.Div().Height(ui.Px(1)).Background(t.Border)).Child(notes)
+	// With no source to install from there are no notes, and no second divider.
+	if isAdded || choice.Reason != "" || listing.Source != "" {
+		panel = panel.Child(ui.Div().Height(ui.Px(1)).Background(t.Border)).Child(notes)
+	}
 
 	bugs := ""
 	for _, l := range app.Listings {
@@ -686,11 +706,13 @@ func (a *App) confirmDialog(ctx *ui.Context) ui.Element {
 		body = body.Child(trustPanel(ctx, l))
 	}
 	intent := ui.AlertDialogConfirm
-	if l.Trust != nil && (l.Trust.Score < 60 || len(l.Trust.Flags) > 0) {
+	if l.Live || (l.Trust != nil && (l.Trust.Score < 60 || len(l.Trust.Flags) > 0)) {
 		intent = ui.AlertDialogWarning
 	}
 	message := "This source is not reviewed by a distribution."
 	switch {
+	case l.Live:
+		message = "Install it only if you trust its developer."
 	case a.s.NeedsRestart(l.Source) && l.Source == catalog.SourceFedora:
 		message = "This adds the package to your system image."
 	case l.Source.Distribution():

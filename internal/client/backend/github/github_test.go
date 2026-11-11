@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -164,5 +165,92 @@ func TestOwns(t *testing.T) {
 		if b.owns(p) {
 			t.Errorf("owns(%q) = true", p)
 		}
+	}
+}
+
+// An app installed from a link that the catalog doesn't have is recorded as such, and updates from its repo's
+// releases (Live) for as long as the catalog doesn't have it.
+func TestInstalledFromLinkUpdatesFromRepo(t *testing.T) {
+	v1, v2 := []byte("not really an appimage v1"), []byte("not really an appimage v2")
+	l1, l2 := listing("1.0", v1), listing("2.0", v2)
+	l1.Live, l2.Live = true, true
+	srv := files{l1.Assets[0].URL: v1, l2.Assets[0].URL: v2}
+	b := newBackend(t, srv, catalog.Listing{})
+	b.Latest = func(_ context.Context, repo string) (catalog.Listing, error) {
+		return catalog.Listing{}, errors.New(repo + " is no longer in the catalog")
+	}
+	live := l1
+	lookups := 0
+	b.Live = func(_ context.Context, repo string) (catalog.Listing, error) {
+		lookups++
+		if repo != "example/notes" {
+			t.Errorf("Live(%q)", repo)
+		}
+		return live, nil
+	}
+	ctx := context.Background()
+	if err := b.Install(ctx, l1, nil); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := b.State.Load()
+	if g, ok := st.Find("example/notes"); !ok || !g.FromURL {
+		t.Fatalf("state = %+v", st.GitHub)
+	}
+	apps, _ := b.Installed(ctx)
+	if len(apps) != 1 || !apps[0].FromURL || !apps[0].Matches(l1) {
+		t.Fatalf("installed = %+v", apps)
+	}
+
+	if ups, err := b.Updates(ctx); err != nil || len(ups) != 0 {
+		t.Fatalf("updates while current = %+v, %v", ups, err)
+	}
+	live = l2
+	ups, err := b.Updates(ctx)
+	if err != nil || len(ups) != 1 || ups[0].Ref != "example/notes" || ups[0].Version != "2.0" {
+		t.Fatalf("updates = %+v, %v", ups, err)
+	}
+	if err := b.Update(ctx, apps[0], nil); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = b.State.Load()
+	if g, _ := st.Find("example/notes"); g.Version != "2.0" || g.SHA256 != sum(v2) || !g.FromURL {
+		t.Fatalf("after update = %+v", g)
+	}
+
+	// Once the catalog has the app, it updates from there and stops being an app from a link.
+	cat := l2
+	cat.Live = false
+	b.Latest = func(context.Context, string) (catalog.Listing, error) { return cat, nil }
+	before := lookups
+	if ups, err := b.Updates(ctx); err != nil || len(ups) != 0 || lookups != before {
+		t.Fatalf("updates from the catalog = %+v, %v, %d lookups", ups, err, lookups-before)
+	}
+	if err := b.Install(ctx, cat, nil); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = b.State.Load()
+	if g, _ := st.Find("example/notes"); g.FromURL {
+		t.Error("still from a link after installing the catalog's listing")
+	}
+}
+
+// Apps installed from the catalog never ask the forge: one the catalog dropped has no updates, as before.
+func TestCatalogInstallNeverLive(t *testing.T) {
+	v1 := []byte("not really an appimage v1")
+	l1 := listing("1.0", v1)
+	b := newBackend(t, files{l1.Assets[0].URL: v1}, l1)
+	b.Live = func(context.Context, string) (catalog.Listing, error) {
+		t.Error("Live was asked about an app installed from the catalog")
+		return catalog.Listing{}, errors.New("no")
+	}
+	ctx := context.Background()
+	if err := b.Install(ctx, l1, nil); err != nil {
+		t.Fatal(err)
+	}
+	b.Latest = func(context.Context, string) (catalog.Listing, error) {
+		return catalog.Listing{}, errors.New("no longer in the catalog")
+	}
+	if ups, err := b.Updates(ctx); err != nil || len(ups) != 0 {
+		t.Errorf("updates = %+v, %v", ups, err)
 	}
 }

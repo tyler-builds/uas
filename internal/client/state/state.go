@@ -32,7 +32,11 @@ type GitHubInstall struct {
 	WMClass string `json:"wm_class,omitempty"`
 	// ExecArgs are the launcher's launch arguments when they came from a launcher uas took over, because the
 	// AppImage's own launcher couldn't be read to take them from.
-	ExecArgs    string    `json:"exec_args,omitempty"`
+	ExecArgs string `json:"exec_args,omitempty"`
+	// FromURL is true when the user installed the app from a link to its repo and the catalog didn't have it
+	// then. It updates from the repo's releases, read from the forge, for as long as the catalog doesn't
+	// have it.
+	FromURL     bool      `json:"from_url,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 

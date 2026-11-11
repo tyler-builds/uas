@@ -196,6 +196,26 @@ type Listing struct {
 	Assets []Asset `json:"assets,omitempty"`
 	// Trust explains how far a listing from an unreviewed source (GitHub, COPR) can be trusted.
 	Trust *Trust `json:"trust,omitempty"`
+
+	// Live is true for a listing uas read from its source just now, because the user gave a link to an app
+	// the catalog doesn't have (Install from URL). The catalog never holds one.
+	Live bool `json:"live,omitempty"`
+}
+
+// Live reports whether the app was read from its source just now rather than from the catalog (see
+// Listing.Live).
+func (a *App) Live() bool {
+	return len(a.Listings) > 0 && a.Listings[0].Live
+}
+
+// LiveApp is the app of a listing uas read from its source (see Listing.Live), with the ID the catalog gives
+// an app from one release listing: "github:owner/repo".
+func LiveApp(l Listing) *App {
+	return &App{ID: string(l.Source) + ":" + l.Ref, Kind: l.Kind, Name: l.Name, Summary: l.Summary,
+		Description: l.Description, Developer: l.Developer, License: l.License, Homepage: l.Homepage,
+		VCSURL: l.VCSURL, IconURL: l.IconURL, Categories: l.Categories, Keywords: l.Keywords,
+		Screenshots: l.Screenshots, Popularity: l.Installs, Stars: l.Stars, Updated: l.Released,
+		Listings: []Listing{l}}
 }
 
 // Change is one release's notes.

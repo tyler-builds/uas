@@ -83,6 +83,9 @@ type App struct {
 	removing *ui.Signal[*removal]     // a removal waiting for the user's OK
 	restore  *ui.Signal[*restorePlan] // a restore waiting for the user's OK
 	whatsNew *ui.Signal[*whatsNew]    // an open "What's new" dialog
+	// linkDialog is whether the "Install from a link" dialog is open, and linkText what is typed in it.
+	linkDialog *ui.Signal[bool]
+	linkText   *ui.Signal[string]
 
 	migrate *ui.Signal[*migratePlan] // an open Migrate dialog
 	// scanMigrations, migrateOne and clearLeftovers do the dialog's work: the session's, unless a test
@@ -140,6 +143,8 @@ func New(s *session.Session) *App {
 		removing:       ui.NewSignal[*removal](nil),
 		restore:        ui.NewSignal[*restorePlan](nil),
 		whatsNew:       ui.NewSignal[*whatsNew](nil),
+		linkDialog:     ui.NewSignal(false),
+		linkText:       ui.NewSignal(""),
 		updatedTo:      ui.NewSignal(""),
 		uninstalling:   ui.NewSignal(false),
 		migrate:        ui.NewSignal[*migratePlan](nil),
@@ -295,6 +300,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.removeDialog(ctx)).
 		Child(a.restoreDialog(ctx)).
 		Child(a.whatsNewDialog(ctx)).
+		Child(a.installLinkDialog(ctx)).
 		Child(a.extRemoveDialog(ctx)).
 		Child(a.migrateDialog(ctx)).
 		Child(a.uninstallDialog(ctx)).
@@ -505,13 +511,7 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 	row := ui.Div().Row().Align(ui.Center).Gap(6).Shrink(1).MinWidth(ui.Px(0))
 	if v.isDetail() {
 		// The app's name comes from the query its page runs, so it is usually there already.
-		res := ui.Query(ctx, a.key("app", v.arg), func(c context.Context) (*catalog.App, error) {
-			db, err := a.catalog(c)
-			if err != nil {
-				return nil, err
-			}
-			return db.Resolve(c, v.arg)
-		})
+		res := a.appQuery(ctx, v.arg)
 		app := ""
 		if res.Data != nil {
 			app = res.Data.Name

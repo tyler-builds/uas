@@ -43,6 +43,10 @@ type ExportedApp struct {
 	Package string           `json:"package,omitempty"`
 	Name    string           `json:"name"`
 	Scope   string           `json:"scope,omitempty"`
+	// FromURL is true for an app installed from a link to its repo, which the catalog didn't have; a restore
+	// reads it from the repo again. Versions of uas from before Install from URL list it as not in the
+	// catalog.
+	FromURL bool `json:"from_url,omitempty"`
 }
 
 // Export lists the installed apps, the user's Flatpak permission changes, and in a GNOME session the
@@ -56,7 +60,7 @@ func (s *Session) Export(ctx context.Context) (Export, error) {
 		System: s.Platform.PrettyName, FlatpakScope: string(s.Settings.FlatpakScope)}
 	for _, a := range apps {
 		ex.Apps = append(ex.Apps, ExportedApp{Source: a.Source, Ref: a.Ref, AppID: a.AppID, Package: a.Package,
-			Name: a.Name, Scope: a.Scope})
+			Name: a.Name, Scope: a.Scope, FromURL: a.FromURL})
 		if a.Source == catalog.SourceFlathub {
 			if o := readOverride(a.AppID); o != "" {
 				if ex.FlatpakOverrides == nil {
@@ -176,6 +180,9 @@ func (s *Session) planOne(ctx context.Context, db *catalog.DB, installed []backe
 			break
 		}
 	}
+	if app == nil && e.FromURL && e.Source.Releases() {
+		return s.planFromURL(ctx, installed, e)
+	}
 	if app == nil {
 		it.Action, it.Note = RestoreUnavailable, "not in the catalog"
 		return it
@@ -267,3 +274,28 @@ func readOverride(appID string) string {
 
 // flatpakAppID matches Flatpak app IDs, which name override files.
 var flatpakAppID = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$`)
+
+// planFromURL plans the restore of an app installed from a link that the catalog doesn't have: from its
+// repo's current release, read now.
+func (s *Session) planFromURL(ctx context.Context, installed []backend.InstalledApp, e ExportedApp) RestoreItem {
+	it := RestoreItem{App: e}
+	l, err := s.liveListing(ctx, e.Source, e.Ref)
+	if err != nil {
+		it.Action, it.Note = RestoreUnavailable, "not in the catalog, and its repo can't be read: "+err.Error()
+		return it
+	}
+	for _, in := range installed {
+		if in.Matches(l) {
+			it.Action = RestoreInstalled
+			return it
+		}
+	}
+	if why := s.Unavailable(l); why != "" {
+		it.Action, it.Note = RestoreUnavailable, why
+		return it
+	}
+	it.appID = catalog.LiveApp(l).ID
+	it.Action, it.Listing = RestoreInstall, l
+	it.Note = "from " + l.Source.Host() + "/" + l.Source.Repo(l.Ref) + ", which isn't in uas's catalog"
+	return it
+}

@@ -30,6 +30,9 @@ type InstalledApp struct {
 	Desktop string `json:"desktop,omitempty"`
 	// Pending is true when the change takes effect only after a restart.
 	Pending bool `json:"pending,omitempty"`
+	// FromURL is true for an app installed from a link to its repo, which the catalog didn't have (see
+	// catalog.Listing.Live).
+	FromURL bool `json:"from_url,omitempty"`
 }
 
 // Matches reports whether a is the installed copy of l.

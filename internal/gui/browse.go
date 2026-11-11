@@ -9,6 +9,7 @@ import (
 	"github.com/tyler-builds/jamb/ui"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/fromurl"
 )
 
 // listMaxWidth is how wide list pages grow.
@@ -41,7 +42,13 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 			Child(pageHeader(ctx, "Search", "Type in the box above to search "+a.appCount(ctx)+
 				" apps by name or what they do.", nil)).
 			Child(controls).
-			Child(ui.Div().Row().Wrap().Gap(space2).Children(a.categoryChips(ctx)...)))
+			Child(ui.Div().Row().Wrap().Gap(space2).Children(a.categoryChips(ctx)...)).
+			Child(ui.Div().Row().Wrap().Align(ui.Center).Gap(space3).MarginTop(space4).
+				Child(muted(ctx, "Not in the catalog? Paste a link to the app's GitHub repo in the box above, or")).
+				Child(a.installLinkButton())))
+	}
+	if fromurl.IsLink(q) {
+		return a.linkResults(ctx, page, q)
 	}
 	res := ui.Query(ctx, a.key("search", q, string(src), string(order)),
 		func(c context.Context) ([]catalog.SearchResult, error) {
@@ -67,7 +74,8 @@ func (a *App) searchPage(ctx *ui.Context) ui.Element {
 		Child(pageHeader(ctx, "Search results", summary, busy)).
 		Child(controls).
 		Child(a.extensionsHint(ctx, q)).
-		Child(a.resultList(ctx, res, "Try other words, another source, or check the spelling.")))
+		Child(a.resultList(ctx, res, "Try other words, another source, or check the spelling. For an app "+
+			"that isn't in the catalog, paste a link to its GitHub repo in the search box.")))
 }
 
 // categoryChips are links to the categories, for the empty search page.

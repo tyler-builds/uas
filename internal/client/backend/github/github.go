@@ -91,6 +91,9 @@ type Backend struct {
 	Client *http.Client
 	// Latest returns the current catalog listing for a repo, for updates.
 	Latest func(ctx context.Context, repo string) (catalog.Listing, error)
+	// Live, if set, reads a repo's current release from the forge (a listing with Live set), for updates of
+	// apps installed from a link that the catalog doesn't have.
+	Live func(ctx context.Context, repo string) (catalog.Listing, error)
 	// Runner runs flatpak for bundles and, if set, update-desktop-database after launchers change.
 	Runner run.Runner
 	// Flatpak is the flatpak binary. Without it, Flatpak bundles aren't installable.
@@ -168,7 +171,7 @@ func (b *Backend) Installed(context.Context) ([]backend.InstalledApp, error) {
 		}
 		apps = append(apps, backend.InstalledApp{Source: src, Ref: g.Repo, AppID: g.Repo,
 			Name: g.Name, Version: g.Version, Scope: "user", Origin: string(src), Icon: iconURL(g.IconFile),
-			Desktop: g.DesktopFile})
+			Desktop: g.DesktopFile, FromURL: g.FromURL})
 	}
 	return apps, nil
 }
@@ -220,7 +223,7 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 	}
 	st.Put(state.GitHubInstall{Repo: l.Ref, Source: stateSource(l.Source), Name: p.name, Version: l.Version, Asset: a.Name, SHA256: a.SHA256,
 		Path: p.path, DesktopFile: p.desktopFile, IconFile: p.iconFile, WMClass: old.WMClass, ExecArgs: old.ExecArgs,
-		InstalledAt: b.now()})
+		FromURL: l.Live, InstalledAt: b.now()})
 	return b.State.Save(st)
 }
 
@@ -493,15 +496,25 @@ func (b *Backend) Updates(ctx context.Context) ([]backend.AvailableUpdate, error
 		if sourceOf(g) != b.Source() {
 			continue
 		}
-		l, err := b.Latest(ctx, g.Repo)
+		l, err := b.latest(ctx, g)
 		if err != nil {
-			continue // no longer in the catalog: nothing to offer
+			continue // no longer in the catalog, or the forge can't be reached: nothing to offer
 		}
 		if a, ok := b.Pick(l); ok && a.SHA256 != g.SHA256 {
 			ups = append(ups, backend.AvailableUpdate{Ref: g.Repo, Scope: "user", Version: l.Version})
 		}
 	}
 	return ups, nil
+}
+
+// latest is the current listing of an install: the catalog's, else, for an app installed from a link that
+// the catalog doesn't have, the forge's (Live).
+func (b *Backend) latest(ctx context.Context, g state.GitHubInstall) (catalog.Listing, error) {
+	l, err := b.Latest(ctx, g.Repo)
+	if err != nil && g.FromURL && b.Live != nil {
+		return b.Live(ctx, g.Repo)
+	}
+	return l, err
 }
 
 // Update implements backend.Backend: it installs the catalog's current release if it differs.
@@ -520,7 +533,7 @@ func (b *Backend) Update(ctx context.Context, a backend.InstalledApp, progress f
 	if !ok {
 		return fmt.Errorf("%s: %s is not installed", a.Source, a.Ref)
 	}
-	l, err := b.Latest(ctx, a.Ref)
+	l, err := b.latest(ctx, cur)
 	if err != nil {
 		return err
 	}

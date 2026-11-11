@@ -30,7 +30,7 @@ func runInstall(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(ids) != 1 {
-		return errors.New("install: give exactly one app ID (see \"uas search\")")
+		return errors.New("install: give exactly one app ID (see \"uas search\") or a link to the app's GitHub repo")
 	}
 	e, err := session.Load(ctx, *scope, *catalogPath)
 	if err != nil {
@@ -41,9 +41,14 @@ func runInstall(ctx context.Context, args []string) error {
 		return err
 	}
 	defer db.Close()
-	app, err := db.Resolve(ctx, ids[0])
+	app, err := e.ResolveApp(ctx, db, ids[0])
 	if err != nil {
 		return err
+	}
+	if app.Live() {
+		if why := e.Unavailable(app.Listings[0]); why != "" {
+			return fmt.Errorf("can't install %s: %s", app.Name, why)
+		}
 	}
 	if app.Kind == catalog.KindShellExtension && len(app.Listings) > 0 {
 		return fmt.Errorf("%s is a GNOME extension, which GNOME Shell installs: run \"uas extensions install %s\"",

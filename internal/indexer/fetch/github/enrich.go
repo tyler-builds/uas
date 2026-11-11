@@ -533,15 +533,21 @@ func (f *Fetcher) rest(ctx context.Context, path string, limit int64, v any) err
 		return err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+f.Token)
-	req.Header.Set("User-Agent", fetch.UserAgent)
+	if f.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+f.Token)
+	}
+	ua := f.UserAgent
+	if ua == "" {
+		ua = fetch.UserAgent
+	}
+	req.Header.Set("User-Agent", ua)
 	resp, err := f.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", path, resp.Status)
+		return &StatusError{Path: path, Code: resp.StatusCode, Status: resp.Status}
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, limit)).Decode(v)
 }
