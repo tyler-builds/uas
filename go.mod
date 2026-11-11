@@ -6,7 +6,8 @@ require (
 	github.com/CalebQ42/squashfs v1.4.1
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/klauspost/compress v1.20.3
-	github.com/tyler-builds/jamb v0.6.3
+	github.com/kpfaulkner/jxl-go v0.0.0-20260623205201-d6826b04db87
+	github.com/tyler-builds/jamb v0.8.2
 	github.com/ulikunitz/xz v0.5.12
 	golang.org/x/image v0.47.0
 	golang.org/x/term v0.47.0
@@ -19,7 +20,6 @@ require (
 	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/kpfaulkner/jxl-go v0.0.0-20260623205201-d6826b04db87 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mikelolasagasti/xz v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
