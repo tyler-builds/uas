@@ -1,4 +1,4 @@
-/out/
+out/
 *.db
 *.db.tmp
 .wrangler/
