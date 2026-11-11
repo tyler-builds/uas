@@ -1,10 +1,9 @@
 name: Release
 
-# Builds uas for x86_64 and aarch64 (the program, and the archive that uas 0.5.0 and older update from) and
-# publishes them beside the catalog, with a signed releases/latest.json that installed copies of uas update
-# from. Push a tag such as v0.2.0 to release; run it by hand to build without publishing (or with publish
-# checked, to publish the given version). The catalog Worker in deploy/cloudflare must accept the programs
-# (deploy it before the first release that has them).
+# Builds uas for x86_64 and aarch64 and publishes a GitHub release with uas-linux-x86_64, uas-linux-aarch64,
+# a signed uas-release.json that installed copies of uas check before updating themselves, and SHA256SUMS.
+# Push a tag such as v0.6.0 to release; run it by hand to build without publishing (or with publish checked,
+# to tag the commit it ran on and publish the given version).
 on:
   push:
     tags: ["v*.*.*"]
@@ -46,27 +45,33 @@ jobs:
       - run: go test -tags no_gpl ./...
       - name: Build
         run: |
-          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) # reproducible archive times
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) # reproducible file times
           for arch in x86_64 aarch64; do
             packaging/linux/build-release.sh "${{ steps.version.outputs.version }}" "$arch" dist
           done
-          sha256sum dist/*
       # The x86_64 program installs itself into a clean home, refreshes an old install, and uninstalls.
       - run: packaging/linux/test-install.sh dist/uas-${{ steps.version.outputs.version }}-linux-x86_64
+      # The release's files: the programs under their release names, signed uas-release.json and SHA256SUMS.
+      - name: Sign
+        run: |
+          go run ./cmd/uas-release -version "${{ steps.version.outputs.version }}" -out dist/github dist/uas-*-linux-*
+          cat dist/github/SHA256SUMS
+        env:
+          UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
       - uses: actions/upload-artifact@v7
         with:
           name: uas-${{ steps.version.outputs.version }}
-          path: dist/*
-      - name: Publish
-        if: github.event_name == 'push' || inputs.publish
-        run: go run ./cmd/uas-release -version "${{ steps.version.outputs.version }}" -publish "$CATALOG_URL" dist/*
-        env:
-          CATALOG_URL: https://uas-catalog.tyler-builds.workers.dev
-          UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
-          UAS_UPLOAD_TOKEN: ${{ secrets.UAS_UPLOAD_TOKEN }}
+          path: dist/github/*
       - name: GitHub release
-        if: github.event_name == 'push'
-        # The programs only: the archives are for old copies of uas to update from.
-        run: gh release create "${{ github.ref_name }}" dist/uas-*-linux-x86_64 dist/uas-*-linux-aarch64 --title "uas ${{ steps.version.outputs.version }}" --generate-notes
+        if: github.event_name == 'push' || inputs.publish
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          # Installed copies follow GitHub's latest release, so don't let an older version take its place.
+          latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+          newest=$(printf '%s\n' "$latest" "$tag" | sort -V | tail -n1)
+          if [ -n "$latest" ] && { [ "$latest" = "$tag" ] || [ "$newest" != "$tag" ]; }; then
+            echo "$latest is released already; $tag is not newer"; exit 1
+          fi
+          gh release create "$tag" dist/github/* --target "$GITHUB_SHA" --title "uas ${{ steps.version.outputs.version }}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks that a release program (from build-release.sh) installs itself into a clean home, that the launcher
-# and the CLI work afterwards, that an install by the old install.sh which updated itself to this release
-# becomes the new layout, and that self-uninstall removes it all.
+# and the CLI work afterwards, that an install in the old layout (by install.sh) becomes the new one, and
+# that self-uninstall removes it all.
 #
 #   packaging/linux/test-install.sh dist/uas-<version>-linux-x86_64
 #
@@ -40,12 +40,11 @@ echo "== installing again keeps one install"
 "$dl" self-install >/dev/null
 check_installed
 
-echo "== an install by install.sh, after uas 0.5.0 or older updated it from this release's archive"
+echo "== an install by install.sh (uas 0.5.0 and older), with uas and uas-gui as two copies of this program"
 "$bin/uas" self-uninstall >/dev/null
 mkdir -p "$bin" "$(dirname "$desktop")"
-tar -xzf "${prog}.tar.gz" -C "$HOME" # the archive's uas and uas-gui, as the old updater writes them
-cp "$HOME/$(basename "$prog")/uas" "$bin/uas"
-cp "$HOME/$(basename "$prog")/uas-gui" "$bin/uas-gui"
+cp "$prog" "$bin/uas"
+cp "$prog" "$bin/uas-gui"
 printf '[Desktop Entry]\nType=Application\nName=uas\nExec=%s\nIcon=io.github.tyler_builds.uas\n' "$bin/uas-gui" >"$desktop"
 [ -L "$bin/uas-gui" ] && fail "the old layout should have uas-gui as a file"
 "$bin/uas" version >/dev/null # the next run of the new program refreshes the install

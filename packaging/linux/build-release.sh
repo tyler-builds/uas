@@ -5,10 +5,8 @@
 #
 #   packaging/linux/build-release.sh <version> <x86_64|aarch64> <out-dir>
 #
-# Writes, in <out-dir>:
-#   uas-<version>-linux-<arch>         the program: what people download, and what uas updates itself to
-#   uas-<version>-linux-<arch>.tar.gz  the program as uas and as uas-gui, for uas 0.5.0 and older to update
-#                                      from (they read only archives with those two programs)
+# Writes <out-dir>/uas-<version>-linux-<arch>, the program; the release workflow publishes it on GitHub as
+# uas-linux-<arch> (cmd/uas-release).
 # Run it from the repo root.
 set -euo pipefail
 
@@ -26,10 +24,9 @@ if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 name="uas-$version-linux-$arch"
-stage=$(mktemp -d)
 # The licenses go in internal/legal/bundle, which a build with the uas_release tag embeds.
 lic=internal/legal/bundle
-trap 'rm -rf "$stage" "$lic"' EXIT
+trap 'rm -rf "$lic"' EXIT
 rm -rf "$lic"
 
 # uas's license, and the licenses and notices of everything the program contains: each Go module it links
@@ -66,17 +63,5 @@ ldflags="-s -w -X github.com/tyler-builds/uas/internal/version.Version=$version"
 CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -tags no_gpl,uas_release -trimpath -ldflags "$ldflags" \
   -o "$out/$name" ./cmd/uas
 chmod 755 "$out/$name"
-
-# The archive for older copies of uas: the program twice, as regular files, since they replace uas and uas-gui
-# each from its own file. Once running, the new program makes uas-gui a link to uas.
-dir="$stage/$name"
-mkdir -p "$dir"
-cp "$out/$name" "$dir/uas"
-cp "$out/$name" "$dir/uas-gui"
-cp LICENSE "$dir/"
-# Reproducible: sorted names, fixed owner and time.
-tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH:-0}" \
-  -C "$stage" -czf "$out/$name.tar.gz" "$name"
 touch -d "@${SOURCE_DATE_EPOCH:-0}" "$out/$name"
 echo "$out/$name"
-echo "$out/$name.tar.gz"

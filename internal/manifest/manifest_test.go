@@ -87,31 +87,34 @@ func TestVerifyRejects(t *testing.T) {
 }
 
 func TestReleaseFiles(t *testing.T) {
-	file := func(path string) ReleaseFile {
-		return ReleaseFile{Arch: "x86_64", Path: path, SHA256: strings.Repeat("a", 64), Size: 1}
+	file := func(arch, name string) ReleaseFile {
+		return ReleaseFile{Arch: arch, Name: name, SHA256: strings.Repeat("a", 64), Size: 1}
 	}
+	x86, arm := file("x86_64", "uas-linux-x86_64"), file("aarch64", "uas-linux-aarch64")
 	at := time.Unix(1770000000, 0)
 	for _, tc := range []struct {
 		name string
 		r    Release
 		ok   bool
 	}{
-		{"program and archive", Release{Version: "0.6.0", Released: at, Files: []ReleaseFile{file(ReleasePath("0.6.0", "x86_64"))},
-			Programs: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}, true},
-		{"program only", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}, true},
+		{"both", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{x86, arm}}, true},
+		{"one", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{x86}}, true},
 		{"nothing", Release{Version: "0.6.0", Released: at}, false},
-		{"archive as program", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file(ReleasePath("0.6.0", "x86_64"))}}, false},
-		{"program as archive", Release{Version: "0.6.0", Released: at, Files: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}, false},
-		{"other version", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file(ProgramPath("0.5.0", "x86_64"))}}, false},
+		{"bad version", Release{Version: "0.6", Released: at, Programs: []ReleaseFile{x86}}, false},
+		{"no date", Release{Version: "0.6.0", Programs: []ReleaseFile{x86}}, false},
+		{"other arch's name", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file("x86_64", "uas-linux-aarch64")}}, false},
+		{"versioned name", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file("x86_64", "uas-0.6.0-linux-x86_64")}}, false},
+		{"unknown arch", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file("riscv64", "uas-linux-riscv64")}}, false},
+		{"twice", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{x86, x86}}, false},
+		{"no checksum", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{{Arch: "x86_64", Name: "uas-linux-x86_64", Size: 1}}}, false},
 	} {
 		if err := tc.r.Validate(); (err == nil) != tc.ok {
 			t.Errorf("%s: Validate = %v", tc.name, err)
 		}
 	}
-	r := Release{Version: "0.6.0", Released: at, Files: []ReleaseFile{file(ReleasePath("0.6.0", "x86_64"))},
-		Programs: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}
-	if f, ok := r.File("x86_64"); !ok || f.Archive() {
-		t.Errorf("File = %+v, %v; want the program", f, ok)
+	r := Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{x86}}
+	if f, ok := r.File("x86_64"); !ok || f != x86 {
+		t.Errorf("File = %+v, %v", f, ok)
 	}
 	if _, ok := r.File("aarch64"); ok {
 		t.Error("a build for aarch64 that isn't there")
