@@ -518,19 +518,20 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 		}
 		return row.Child(ui.Text(app).FontSize(13).Medium().Truncate())
 	}
-	return row.Child(ui.Icon(crumbIcon(v)).Size(15).Color(t.TextMuted)).
-		Child(ui.Text(name(v)).FontSize(13).Medium().Truncate())
+	mark := ui.Element(ui.Icon(crumbIcon(v)).Size(15).Color(t.TextMuted))
+	if v.page == pageSource {
+		mark = sourceMark(ctx, catalog.SourceID(v.arg), 15, t.TextMuted)
+	}
+	return row.Child(mark).Child(ui.Text(name(v)).FontSize(13).Medium().Truncate())
 }
 
-// crumbIcon is the sidebar's icon for a view.
+// crumbIcon is the sidebar's icon for a view; a source's page shows the source's mark instead.
 func crumbIcon(v view) *icons.Icon {
 	switch v.page {
 	case pageSearch:
 		return icons.Search
 	case pageSources:
 		return icons.Layers
-	case pageSource:
-		return sourceIcons[catalog.SourceID(v.arg)]
 	case pageCategory:
 		for _, c := range navCategories {
 			if c.key == v.arg {

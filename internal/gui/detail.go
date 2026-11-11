@@ -239,7 +239,7 @@ func (a *App) installArea(ctx *ui.Context, app *catalog.App, available []catalog
 		for _, l := range available {
 			if listingKey(l) == opt.Value {
 				return ui.Div().Row().Align(ui.Center).Gap(space2).
-					Child(ui.Icon(sourceIcons[l.Source]).Size(16).Color(sourceColor(ctx, l.Source))).
+					Child(sourceMark(ctx, l.Source, 16, sourceColor(ctx, l.Source))).
 					Child(ui.Text(listingLabel(l)).FontSize(13).Truncate())
 			}
 		}
@@ -361,11 +361,11 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 	added, isAdded := a.addedCopy(ctx, app, listing)
 	if isAdded {
 		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).Tooltip(sourceTips[catalog.SourceAppImage]).
-			Child(ui.Icon(sourceIcons[catalog.SourceAppImage]).Size(14).Color(sourceColor(ctx, catalog.SourceAppImage))).
+			Child(sourceMark(ctx, catalog.SourceAppImage, 14, sourceColor(ctx, catalog.SourceAppImage))).
 			Child(value("Your AppImage")))
 	} else if listing.Source != "" {
 		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).
-			Child(ui.Icon(sourceIcons[listing.Source]).Size(14).Color(sourceColor(ctx, listing.Source))).
+			Child(sourceMark(ctx, listing.Source, 14, sourceColor(ctx, listing.Source))).
 			Child(value(listing.Source.Name())))
 	}
 	if app.License != "" {
