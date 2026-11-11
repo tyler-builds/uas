@@ -19,27 +19,46 @@ const ReleaseName = "releases/latest.json"
 
 const releaseContext = "uas-release-v1\n"
 
-// releasePath matches the only object names a release may point at.
-var releasePath = regexp.MustCompile(`^releases/uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)\.tar\.gz$`)
+// releasePath and programPath match the only object names a release may point at.
+var (
+	releasePath = regexp.MustCompile(`^releases/uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)\.tar\.gz$`)
+	programPath = regexp.MustCompile(`^releases/uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)$`)
+)
 
 // Release describes a published version of uas.
+//
+// A release is one program per architecture (Programs), which is the CLI and the app and installs itself.
+// uas 0.5.0 and older read only Files, archives holding uas and uas-gui, and refuse a release whose
+// files they don't know; so a release also lists those archives, with the program as both, for them to update
+// to it. Once updated, they use Programs.
 type Release struct {
 	Version  string        `json:"version"` // "0.2.0", without a "v"
 	Released time.Time     `json:"released"`
 	Files    []ReleaseFile `json:"files"`
+	Programs []ReleaseFile `json:"programs,omitempty"`
 }
 
-// ReleaseFile is a release's archive for one architecture: uas, uas-gui and their launcher files.
+// ReleaseFile is a release's program or archive for one architecture.
 type ReleaseFile struct {
-	Arch   string `json:"arch"`
-	Path   string `json:"path"` // relative to the base URL, such as "releases/uas-0.2.0-linux-x86_64.tar.gz"
+	Arch string `json:"arch"`
+	// Path is relative to the base URL: "releases/uas-0.2.0-linux-x86_64" for a program,
+	// "releases/uas-0.2.0-linux-x86_64.tar.gz" for an archive.
+	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
 }
 
+// Archive reports whether the file is an archive (of the programs) rather than the program itself.
+func (f ReleaseFile) Archive() bool { return strings.HasSuffix(f.Path, ".tar.gz") }
+
 // ReleasePath returns the object name of a release archive.
 func ReleasePath(version, arch string) string {
-	return "releases/uas-" + version + "-linux-" + arch + ".tar.gz"
+	return ProgramPath(version, arch) + ".tar.gz"
+}
+
+// ProgramPath returns the object name of a release's program.
+func ProgramPath(version, arch string) string {
+	return "releases/uas-" + version + "-linux-" + arch
 }
 
 // Validate checks the fields a client relies on.
@@ -47,26 +66,33 @@ func (r *Release) Validate() error {
 	if _, err := ParseVersion(r.Version); err != nil {
 		return err
 	}
-	if r.Released.IsZero() || len(r.Files) == 0 {
+	if r.Released.IsZero() || len(r.Files)+len(r.Programs) == 0 {
 		return errors.New("release: missing date or files")
 	}
-	for _, f := range r.Files {
-		m := releasePath.FindStringSubmatch(f.Path)
-		if m == nil || m[1] != r.Version || m[2] != f.Arch {
-			return fmt.Errorf("release: bad file path %q", f.Path)
-		}
-		if len(f.SHA256) != 64 || f.Size <= 0 {
-			return fmt.Errorf("release: %s has no checksum or size", f.Path)
+	for _, set := range []struct {
+		files []ReleaseFile
+		path  *regexp.Regexp
+	}{{r.Files, releasePath}, {r.Programs, programPath}} {
+		for _, f := range set.files {
+			m := set.path.FindStringSubmatch(f.Path)
+			if m == nil || m[1] != r.Version || m[2] != f.Arch {
+				return fmt.Errorf("release: bad file path %q", f.Path)
+			}
+			if len(f.SHA256) != 64 || f.Size <= 0 {
+				return fmt.Errorf("release: %s has no checksum or size", f.Path)
+			}
 		}
 	}
 	return nil
 }
 
-// File returns the release's archive for arch.
+// File returns what to update to on arch: the release's program, else its archive.
 func (r *Release) File(arch string) (ReleaseFile, bool) {
-	for _, f := range r.Files {
-		if f.Arch == arch {
-			return f, true
+	for _, set := range [][]ReleaseFile{r.Programs, r.Files} {
+		for _, f := range set {
+			if f.Arch == arch {
+				return f, true
+			}
 		}
 	}
 	return ReleaseFile{}, false

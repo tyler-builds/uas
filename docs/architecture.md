@@ -32,7 +32,7 @@ works.
  └───────────────────────────────────────────────┘                       │ HTTPS GET
                                                                           ▼
  ┌────────────────────────────── user's Bazzite machine ─────────────────────────────────┐
- │  uas-gui (Jamb)        uas (CLI)                                                       │
+ │  uas gui (Jamb)        uas (CLI)                                                       │
  │        └──────┬───────────┘                                                            │
  │          client core: platform · refresh · catalog · recommend · state · jobs       │
  │               │                                                                        │
@@ -399,12 +399,12 @@ type Backend interface {
 `uas settings update_checks on`). Turning it on writes a systemd user timer and service
 (`~/.config/systemd/user/uas-update-check.{timer,service}`: daily, 15 minutes after login, a random delay of
 up to an hour, catching up after the machine was off) and enables it; turning it off disables and deletes
-them, so the units are the setting. The service runs the binary that turned it on (`uas-gui --check-updates`
+them, so the units are the setting. The service runs the program that turned it on (`uas gui --check-updates`
 or `uas check-updates -notify`), which refreshes the catalog, lists updates and, if any are new since the
 last notification (remembered with versions in `~/.local/state/uas/notified.json`), shows one notification
 through `org.freedesktop.Notifications` on the session bus. It talks D-Bus directly (`internal/client/notify`)
 because notify-send is broken on some systems (Bazzite 45's fails with a symbol lookup error). A click on
-"Show updates" within an hour opens the app on its Updates page (`uas-gui --page updates`), started through
+"Show updates" within an hour opens the app on its Updates page (`uas gui --page updates`), started through
 `systemd-run --user` so it outlives the check. Nothing is installed without the user.
 
 ### ujust commands
@@ -528,7 +528,7 @@ Layered packages go last. Overrides are written only for apps with none here yet
 
 ### UI (Jamb)
 
-`cmd/uas-gui` with `internal/gui`, on top of `internal/client/session`, the engine the CLI uses too (settings,
+`uas gui` (`cmd/uas/gui.go`) with `internal/gui`, on top of `internal/client/session`, the engine the CLI uses too (settings,
 platform, backends, install and remove, catalog). Pages:
 
 - **Discover:** a search field (searches after a 250 ms pause) and category chips with tooltips. With no
@@ -557,23 +557,45 @@ found while building the UI are written up for the Jamb maintainers outside this
 
 ### Packaging the client
 
-Not a Flatpak: the sandbox would block calling `rpm-ostree`, `brew` and `pkexec`. A release is an archive per
-architecture (`packaging/linux/build-release.sh`): static `uas` and `uas-gui` (no cgo; Jamb loads Wayland
-through purego), the launcher, the icon and `install.sh`, which installs to `~/.local/bin` and writes the
-launcher with the full path. The repo is private, so releases aren't served from GitHub: the Release
-workflow (on a `v*.*.*` tag, or by hand without publishing) builds both archives and `cmd/uas-release`
-uploads them through the catalog Worker, then a signed `releases/latest.json` (the catalog's key, under its
-own signing context, so a manifest signature can't pass as a release's). It refuses a version that isn't
-newer than the published one, and the Worker refuses to replace a published archive.
+Not a Flatpak: the sandbox would block calling `rpm-ostree`, `brew` and `pkexec`. Not an AppImage either:
+that needs FUSE and a runtime, mounts itself on every run (the CLI and the background check run often),
+and is the kind of file uas itself manages. A release is one static program per architecture
+(`packaging/linux/build-release.sh`; no cgo, Jamb loads Wayland through purego), `uas-<version>-linux-<arch>`,
+which is the CLI and the desktop app (`uas gui`, or `uas-gui`, a link to it), carries its launcher and icon
+(`packaging/linux`, embedded) and the licenses of everything in it (`uas licenses`, `internal/legal`), and
+installs itself (`internal/client/selfinstall`). Run with no arguments from where it was downloaded (not
+from the install, and not from a folder on the PATH, where a package would put it), it copies itself to
+`~/.local/bin/uas`, links `uas-gui` to it, writes the launcher (with the full path) and the icon, and opens
+the app; `uas self-install` does the same from a terminal. Nothing needs root, which suits Fedora Atomic and
+its derivatives. Opened from a file manager there is no terminal, so a failure also shows as a
+notification. `uas self-uninstall` and Settings → About → Uninstall remove the programs, the launcher, the
+icon and the background check's units; apps, settings and the catalog stay.
+
+The repo is private, so releases aren't served from GitHub: the Release workflow (on a `v*.*.*` tag, or by
+hand without publishing) builds both architectures, checks that the x86_64 program installs itself into a
+clean home (`packaging/linux/test-install.sh`), and `cmd/uas-release` uploads the files through the catalog
+Worker, then a signed `releases/latest.json` (the catalog's key, under its own signing context, so a
+manifest signature can't pass as a release's). It refuses a version that isn't newer than the published one,
+and the Worker refuses to replace a published file. The Worker also redirects `releases/uas-linux-<arch>` to
+the latest program, for download links.
 
 **Self-update** (`internal/client/selfupdate`): `uas self-update`, Settings → About, and the background check
 (which lists "uas 0.3.0" with app updates) read `latest.json`, verify it, and compare versions. Installing
-downloads the archive, checks its size and SHA-256 against the signed values, writes both programs beside
-the running one, then renames them into place, only if that folder is the user's. The window still runs the
-old program, so in the desktop app the Update button then becomes Restart (disabled while an install or
-removal runs, which it would cut off): the app quits and, once it has shut down, the same process becomes
-the program now at its path (`exec`), opened on Settings. Builds from source report version `dev` and never
-update themselves. A Homebrew tap can come later.
+downloads the release's program (`programs` in `latest.json`), checks its size and SHA-256 against the
+signed values, writes it beside the running one, then renames it into place, only if that folder is the
+user's. The window still runs the old program, so in the desktop app the Update button then becomes Restart
+(disabled while an install or removal runs, which it would cut off): the app quits and, once it has shut
+down, the same process becomes the program now at its path (`exec`), opened on Settings. Builds from source
+report version `dev` and never update themselves. A Homebrew tap can come later.
+
+**Older installs.** uas 0.5.0 and older were an archive with two programs, `uas` and `uas-gui`, installed by
+an `install.sh`, and they update only from `files` in `latest.json`: archives holding both, and they refuse a
+release whose files they don't recognise. So each release also has `uas-<version>-linux-<arch>.tar.gz`, with
+the new program as both `uas` and `uas-gui`. The first time the new program runs from such an install (the
+old app's Restart button runs `uas-gui`), it makes `uas-gui` a link to `uas` and refreshes the launcher and
+icon (`Layout.Refresh`, on every start of a release from its install; it changes nothing when they are up to
+date, and doesn't bring back a launcher the user removed). The archives can go once no such install is
+left.
 
 ### Telemetry
 
@@ -592,8 +614,7 @@ Note that catalog downloads from R2 are plain anonymous GETs. Cloudflare still s
 uas/
 ├── go.mod
 ├── cmd/
-│   ├── uas/                 # CLI: search, info, install, remove, update
-│   ├── uas-gui/             # Jamb desktop app
+│   ├── uas/                 # the program: CLI (search, info, install, remove, update) and app (uas gui)
 │   └── uas-indexer/         # crawler, run in CI
 ├── internal/
 │   ├── catalog/             # shared types, SQLite schema, FTS queries (rebuilt each run, no migrations)

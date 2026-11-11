@@ -108,7 +108,7 @@ func (a *App) settingsPage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 			Child(cat).
 			Child(system).
 			Child(section(sectionHeader(ctx, "Privacy", ""), privacy)).
-			Child(section(sectionHeader(ctx, "About", ""), a.aboutRow(ctx)))
+			Child(section(sectionHeader(ctx, "About", ""), a.aboutList(ctx)))
 		return scroll(page)
 	}).Key("settings")
 }
@@ -188,7 +188,7 @@ func (a *App) updateChecksRow(ctx *ui.Context) ui.Element {
 			if v {
 				var exe string
 				if exe, err = os.Executable(); err == nil {
-					err = timer.Enable(context.Background(), []string{exe, "--check-updates"})
+					err = timer.Enable(context.Background(), []string{exe, "gui", "--check-updates"})
 				}
 			} else {
 				err = timer.Disable(context.Background())
@@ -217,13 +217,12 @@ func (a *App) working() string {
 	return ""
 }
 
-// aboutRow shows this uas's version, with an update to the latest release when there is one. Once the update
-// is installed its button becomes Restart, since the window still runs the old version.
+// aboutRow shows this uas's version, with an update to the latest release when there is one. Once the
+// update is installed its button becomes Restart, since the window still runs the old version.
 func (a *App) aboutRow(ctx *ui.Context) ui.Element {
 	icon := ui.Div().Size(ui.Px(18), ui.Px(18)).Child(brandMark(ctx, 18))
 	if !version.Release() {
-		return settingsList(ctx, settingsRow(ctx, icon, "uas (built from source)",
-			"Builds from source don't update themselves.", nil))
+		return settingsRow(ctx, icon, "uas (built from source)", "Builds from source don't update themselves.", nil)
 	}
 	if v := a.updatedTo.Get(); v != "" {
 		// The new programs are in place, but this window still runs the old one until it restarts.
@@ -237,8 +236,8 @@ func (a *App) aboutRow(ctx *ui.Context) ui.Element {
 			right = ui.Button("Restart").Icon(icons.RotateCw).Primary().Small().Disabled(working != "").
 				Tooltip(tip).OnClick(a.Restart)
 		}
-		return settingsList(ctx, settingsRow(ctx, icon, "uas "+version.Version,
-			"uas "+v+" is installed. Restart uas to start using it.", right))
+		return settingsRow(ctx, icon, "uas "+version.Version, "uas "+v+" is installed. Restart uas to start using it.",
+			right)
 	}
 	res := ui.Query(ctx, "self-update", func(c context.Context) (*selfupdate.Available, error) {
 		return a.s.SelfUpdater().Check(c)
@@ -270,5 +269,54 @@ func (a *App) aboutRow(ctx *ui.Context) ui.Element {
 				})
 		})
 	}
-	return settingsList(ctx, settingsRow(ctx, icon, "uas "+version.Version, sub, right))
+	return settingsRow(ctx, icon, "uas "+version.Version, sub, right)
+}
+
+// aboutList is the About section: this uas's version and updates, and a way to uninstall it, for a release
+// run by a program that can.
+func (a *App) aboutList(ctx *ui.Context) ui.Element {
+	if a.Uninstall == nil || !version.Release() {
+		return settingsList(ctx, a.aboutRow(ctx))
+	}
+	return settingsList(ctx, a.aboutRow(ctx), a.uninstallRow(ctx))
+}
+
+// uninstallRow removes uas itself, after asking.
+func (a *App) uninstallRow(ctx *ui.Context) ui.Element {
+	t := ctx.Theme()
+	working := a.working()
+	tip := "Remove uas from this computer"
+	if working != "" {
+		tip = "Wait for “" + working + "” to finish first"
+	}
+	btn := ui.Button("Uninstall uas").Icon(icons.Trash).Small().Disabled(working != "").Tooltip(tip).
+		OnClick(func() { a.uninstalling.Set(true) })
+	return settingsList(ctx, settingsRow(ctx, ui.Icon(icons.Trash).Size(18).Color(t.TextMuted),
+		"Uninstall uas", "Removes uas and its launcher. The apps you installed with it stay.", btn))
+}
+
+// uninstallDialog asks before uninstalling uas, then removes it and closes the app.
+func (a *App) uninstallDialog(ctx *ui.Context) ui.Element {
+	if !a.uninstalling.Get() || a.Uninstall == nil {
+		return ui.Div().Display(false)
+	}
+	return ui.AlertDialog("Uninstall uas?", "uas, its launcher and its background update check are removed, "+
+		"and this window closes. The apps you installed with it stay, and so do its settings and catalog.").
+		Intent(ui.AlertDialogDestructive).
+		Confirm("Uninstall", func() {
+			a.uninstalling.Set(false)
+			go func() {
+				err := a.Uninstall(context.Background())
+				ctx.Post(func() {
+					if err != nil {
+						ctx.Toast(ui.ToastError, errText(err)).Title("Could not uninstall uas")
+						return
+					}
+					if a.Quit != nil {
+						a.Quit()
+					}
+				})
+			}()
+		}).
+		Cancel("", func() { a.uninstalling.Set(false) })
 }

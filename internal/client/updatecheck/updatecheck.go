@@ -12,12 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -25,6 +23,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/notify"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/run"
+	"github.com/tyler-builds/uas/internal/client/selfinstall"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/version"
 )
@@ -145,15 +144,10 @@ func Notify(ctx context.Context, r Result, wait time.Duration, open func() error
 	return nil
 }
 
-// OpenUpdates starts the desktop app (the program at gui) on its Updates page. It runs it as its own
-// transient systemd unit when it can, so the app outlives the check's service.
-func OpenUpdates(gui string) error {
-	if p, err := exec.LookPath("systemd-run"); err == nil {
-		return exec.Command(p, "--user", "--collect", "--quiet", gui, "--page", "updates").Run()
-	}
-	cmd := exec.Command(gui, "--page", "updates")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd.Start()
+// OpenUpdates starts the desktop app (open is the command that opens it) on its Updates page, on its own so
+// that the app outlives the check's service.
+func OpenUpdates(open []string) error {
+	return selfinstall.Detach(append(append([]string(nil), open...), "--page", "updates"))
 }
 
 // notifiedPath is where the updates of the last notification are kept.

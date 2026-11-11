@@ -32,53 +32,66 @@ func archive(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-func serve(t *testing.T, key ed25519.PrivateKey, ver string, arc []byte) *httptest.Server {
-	sum := sha256.Sum256(arc)
-	rel := manifest.Release{Version: ver, Released: time.Now(), Files: []manifest.ReleaseFile{{
-		Arch: "x86_64", Path: manifest.ReleasePath(ver, "x86_64"), SHA256: hex.EncodeToString(sum[:]),
-		Size: int64(len(arc))}}}
+// serve publishes a release of ver: the program, when prog isn't nil, and the archive, when arc isn't.
+func serve(t *testing.T, key ed25519.PrivateKey, ver string, prog, arc []byte) *httptest.Server {
+	file := func(path string, b []byte) manifest.ReleaseFile {
+		sum := sha256.Sum256(b)
+		return manifest.ReleaseFile{Arch: "x86_64", Path: path, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(b))}
+	}
+	rel := manifest.Release{Version: ver, Released: time.Now()}
+	objects := map[string][]byte{}
+	if prog != nil {
+		rel.Programs = append(rel.Programs, file(manifest.ProgramPath(ver, "x86_64"), prog))
+		objects["/"+manifest.ProgramPath(ver, "x86_64")] = prog
+	}
+	if arc != nil {
+		rel.Files = append(rel.Files, file(manifest.ReleasePath(ver, "x86_64"), arc))
+		objects["/"+manifest.ReleasePath(ver, "x86_64")] = arc
+	}
 	signed, err := manifest.SignRelease(rel, key)
 	if err != nil {
 		t.Fatal(err)
 	}
+	objects["/"+manifest.ReleaseName] = signed
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/" + manifest.ReleaseName:
-			w.Write(signed)
-		case "/" + manifest.ReleasePath(ver, "x86_64"):
-			w.Write(arc)
-		default:
-			http.NotFound(w, r)
+		if b, ok := objects[r.URL.Path]; ok {
+			w.Write(b)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 }
 
+// TestUpdate updates an install that has uas and uas-gui as two programs, as uas 0.5.0 and older installed
+// them: uas becomes the release's program, and uas-gui a link to it.
 func TestUpdate(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	arc := archive(t, map[string]string{"uas-0.3.0-linux-x86_64/uas": "new cli",
-		"uas-0.3.0-linux-x86_64/uas-gui": "new gui", "uas-0.3.0-linux-x86_64/install.sh": "#!/bin/sh"})
-	srv := serve(t, priv, "0.3.0", arc)
+	arc := archive(t, map[string]string{"uas-0.3.0-linux-x86_64/uas": "archived", "uas-0.3.0-linux-x86_64/uas-gui": "archived"})
+	srv := serve(t, priv, "0.3.0", []byte("new uas"), arc)
 	defer srv.Close()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "uas"), []byte("old cli"), 0o755)
 	os.WriteFile(filepath.Join(dir, "uas-gui"), []byte("old gui"), 0o755)
-
 	u := &Updater{BaseURL: srv.URL, TrustedKeys: []ed25519.PublicKey{pub}, Client: srv.Client(), Arch: "x86_64",
 		Current: "0.2.9", Dir: dir}
 	a, err := u.Check(context.Background())
 	if err != nil || a == nil {
 		t.Fatalf("Check = %v, %v", a, err)
 	}
+	if a.File.Archive() {
+		t.Error("the program should be preferred to the archive")
+	}
 	if err := u.Install(context.Background(), a, nil); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"uas": "new cli", "uas-gui": "new gui"} {
-		if b, _ := os.ReadFile(filepath.Join(dir, name)); string(b) != want {
-			t.Errorf("%s = %q", name, b)
-		}
+	if b, _ := os.ReadFile(filepath.Join(dir, "uas")); string(b) != "new uas" {
+		t.Errorf("uas = %q", b)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "install.sh")); err == nil {
-		t.Error("only the programs should be installed")
+	if l, err := os.Readlink(filepath.Join(dir, "uas-gui")); err != nil || l != "uas" {
+		t.Errorf("uas-gui links to %q, %v; want uas", l, err)
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "uas")); fi.Mode().Perm() != 0o755 {
+		t.Errorf("uas mode %v", fi.Mode())
 	}
 
 	// Up to date, a build from source, and an untrusted key.
@@ -97,20 +110,51 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
-func TestTamperedArchive(t *testing.T) {
+// TestUpdateFromArchive updates from a release with only an archive; a CLI-only install gets no uas-gui.
+func TestUpdateFromArchive(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	good := archive(t, map[string]string{"uas-0.3.0-linux-x86_64/uas": "cli", "uas-0.3.0-linux-x86_64/uas-gui": "gui"})
-	srv := serve(t, priv, "0.3.0", good)
+	arc := archive(t, map[string]string{"uas-0.3.0-linux-x86_64/uas": "new uas",
+		"uas-0.3.0-linux-x86_64/uas-gui": "new uas", "uas-0.3.0-linux-x86_64/LICENSE": "license"})
+	srv := serve(t, priv, "0.3.0", nil, arc)
 	defer srv.Close()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "uas"), []byte("old cli"), 0o755)
 	u := &Updater{BaseURL: srv.URL, TrustedKeys: []ed25519.PublicKey{pub}, Client: srv.Client(), Arch: "x86_64",
-		Current: "0.2.0", Dir: t.TempDir()}
+		Current: "0.2.9", Dir: dir}
+	a, err := u.Check(context.Background())
+	if err != nil || a == nil {
+		t.Fatalf("Check = %v, %v", a, err)
+	}
+	if err := u.Install(context.Background(), a, nil); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "uas")); string(b) != "new uas" {
+		t.Errorf("uas = %q", b)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("only uas should be in the folder, found %v", entries)
+	}
+}
+
+func TestTamperedProgram(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	srv := serve(t, priv, "0.3.0", []byte("program"), nil)
+	defer srv.Close()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "uas"), []byte("old"), 0o755)
+	u := &Updater{BaseURL: srv.URL, TrustedKeys: []ed25519.PublicKey{pub}, Client: srv.Client(), Arch: "x86_64",
+		Current: "0.2.0", Dir: dir}
 	a, err := u.Check(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.File.SHA256 = hex.EncodeToString(make([]byte, 32)) // as if the archive were swapped
+	a.File.SHA256 = hex.EncodeToString(make([]byte, 32)) // as if the program were swapped
 	if err := u.Install(context.Background(), a, nil); err == nil {
-		t.Error("an archive that doesn't match its checksum should be refused")
+		t.Error("a program that doesn't match its checksum should be refused")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "uas")); string(b) != "old" {
+		t.Errorf("uas = %q after a refused update", b)
 	}
 }
 

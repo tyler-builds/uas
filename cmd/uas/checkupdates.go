@@ -5,9 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/tyler-builds/uas/internal/client/session"
@@ -40,23 +37,9 @@ func runCheckUpdates(ctx context.Context, w io.Writer, args []string) error {
 	if !*notifyFlag {
 		return nil
 	}
-	gui := desktopApp()
-	return updatecheck.Notify(ctx, r, time.Hour, func() error {
-		if gui == "" {
-			return nil
-		}
-		return updatecheck.OpenUpdates(gui)
-	})
-}
-
-// desktopApp finds uas-gui: beside this program, else on the PATH.
-func desktopApp() string {
-	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), "uas-gui")
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
+	open, err := guiCommand()
+	if err != nil {
+		return err
 	}
-	p, _ := exec.LookPath("uas-gui")
-	return p
+	return updatecheck.Notify(ctx, r, time.Hour, func() error { return updatecheck.OpenUpdates(open) })
 }

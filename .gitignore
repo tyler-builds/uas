@@ -4,3 +4,4 @@ out/
 .wrangler/
 node_modules/
 jamb-notes.md
+internal/legal/bundle/

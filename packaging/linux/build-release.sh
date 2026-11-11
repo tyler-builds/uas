@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Builds a uas release archive: uas, uas-gui, the launcher and icon, install.sh, and LICENSE with the
-# third-party licenses and notices in licenses/
+# Builds a uas release for one architecture: the uas program, which is the CLI and the desktop app, carries
+# its launcher and icon (packaging/linux) and the licenses and notices of everything in it ("uas licenses"),
+# and installs itself when run.
 #
 #   packaging/linux/build-release.sh <version> <x86_64|aarch64> <out-dir>
 #
-# Writes <out-dir>/uas-<version>-linux-<arch>.tar.gz. Run it from the repo root.
+# Writes, in <out-dir>:
+#   uas-<version>-linux-<arch>         the program: what people download, and what uas updates itself to
+#   uas-<version>-linux-<arch>.tar.gz  the program as uas and as uas-gui, for uas 0.5.0 and older to update
+#                                      from (they read only archives with those two programs)
+# Run it from the repo root.
 set -euo pipefail
 
 version=${1:?version, such as 0.2.0}
@@ -22,19 +27,15 @@ fi
 
 name="uas-$version-linux-$arch"
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
-dir="$stage/$name"
-mkdir -p "$dir/share/applications"
+# The licenses go in internal/legal/bundle, which a build with the uas_release tag embeds.
+lic=internal/legal/bundle
+trap 'rm -rf "$stage" "$lic"' EXIT
+rm -rf "$lic"
 
-ldflags="-s -w -X github.com/tyler-builds/uas/internal/version.Version=$version"
-for cmd in uas uas-gui; do
-  CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -tags no_gpl -trimpath -ldflags "$ldflags" -o "$dir/$cmd" "./cmd/$cmd"
-done
-# uas's license, and the licenses and notices of everything the binaries contain: each Go module they link
+# uas's license, and the licenses and notices of everything the program contains: each Go module it links
 # (with jamb's NOTICE and the licenses of what it bundles), the Go runtime, the Inter font and the source logos.
-cp LICENSE "$dir/"
-lic="$dir/licenses"
 mkdir -p "$lic/go" "$lic/Inter" "$lic/logos"
+cp LICENSE "$lic/"
 goroot=$(go env GOROOT)
 # Go's LICENSE is in GOROOT, or beside it in some packages of Go (Homebrew's).
 golicense=$goroot/LICENSE
@@ -42,7 +43,7 @@ golicense=$goroot/LICENSE
 cp "$golicense" "$goroot/PATENTS" "$lic/go/"
 cp internal/gui/fonts/OFL.txt "$lic/Inter/"
 cp internal/gui/logos/README.md "$lic/logos/"
-GOOS=linux GOARCH=$goarch go list -deps -tags no_gpl -f '{{with .Module}}{{.Path}} {{.Dir}}{{end}}' ./cmd/uas ./cmd/uas-gui |
+GOOS=linux GOARCH=$goarch go list -deps -tags no_gpl,uas_release -f '{{with .Module}}{{.Path}} {{.Dir}}{{end}}' ./cmd/uas |
   sort -u | while read -r mod moddir; do
     [ "$mod" = github.com/tyler-builds/uas ] && continue
     mkdir -p "$lic/$mod"
@@ -59,13 +60,23 @@ GOOS=linux GOARCH=$goarch go list -deps -tags no_gpl -f '{{with .Module}}{{.Path
       cp "$f" "$lic/$mod/${f#"$moddir"/}"
     done
   done
-cp packaging/linux/io.github.tyler_builds.uas.desktop "$dir/share/applications/"
-cp -r packaging/linux/icons "$dir/share/"
-cp packaging/linux/install.sh "$dir/"
-chmod 755 "$dir/install.sh"
 
 mkdir -p "$out"
+ldflags="-s -w -X github.com/tyler-builds/uas/internal/version.Version=$version"
+CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -tags no_gpl,uas_release -trimpath -ldflags "$ldflags" \
+  -o "$out/$name" ./cmd/uas
+chmod 755 "$out/$name"
+
+# The archive for older copies of uas: the program twice, as regular files, since they replace uas and uas-gui
+# each from its own file. Once running, the new program makes uas-gui a link to uas.
+dir="$stage/$name"
+mkdir -p "$dir"
+cp "$out/$name" "$dir/uas"
+cp "$out/$name" "$dir/uas-gui"
+cp LICENSE "$dir/"
 # Reproducible: sorted names, fixed owner and time.
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH:-0}" \
   -C "$stage" -czf "$out/$name.tar.gz" "$name"
+touch -d "@${SOURCE_DATE_EPOCH:-0}" "$out/$name"
+echo "$out/$name"
 echo "$out/$name.tar.gz"

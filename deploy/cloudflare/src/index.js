@@ -1,9 +1,11 @@
 // uas catalog Worker: serves the published catalog from R2 and accepts uploads from the indexer.
 //
 // Public:  GET/HEAD /manifest.json, /catalog-<sha256>.db.zst, /icons/<sha256>.png|svg,
-//          /releases/latest.json, /releases/uas-<version>-linux-<arch>.tar.gz
+//          /releases/latest.json, /releases/uas-<version>-linux-<arch> (the program) and its .tar.gz (the
+//          archive uas 0.5.0 and older update from), and /releases/uas-linux-<arch>, a redirect to the latest
+//          program, for download links
 // Indexer: PUT /manifest.json, /catalog-<sha256>.db.zst or /icons/<sha256>.png|svg,
-//          and (the release workflow) /releases/latest.json and release archives,
+//          and (the release workflow) /releases/latest.json and release programs and archives,
 //          DELETE /catalog-<sha256>.db.zst, GET /_catalogs and /_icons (list stored files).
 //          These need "Authorization: Bearer <UPLOAD_TOKEN>".
 //
@@ -17,7 +19,8 @@ const MANIFEST = "manifest.json";
 const CATALOG = /^catalog-[0-9a-f]{64}\.db\.zst$/;
 const ICON = /^icons\/[0-9a-f]{64}\.(png|svg)$/;
 const RELEASE_INFO = "releases/latest.json";
-const RELEASE = /^releases\/uas-\d+\.\d+\.\d+-linux-(x86_64|aarch64)\.tar\.gz$/;
+const RELEASE = /^releases\/uas-\d+\.\d+\.\d+-linux-(x86_64|aarch64)(\.tar\.gz)?$/;
+const LATEST = /^releases\/uas-linux-(x86_64|aarch64)$/;
 const MAX_ICON = 1024 * 1024;
 const MAX_UPLOAD = 100 * 1024 * 1024;
 
@@ -29,6 +32,11 @@ export default {
       if (request.method !== "GET") return text(405, "method not allowed");
       if (!(await authorized(request, env))) return text(401, "unauthorized");
       return key === "_catalogs" ? listCatalogs(env) : listIcons(env);
+    }
+    const latest = LATEST.exec(key);
+    if (latest) {
+      if (request.method !== "GET" && request.method !== "HEAD") return text(405, "method not allowed");
+      return redirectToLatest(request, env, latest[1]);
     }
     if (key !== MANIFEST && key !== RELEASE_INFO && !CATALOG.test(key) && !ICON.test(key) && !RELEASE.test(key)) {
       return text(404, "not found");
@@ -82,12 +90,32 @@ async function put(request, env, key) {
   let contentType = key === MANIFEST || key === RELEASE_INFO ? "application/json" : "application/zstd";
   if (ICON.test(key)) contentType = key.endsWith(".svg") ? "image/svg+xml" : "image/png";
   if (RELEASE.test(key)) {
-    contentType = "application/gzip";
+    contentType = key.endsWith(".tar.gz") ? "application/gzip" : "application/octet-stream";
     // A published version is never replaced: clients and caches treat its archive as immutable.
     if ((await env.BUCKET.head(key)) !== null) return text(409, "this version is already published");
   }
   await env.BUCKET.put(key, request.body, { httpMetadata: { contentType } });
   return text(201, "stored");
+}
+
+// redirectToLatest sends a download link to the latest release's program for arch, as releases/latest.json
+// names it. The redirect needs no trust: uas checks itself against the signed latest.json once installed, and
+// the release's checksums are in it for anyone who checks by hand.
+async function redirectToLatest(request, env, arch) {
+  const obj = await env.BUCKET.get(RELEASE_INFO);
+  if (obj === null) return text(404, "no release is published yet");
+  let file;
+  try {
+    const release = JSON.parse(atob((await obj.json()).payload));
+    file = (release.programs || []).find((f) => f.arch === arch);
+  } catch {
+    return text(500, "the published release can't be read");
+  }
+  if (!file || !RELEASE.test(file.path) || file.path.endsWith(".tar.gz")) {
+    return text(404, `the latest release has no program for ${arch}`);
+  }
+  const location = new URL("/" + file.path, request.url).toString();
+  return new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "public, max-age=300" } });
 }
 
 async function listIcons(env) {
