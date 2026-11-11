@@ -5,60 +5,46 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// Releases of uas itself are published beside the catalog and signed with the same key, under their own
-// signing context, so a catalog manifest's signature can never pass as a release's, or the other way round.
+// Releases of uas itself are GitHub releases of github.com/tyler-builds/uas. Each carries the program for
+// every architecture and a signed description of the release (ReleaseAsset), signed with the catalog's key
+// under its own signing context, so a catalog manifest's signature can never pass as a release's, or the other
+// way round. uas trusts a release's checksums only from that signature, not from GitHub.
 
-// ReleaseName is the object name of the latest release's signed description.
-const ReleaseName = "releases/latest.json"
+// ReleaseAsset is the name of a release's signed description.
+const ReleaseAsset = "uas-release.json"
 
-const releaseContext = "uas-release-v1\n"
+// ChecksumsAsset is the name of a release's SHA256SUMS file, for people who check a download by hand.
+const ChecksumsAsset = "SHA256SUMS"
 
-// releasePath and programPath match the only object names a release may point at.
-var (
-	releasePath = regexp.MustCompile(`^releases/uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)\.tar\.gz$`)
-	programPath = regexp.MustCompile(`^releases/uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)$`)
-)
+// releaseContext is v2 since releases moved to GitHub: a v1 release (served by the catalog Worker to uas 0.5.0
+// and older, with paths on the Worker) can never pass as one.
+const releaseContext = "uas-release-v2\n"
 
-// Release describes a published version of uas.
-//
-// A release is one program per architecture (Programs), which is the CLI and the app and installs itself.
-// uas 0.5.0 and older read only Files, archives holding uas and uas-gui, and refuse a release whose
-// files they don't know; so a release also lists those archives, with the program as both, for them to update
-// to it. Once updated, they use Programs.
+// Release describes a published version of uas: one program per architecture, which is the CLI and the app
+// and installs itself.
 type Release struct {
 	Version  string        `json:"version"` // "0.2.0", without a "v"
 	Released time.Time     `json:"released"`
-	Files    []ReleaseFile `json:"files"`
-	Programs []ReleaseFile `json:"programs,omitempty"`
+	Programs []ReleaseFile `json:"programs"`
 }
 
-// ReleaseFile is a release's program or archive for one architecture.
+// ReleaseFile is a release's program for one architecture.
 type ReleaseFile struct {
-	Arch string `json:"arch"`
-	// Path is relative to the base URL: "releases/uas-0.2.0-linux-x86_64" for a program,
-	// "releases/uas-0.2.0-linux-x86_64.tar.gz" for an archive.
-	Path   string `json:"path"`
+	Arch   string `json:"arch"`
+	Name   string `json:"name"` // the release asset's name, AssetName(Arch)
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
 }
 
-// Archive reports whether the file is an archive (of the programs) rather than the program itself.
-func (f ReleaseFile) Archive() bool { return strings.HasSuffix(f.Path, ".tar.gz") }
-
-// ReleasePath returns the object name of a release archive.
-func ReleasePath(version, arch string) string {
-	return ProgramPath(version, arch) + ".tar.gz"
-}
-
-// ProgramPath returns the object name of a release's program.
-func ProgramPath(version, arch string) string {
-	return "releases/uas-" + version + "-linux-" + arch
+// AssetName returns the name of a release's program for arch, such as "uas-linux-x86_64". It has no version,
+// so https://github.com/tyler-builds/uas/releases/latest/download/<name> always downloads the latest.
+func AssetName(arch string) string {
+	return "uas-linux-" + arch
 }
 
 // Validate checks the fields a client relies on.
@@ -66,33 +52,27 @@ func (r *Release) Validate() error {
 	if _, err := ParseVersion(r.Version); err != nil {
 		return err
 	}
-	if r.Released.IsZero() || len(r.Files)+len(r.Programs) == 0 {
-		return errors.New("release: missing date or files")
+	if r.Released.IsZero() || len(r.Programs) == 0 {
+		return errors.New("release: missing date or programs")
 	}
-	for _, set := range []struct {
-		files []ReleaseFile
-		path  *regexp.Regexp
-	}{{r.Files, releasePath}, {r.Programs, programPath}} {
-		for _, f := range set.files {
-			m := set.path.FindStringSubmatch(f.Path)
-			if m == nil || m[1] != r.Version || m[2] != f.Arch {
-				return fmt.Errorf("release: bad file path %q", f.Path)
-			}
-			if len(f.SHA256) != 64 || f.Size <= 0 {
-				return fmt.Errorf("release: %s has no checksum or size", f.Path)
-			}
+	seen := map[string]bool{}
+	for _, f := range r.Programs {
+		if (f.Arch != "x86_64" && f.Arch != "aarch64") || f.Name != AssetName(f.Arch) || seen[f.Arch] {
+			return fmt.Errorf("release: bad program %q for %q", f.Name, f.Arch)
+		}
+		seen[f.Arch] = true
+		if len(f.SHA256) != 64 || f.Size <= 0 {
+			return fmt.Errorf("release: %s has no checksum or size", f.Name)
 		}
 	}
 	return nil
 }
 
-// File returns what to update to on arch: the release's program, else its archive.
+// File returns the release's program for arch.
 func (r *Release) File(arch string) (ReleaseFile, bool) {
-	for _, set := range [][]ReleaseFile{r.Programs, r.Files} {
-		for _, f := range set {
-			if f.Arch == arch {
-				return f, true
-			}
+	for _, f := range r.Programs {
+		if f.Arch == arch {
+			return f, true
 		}
 	}
 	return ReleaseFile{}, false

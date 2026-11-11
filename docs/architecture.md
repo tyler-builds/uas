@@ -571,31 +571,39 @@ its derivatives. Opened from a file manager there is no terminal, so a failure a
 notification. `uas self-uninstall` and Settings → About → Uninstall remove the programs, the launcher, the
 icon and the background check's units; apps, settings and the catalog stay.
 
-The repo is private, so releases aren't served from GitHub: the Release workflow (on a `v*.*.*` tag, or by
-hand without publishing) builds both architectures, checks that the x86_64 program installs itself into a
-clean home (`packaging/linux/test-install.sh`), and `cmd/uas-release` uploads the files through the catalog
-Worker, then a signed `releases/latest.json` (the catalog's key, under its own signing context, so a
-manifest signature can't pass as a release's). It refuses a version that isn't newer than the published one,
-and the Worker refuses to replace a published file. The Worker also redirects `releases/uas-linux-<arch>` to
-the latest program, for download links.
+Releases are GitHub releases. The Release workflow (on a `v*.*.*` tag, or by hand without publishing) builds
+both architectures, checks that the x86_64 program installs itself into a clean home
+(`packaging/linux/test-install.sh`), and `cmd/uas-release` prepares the release's files: the programs as
+`uas-linux-<arch>` (no version in the name, so `releases/latest/download/uas-linux-<arch>` always downloads
+the latest, which is the README's install link), `SHA256SUMS` for people, and `uas-release.json`, a signed
+description of the release with each program's size and SHA-256 (the catalog's key, under its own signing
+context, so a manifest signature can't pass as a release's). `gh release create` publishes them, after
+checking that the version is newer than the latest release.
 
 **Self-update** (`internal/client/selfupdate`): `uas self-update`, Settings → About, and the background check
-(which lists "uas 0.3.0" with app updates) read `latest.json`, verify it, and compare versions. Installing
-downloads the release's program (`programs` in `latest.json`), checks its size and SHA-256 against the
-signed values, writes it beside the running one, then renames it into place, only if that folder is the
-user's. The window still runs the old program, so in the desktop app the Update button then becomes Restart
-(disabled while an install or removal runs, which it would cut off): the app quits and, once it has shut
-down, the same process becomes the program now at its path (`exec`), opened on Settings. Builds from source
-report version `dev` and never update themselves. A Homebrew tap can come later.
+(which lists "uas 0.6.0" with app updates) ask GitHub's API for the latest release
+(`api.github.com/repos/tyler-builds/uas/releases/latest`, no account, so 60 requests an hour per address;
+Settings checks at most hourly and the background check daily) and compare its tag with the running version.
+Only when it is newer does uas download `uas-release.json`, verify it, and check that it is signed as the
+tagged version and that the program's asset has the signed size. GitHub is trusted to say a release exists,
+not for what it contains: a release changed by anyone without the signing key is refused, and an old signed
+description can't pass as a newer release. Installing downloads the program for this architecture, checks
+its size and SHA-256 against the signed values, writes it beside the running one, then renames it into
+place, only if that folder is the user's. Rate limits (403 or 429 with `X-RateLimit-Remaining: 0` or
+`Retry-After`) and network failures become messages that say when to try again. The window still runs the old
+program, so in the desktop app the Update button then becomes Restart (disabled while an install or removal
+runs, which it would cut off): the app quits and, once it has shut down, the same process becomes the program
+now at its path (`exec`), opened on Settings. Builds from source report version `dev` and never update
+themselves. A Homebrew tap can come later.
 
-**Older installs.** uas 0.5.0 and older were an archive with two programs, `uas` and `uas-gui`, installed by
-an `install.sh`, and they update only from `files` in `latest.json`: archives holding both, and they refuse a
-release whose files they don't recognise. So each release also has `uas-<version>-linux-<arch>.tar.gz`, with
-the new program as both `uas` and `uas-gui`. The first time the new program runs from such an install (the
-old app's Restart button runs `uas-gui`), it makes `uas-gui` a link to `uas` and refreshes the launcher and
-icon (`Layout.Refresh`, on every start of a release from its install; it changes nothing when they are up to
-date, and doesn't bring back a launcher the user removed). The archives can go once no such install is
-left.
+**Older installs.** uas 0.5.0 and older were two programs, `uas` and `uas-gui`, installed by an
+`install.sh`, and they look for updates only in the catalog Worker's signed `releases/latest.json`, which
+names archives on the Worker. Releases were published there while the repo was private; they no longer are,
+so those copies stay on their version and report it as up to date (the Worker still serves the last one,
+read-only, so they don't show an error). Installing the new program once by hand replaces such an install:
+it makes `uas-gui` a link to `uas` and refreshes the launcher and icon (`Layout.Refresh`, on every start of a
+release from its install; it changes nothing when they are up to date, and doesn't bring back a launcher the
+user removed).
 
 ### Telemetry
 

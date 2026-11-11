@@ -1,163 +1,95 @@
-// Command uas-release publishes a release of uas beside the catalog: the program for each architecture, the
-// archives that uas 0.5.0 and older update from, and a signed releases/latest.json that clients check before
-// updating themselves.
+// Command uas-release prepares the files of a GitHub release of uas: the program for each architecture under
+// its release name (uas-linux-<arch>, with no version, so releases/latest/download/ links always work), the
+// signed description that installed copies of uas check before updating themselves (uas-release.json), and a
+// SHA256SUMS file for people who check a download by hand.
 //
-//	uas-release -version 0.2.0 -publish https://uas-catalog.example.workers.dev dist/uas-0.2.0-linux-*
+//	uas-release -version 0.6.0 -out dist/github dist/uas-0.6.0-linux-x86_64 dist/uas-0.6.0-linux-aarch64
 //
-// It needs $UAS_SIGNING_KEY (the catalog's signing key) and, with -publish, $UAS_UPLOAD_TOKEN. The files
-// come from packaging/linux/build-release.sh. A version older than the published one is refused.
+// It needs $UAS_SIGNING_KEY (the catalog's signing key). The programs come from
+// packaging/linux/build-release.sh. Uploading is left to the release workflow (gh release create).
 package main
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/tyler-builds/uas/internal/client/refresh"
-	"github.com/tyler-builds/uas/internal/indexer/publish"
 	"github.com/tyler-builds/uas/internal/manifest"
 )
 
-// fileName matches a release's files: the program, and with .tar.gz, its archive.
-var fileName = regexp.MustCompile(`^uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)(\.tar\.gz)?$`)
+// fileName matches a program from build-release.sh.
+var fileName = regexp.MustCompile(`^uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)$`)
 
 func main() {
-	ver := flag.String("version", "", "the version to publish, such as 0.2.0 (required)")
-	publishURL := flag.String("publish", "", "publish to the catalog Worker at this URL")
-	publishDir := flag.String("publish-dir", "", "publish into this local directory instead")
+	ver := flag.String("version", "", "the version to release, such as 0.6.0 (required)")
+	out := flag.String("out", "", "write the release's files into this directory (required)")
 	flag.Parse()
-	if err := run(*ver, *publishURL, *publishDir, flag.Args()); err != nil {
+	if err := run(*ver, *out, flag.Args(), time.Now()); err != nil {
 		fmt.Fprintln(os.Stderr, "uas-release:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ver, publishURL, publishDir string, files []string) error {
+func run(ver, out string, files []string, now time.Time) error {
 	ver = strings.TrimPrefix(ver, "v")
 	if _, err := manifest.ParseVersion(ver); err != nil {
 		return err
 	}
+	if out == "" {
+		return errors.New("-out is required")
+	}
 	if len(files) == 0 {
-		return errors.New("give the release's files to publish")
+		return errors.New("give the release's programs")
 	}
 	key, err := manifest.ParsePrivateKey(os.Getenv("UAS_SIGNING_KEY"))
 	if err != nil {
 		return fmt.Errorf("$UAS_SIGNING_KEY: %w", err)
 	}
-	var store publish.Store
-	switch {
-	case publishURL != "" && publishDir == "":
-		token := os.Getenv("UAS_UPLOAD_TOKEN")
-		if token == "" {
-			return errors.New("-publish needs $UAS_UPLOAD_TOKEN")
-		}
-		store = &publish.HTTPStore{BaseURL: publishURL, Token: token, Client: &http.Client{Timeout: 10 * time.Minute}}
-	case publishDir != "" && publishURL == "":
-		store = &publish.DirStore{Dir: publishDir}
-	default:
-		return errors.New("use -publish or -publish-dir")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return err
 	}
-	ctx := context.Background()
 
-	if publishURL != "" {
-		if err := checkNewer(ctx, publishURL, ver); err != nil {
-			return err
-		}
-	}
-	// Every architecture needs both: the program is what installs and updates, and uas 0.5.0 and older update
-	// only from archives.
-	have := map[string]int{}
+	rel := manifest.Release{Version: ver, Released: now.UTC().Truncate(time.Second)}
+	var sums strings.Builder
 	for _, a := range files {
 		m := fileName.FindStringSubmatch(filepath.Base(a))
 		if m == nil || m[1] != ver {
-			return fmt.Errorf("%s is not a file of uas %s", a, ver)
+			return fmt.Errorf("%s is not a program of uas %s", a, ver)
 		}
-		have[m[2]+m[3]]++
-	}
-	for name := range have {
-		arch := strings.TrimSuffix(name, ".tar.gz")
-		if have[arch] != 1 || have[arch+".tar.gz"] != 1 {
-			return fmt.Errorf("give the program and the archive for %s, once each", arch)
+		if _, ok := rel.File(m[2]); ok {
+			return fmt.Errorf("two programs for %s", m[2])
 		}
-	}
-
-	rel := manifest.Release{Version: ver, Released: time.Now().UTC().Truncate(time.Second)}
-	for _, a := range files {
-		m := fileName.FindStringSubmatch(filepath.Base(a))
 		b, err := os.ReadFile(a)
 		if err != nil {
 			return err
 		}
 		sum := sha256.Sum256(b)
-		f := manifest.ReleaseFile{Arch: m[2], Path: manifest.ProgramPath(ver, m[2]),
-			SHA256: hex.EncodeToString(sum[:]), Size: int64(len(b))}
-		contentType := "application/octet-stream"
-		if m[3] != "" {
-			f.Path, contentType = manifest.ReleasePath(ver, m[2]), "application/gzip"
-		}
-		// The files first: latest.json points at them.
-		if err := store.Put(ctx, f.Path, bytes.NewReader(b), f.Size, contentType); err != nil {
+		f := manifest.ReleaseFile{Arch: m[2], Name: manifest.AssetName(m[2]), SHA256: hex.EncodeToString(sum[:]),
+			Size: int64(len(b))}
+		if err := os.WriteFile(filepath.Join(out, f.Name), b, 0o755); err != nil {
 			return err
 		}
-		fmt.Printf("uploaded %s (%d bytes, sha256 %s)\n", f.Path, f.Size, f.SHA256)
-		if f.Archive() {
-			rel.Files = append(rel.Files, f)
-		} else {
-			rel.Programs = append(rel.Programs, f)
-		}
+		rel.Programs = append(rel.Programs, f)
+		fmt.Fprintf(&sums, "%s  %s\n", f.SHA256, f.Name)
+		fmt.Printf("%s (%d bytes, sha256 %s)\n", f.Name, f.Size, f.SHA256)
 	}
 	signed, err := manifest.SignRelease(rel, key)
 	if err != nil {
 		return err
 	}
-	if err := store.Put(ctx, manifest.ReleaseName, bytes.NewReader(signed), int64(len(signed)),
-		"application/json"); err != nil {
+	if err := os.WriteFile(filepath.Join(out, manifest.ReleaseAsset), signed, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("published uas %s\n", ver)
-	return nil
-}
-
-// checkNewer refuses to publish a version that isn't newer than the published one.
-func checkNewer(ctx context.Context, base, ver string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(base, "/")+"/"+manifest.ReleaseName, nil)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(out, manifest.ChecksumsAsset), []byte(sums.String()), 0o644); err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil // the first release
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("read the published release: %s", resp.Status)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	cur, err := manifest.VerifyRelease(raw, refresh.TrustedKeys())
-	if err != nil {
-		return fmt.Errorf("the published release doesn't verify: %w", err)
-	}
-	have, _ := manifest.ParseVersion(cur.Version)
-	want, _ := manifest.ParseVersion(ver)
-	if !want.Newer(have) {
-		return fmt.Errorf("uas %s is published already; %s is not newer", cur.Version, ver)
-	}
+	fmt.Printf("signed uas %s in %s\n", ver, filepath.Join(out, manifest.ReleaseAsset))
 	return nil
 }

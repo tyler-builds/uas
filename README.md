@@ -125,8 +125,8 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
 ## Install
 
-Download uas ([x86_64](https://uas-catalog.tyler-builds.workers.dev/releases/uas-linux-x86_64),
-[aarch64](https://uas-catalog.tyler-builds.workers.dev/releases/uas-linux-aarch64)), allow it to run (in
+Download uas ([x86_64](https://github.com/tyler-builds/uas/releases/latest/download/uas-linux-x86_64),
+[aarch64](https://github.com/tyler-builds/uas/releases/latest/download/uas-linux-aarch64)), allow it to run (in
 its Properties, or with `chmod +x`), and open it. It installs itself, with no root needed, and opens. uas is
 then in your app menu, `uas` is in `~/.local/bin`, and it updates itself (Settings → About, or
 `uas self-update`).
@@ -134,8 +134,15 @@ then in your app menu, `uas` is in `~/.local/bin`, and it updates itself (Settin
 Or from a terminal:
 
 ```sh
-curl -fLo uas https://uas-catalog.tyler-builds.workers.dev/releases/uas-linux-$(uname -m) && chmod +x uas && ./uas self-install && rm uas
+curl -fLo uas https://github.com/tyler-builds/uas/releases/latest/download/uas-linux-$(uname -m) && chmod +x uas && ./uas self-install && rm uas
 ```
+
+Each [release](https://github.com/tyler-builds/uas/releases) also lists the programs' checksums in
+`SHA256SUMS`, to compare with `sha256sum` of your download.
+
+**Upgrading from uas 0.5.0 or older:** those versions look for updates in a place uas no longer publishes
+to, so they report being up to date. Install once more with the steps above; it replaces the old copy and
+keeps your apps and settings.
 
 To uninstall, use Settings → About → Uninstall uas, or `uas self-uninstall`. Apps you installed with uas
 stay installed.
@@ -249,9 +256,11 @@ Render every page of the desktop app in both themes (the README's screenshots co
 UAS_SHOTS=/tmp/uas-shots UAS_CATALOG=out/catalog.db go test ./internal/gui -run TestShots
 ```
 
-**Releasing.** Push a tag such as `v0.2.0`. The `Release` workflow tests, builds both archives and publishes
-them with a signed `releases/latest.json` (same secrets as the catalog). Run it by hand to build archives
-without publishing. The catalog Worker must be deployed with release support first.
+**Releasing.** Push a tag such as `v0.6.0` (`git tag -a v0.6.0 -m v0.6.0 && git push origin v0.6.0`). The
+`Release` workflow tests, builds both architectures and creates the GitHub release with `uas-linux-x86_64`,
+`uas-linux-aarch64`, `SHA256SUMS` and `uas-release.json`, signed with the `UAS_SIGNING_KEY` secret, which
+installed copies check before they update themselves. It refuses a version that isn't newer than the latest
+release. Run it by hand to build without publishing.
 
 **Publishing.** The `Index` workflow builds and publishes the catalog every 6 hours, or by hand from the
 Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The catalog Worker is in
@@ -261,8 +270,8 @@ Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The 
 
 Built with [jamb](https://github.com/tyler-builds/jamb). Interface font: [Inter](https://rsms.me/inter/)
 (SIL Open Font License). Source logos: the official Debian, GitHub and Codeberg logos, unchanged; see
-[internal/gui/logos/README.md](internal/gui/logos/README.md). Release archives carry the licenses and notices
-of everything in the binaries in `licenses/`.
+[internal/gui/logos/README.md](internal/gui/logos/README.md). Release programs carry the licenses and notices
+of everything in them (`uas licenses`).
 
 ## License
 

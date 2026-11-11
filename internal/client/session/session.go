@@ -620,11 +620,11 @@ func (s *Session) ResetPermissions(ctx context.Context, appID string) error {
 	return pe.ResetPermissions(ctx, appID)
 }
 
-// SelfUpdater returns the updater for uas itself, which reads releases from where the catalog comes from.
+// SelfUpdater returns the updater for uas itself, which reads its GitHub releases and trusts the keys the
+// catalog is signed with.
 func (s *Session) SelfUpdater() *selfupdate.Updater {
-	opt := RefreshOptions(s.CatalogPath)
-	return &selfupdate.Updater{BaseURL: opt.BaseURL, TrustedKeys: opt.TrustedKeys,
-		Client: &http.Client{Timeout: 10 * time.Minute}, Arch: s.Platform.Arch}
+	return &selfupdate.Updater{TrustedKeys: refresh.TrustedKeys(), Client: &http.Client{Timeout: 10 * time.Minute},
+		Arch: s.Platform.Arch}
 }
 
 // addPackageManager sets up installs of the distribution's own packages on a package-based system: apt on
