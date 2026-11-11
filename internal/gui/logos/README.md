@@ -4,8 +4,6 @@ From [Simple Icons](https://simpleicons.org) (CC0 1.0), with `fill="currentColor
 them. The marks themselves are trademarks of their owners and are used only to say where an app comes from.
 
 - `flathub.svg`: Flathub
-- `fedora.svg`: Fedora. Fedora's [trademark guidelines](https://fedoraproject.org/wiki/Legal:Trademark_guidelines)
-  apply; check them before any public release.
 - `homebrew.svg`: Homebrew
 - `github.svg`: GitHub (see [GitHub's logo guidelines](https://github.com/logos))
 - `codeberg.svg`: Codeberg
@@ -14,4 +12,7 @@ them. The marks themselves are trademarks of their owners and are used only to s
 - `archlinux.svg`: Arch Linux (see the [Arch Linux trademark policy](https://terms.archlinux.org/docs/trademark-policy/))
 - `snapcraft.svg`: Snapcraft, for the Snap Store
 
-COPR has no logo here and keeps a Lucide icon.
+Fedora and COPR have no logo here and use Lucide icons (a package and a hammer). The [Fedora trademark
+guidelines](https://docs.fedoraproject.org/en-US/legal/trademarks/) allow the Fedora logo without permission
+only in connection with promoting the Fedora Project, and require the brand standards (which don't allow
+recoloring) to be followed, so a source badge in another app isn't clearly covered.

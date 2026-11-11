@@ -59,8 +59,8 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   primary, muted (summaries) and subtle (metadata). Teal (`#14897e` dark, `#0f766e` light) is kept to primary
   actions, links and focus; the sidebar selection and counts are neutral. `gui.Themes()` builds both themes
   over jamb's, so every widget picks them up, and the window follows the system's light or dark mode.
-- **Sources:** each has a color and its own logo (`sourceIcons`): Flathub blue, Fedora violet, Homebrew amber,
-  GitHub gray, COPR a rose hammer. The logos are Simple Icons SVGs made into ordinary jamb icons with
+- **Sources:** each has a color and its own logo (`sourceIcons`): Flathub blue, Fedora a violet package (no
+  logo; see `internal/gui/logos/README.md`), Homebrew amber, GitHub gray, COPR a rose hammer. The logos are Simple Icons SVGs made into ordinary jamb icons with
   `icons.MustNew` (`internal/gui/logos.go`). They show in color where a source is the subject (the source
   strip, the source picker, the app page's Source row); in lists, sources are quiet words. A Flathub-verified
   publisher gets a green shield. Hovering any of them explains it.

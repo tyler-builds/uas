@@ -22,11 +22,12 @@ func logoIcon(name string) *icons.Icon {
 	return icons.MustNew("uas-"+name, string(b))
 }
 
-// sourceIcons give each source its mark: its own logo, or for COPR, which has none, a hammer (packages
-// built by the project owner).
+// sourceIcons give each source its mark: its own logo, or a neutral icon where there is none to use: a
+// package for Fedora (its trademark guidelines don't cover the logo in other software), a hammer for COPR
+// (packages built by the project owner).
 var sourceIcons = map[catalog.SourceID]*icons.Icon{
 	catalog.SourceFlathub:  logoIcon("flathub"),
-	catalog.SourceFedora:   logoIcon("fedora"),
+	catalog.SourceFedora:   icons.Package,
 	catalog.SourceHomebrew: logoIcon("homebrew"),
 	catalog.SourceCOPR:     icons.Hammer,
 	catalog.SourceGitHub:   logoIcon("github"),
