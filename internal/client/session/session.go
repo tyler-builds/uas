@@ -23,6 +23,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/backend/pkgmgr"
 	"github.com/tyler-builds/uas/internal/client/backend/rpmostree"
 	snapbackend "github.com/tyler-builds/uas/internal/client/backend/snap"
+	"github.com/tyler-builds/uas/internal/client/fromurl"
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/recommend"
 	"github.com/tyler-builds/uas/internal/client/refresh"
@@ -59,6 +60,10 @@ type Session struct {
 	// Home is the user's home folder, where a migration scan looks for AppImages. Empty means the real one;
 	// tests set it.
 	Home string
+	// Links reads apps from the links people give (Install from URL). Nil makes one on first use; tests set
+	// it.
+	Links     *fromurl.Resolver
+	linksOnce sync.Once
 }
 
 // SystemApps returns the apps installed with the system rather than by a uas backend, such as Steam on
@@ -238,17 +243,23 @@ func (s *Session) InstalledCopy(ctx context.Context, l catalog.Listing) (backend
 	return backend.InstalledApp{}, false, nil
 }
 
-// FindInstalled returns the installed apps that an ID (an app ID, package name or ref) names, optionally only
-// those in scope.
+// FindInstalled returns the installed apps that an ID (an app ID, package name or ref, or a link to the app's
+// repo) names, optionally only those in scope.
 func (s *Session) FindInstalled(ctx context.Context, id, scope string) ([]backend.InstalledApp, error) {
 	installed, err := s.Installed(ctx)
 	if err != nil {
 		return nil, err
 	}
 	names := s.names(ctx, id)
+	// Repo names are the same whatever their case: "owner/name" and "Owner/Name" are one GitHub repo.
+	repos := map[string]bool{}
+	for n := range names {
+		repos[strings.ToLower(n)] = true
+	}
 	var matches []backend.InstalledApp
 	for _, a := range installed {
-		if (names[a.AppID] || names[a.Ref] || (a.Package != "" && names[a.Package])) &&
+		if (names[a.AppID] || names[a.Ref] || (a.Package != "" && names[a.Package]) ||
+			(a.Source.Releases() && repos[strings.ToLower(a.Ref)])) &&
 			(scope == "" || a.Scope == scope) {
 			matches = append(matches, a)
 		}
@@ -260,6 +271,9 @@ func (s *Session) FindInstalled(ctx context.Context, id, scope string) ([]backen
 // names of its catalog listings. The catalog is optional here; without it only the ID is used.
 func (s *Session) names(ctx context.Context, id string) map[string]bool {
 	names := map[string]bool{id: true}
+	if link, err := fromurl.Parse(id); err == nil && fromurl.IsLink(id) {
+		names[link.Ref()] = true
+	}
 	db, err := catalog.Open(s.CatalogPath)
 	if err != nil {
 		return names
@@ -444,6 +458,9 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 	case catalog.SourceHomebrew:
 		notes = append(notes, "Installs with Homebrew for your user account. No restart needed.")
 	case catalog.SourceGitHub, catalog.SourceCodeberg:
+		if l.Live {
+			notes = append(notes, linkNotes(l)...)
+		}
 		var a catalog.Asset
 		if gh, ok := s.Backends[l.Source].(*github.Backend); ok {
 			a, _ = gh.Pick(l)
@@ -566,6 +583,9 @@ func (s *Session) releaseBackend(src catalog.SourceID) (*github.Backend, error) 
 				}
 			}
 			return catalog.Listing{}, fmt.Errorf("%s is no longer in the catalog", repo)
+		},
+		Live: func(ctx context.Context, repo string) (catalog.Listing, error) {
+			return s.liveListing(ctx, src, repo)
 		},
 	}, nil
 }

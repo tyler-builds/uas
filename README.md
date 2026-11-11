@@ -25,6 +25,11 @@ COPR packages, searched and installed from one place.
   click away.
 - **Trust scores.** GitHub and Codeberg releases and COPR projects are scored 0–100 from public signals, with the breakdown
   shown next to Install. See [docs/trust-score.md](docs/trust-score.md).
+- **Install from a link.** Paste a link to an app's GitHub repo, a release or a release file into the
+  search box (or use Install from a link). If the catalog has the app, its page opens; if not, because the
+  project is too new or small, uas reads it from its releases and shows the same page, with the trust score
+  computed on the spot and a note that it isn't in the catalog. Once installed, it updates, opens and backs
+  up like any other app.
 - **One list for everything installed,** whatever its source, with updates and Update all.
 - **Release notes.** An app's page shows what changed in its last few versions, and an update's What's new
   shows what it brings since your version, where the source publishes notes (most Flathub apps, GitHub
@@ -80,6 +85,14 @@ COPR packages, searched and installed from one place.
   <tr>
     <td align="center">Extensions</td>
     <td align="center">Browse extensions</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/install-from-link.png" alt="The page of an app read from a link to its GitHub repo, which the catalog does not have: a warning, its release notes, the trust score and Install"></td>
+    <td width="50%"><img src="docs/screenshots/search-link.png" alt="A GitHub link pasted into search, with Look it up"></td>
+  </tr>
+  <tr>
+    <td align="center">An app from a link</td>
+    <td align="center">A link in search</td>
   </tr>
 </table>
 
@@ -156,13 +169,14 @@ source don't update themselves).
 uas search firefox
 uas info org.mozilla.firefox
 uas install org.mozilla.firefox
+uas install https://github.com/owner/app   # an app that isn't in the catalog
 ```
 
 | Command | |
 | --- | --- |
 | `search <words>` | Find apps |
-| `info <app-id>` | Show an app and its sources |
-| `install <app-id>` | Install from the recommended source |
+| `info <app-id\|url>` | Show an app and its sources |
+| `install <app-id\|url>` | Install from the recommended source, or from a link to the app's GitHub repo |
 | `add <file.AppImage>` | Add an AppImage and keep it updated |
 | `remove <app-id>` | Remove an app |
 | `update <app-id>` | Update an app |
@@ -210,7 +224,9 @@ in uas.
 No distribution reviews those sources, so uas asks before installing, shows a trust score with its breakdown,
 and verifies every download against a checksum: the one GitHub publishes, or for Codeberg, which
 publishes none, the one uas recorded when it built the catalog. The score measures how well kept a project is, not
-whether its code is safe.
+whether its code is safe. An app installed from a link isn't in the catalog at all, so its page says so, and
+uas still installs only its AppImage or Flatpak bundle, checked against GitHub's checksum; it never runs
+install scripts from the project.
 
 **Does uas collect data?**<br>
 No. It downloads the catalog and app icons, and talks to the sources you install from.

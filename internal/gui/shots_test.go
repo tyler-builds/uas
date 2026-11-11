@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,17 +17,21 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/backend/github"
+	"github.com/tyler-builds/uas/internal/client/fromurl"
 	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/settings"
 	"github.com/tyler-builds/uas/internal/client/shellext"
+	"github.com/tyler-builds/uas/internal/client/state"
 	"github.com/tyler-builds/uas/internal/client/sysapps"
 	"github.com/tyler-builds/uas/internal/client/telemetry"
 	"github.com/tyler-builds/uas/internal/client/ujust"
 )
 
 // TestShots renders full pages to PNGs for design review. It needs UAS_SHOTS (an output directory) and a real
-// catalog in UAS_CATALOG, and loads icons from the network.
+// catalog in UAS_CATALOG, and loads icons from the network; the pages of apps from a link read them from
+// GitHub. UAS_SHOTS_ONLY, if set, renders only the shots it names (comma-separated).
 func TestShots(t *testing.T) {
 	out, path := os.Getenv("UAS_SHOTS"), os.Getenv("UAS_CATALOG")
 	if out == "" || path == "" {
@@ -49,11 +54,16 @@ func TestShots(t *testing.T) {
 		{Ref: "app/org.mozilla.firefox/x86_64/stable", Scope: "system", Version: "159.0.1"}}}
 	hb := &fakeBackend{src: catalog.SourceHomebrew, installed: []backend.InstalledApp{
 		{Source: catalog.SourceHomebrew, Ref: "htop", AppID: "htop", Name: "htop", Version: "3.5.3", Scope: "user"}}}
-	gh := &fakeBackend{src: catalog.SourceGitHub}
+	// The real GitHub backend, with nothing installed, so install notes name the file and its size.
+	ghDir := t.TempDir()
+	gh := &github.Backend{State: state.Store{Path: filepath.Join(ghDir, "state.json")},
+		Dirs: github.Dirs{AppImages: ghDir, Icons: ghDir, Applications: ghDir}}
 	// An AppImage added from a file, which the catalog has from Flathub.
 	files := &fakeBackend{src: catalog.SourceAppImage, installed: []backend.InstalledApp{
 		{Source: catalog.SourceAppImage, Ref: "curseforge", AppID: "curseforge", Name: "CurseForge",
 			Version: "1.325.0", Scope: "user", Origin: "curseforge.overwolf.com"}}}
+	// Apps from a link are read from GitHub once for both themes.
+	links := &fromurl.Resolver{Arch: "x86_64", CacheDir: filepath.Join(os.TempDir(), "uas-shot-live")}
 	shots := []struct {
 		name     string
 		setup    func(a *App)
@@ -108,14 +118,37 @@ func TestShots(t *testing.T) {
 			a.goTo(view{page: pageExtensions})
 			a.openExtension(catalog.ExtensionAppID("Vitals@CoreCoding.com"))
 		}, 1000, "", 0},
+		// Install from URL: an app the catalog doesn't have, read from its GitHub repo, and a link in search.
+		{"detail-link", func(a *App) {
+			// Read before the shot: the first read looks inside the AppImage, which takes a few seconds.
+			if _, err := links.Listing(context.Background(), fromurl.Link{Source: catalog.SourceGitHub,
+				Repo: "nikkNizz/Drawish"}, true); err != nil {
+				t.Error(err)
+			}
+		}, 940, "github:nikkNizz/Drawish", 0},
+		{"search-link", func(a *App) {
+			q := "https://github.com/nikkNizz/Drawish"
+			a.query.Set(q)
+			a.search.Set(q)
+			a.goTo(view{page: pageSearch})
+		}, 520, "", 0},
+	}
+	only := map[string]bool{}
+	for _, n := range strings.Split(os.Getenv("UAS_SHOTS_ONLY"), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			only[n] = true
+		}
 	}
 	for _, theme := range []struct {
 		name string
 		t    *ui.Theme
 	}{{"dark", dark}, {"light", light}} {
 		for _, sh := range shots {
-			s := &session.Session{Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path,
-				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true}, Tools: ujust.Detect(),
+			if len(only) > 0 && !only[sh.name] {
+				continue
+			}
+			s := &session.Session{Links: links, Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path,
+				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true, LibFUSE2: true}, Tools: ujust.Detect(),
 				SysApps: map[string]sysapps.App{"com.valvesoftware.Steam": {ID: "com.valvesoftware.Steam", Name: "Steam",
 					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
 				Extensions: &shellext.Manager{Bus: shotShell(), UpdatesDir: updatesDir},

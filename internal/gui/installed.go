@@ -265,11 +265,15 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 				return session.CatalogApp(c, db, in)
 			}, ui.QueryStaleTime(time.Hour))
 		name, icon, appID, summary := in.Name, in.Icon, in.AppID, ""
+		// An app installed from a link that the catalog doesn't have has a page read from its repo.
+		fromLink := match.Data == nil && in.FromURL && in.Source.Releases()
 		if app := match.Data; app != nil {
 			name, appID, summary = app.Name, app.ID, app.Summary
 			if app.IconURL != "" {
 				icon = app.IconURL
 			}
+		} else if fromLink {
+			appID = string(in.Source) + ":" + in.Ref
 		}
 		_, busy := a.running(appID)
 
@@ -290,6 +294,8 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 			meta = append(meta, "doesn't update itself")
 		case in.Origin == "local file":
 			meta = append(meta, "installed from a file")
+		case fromLink:
+			meta = append(meta, "installed from a link")
 		}
 
 		update := func() {
@@ -318,7 +324,7 @@ func (a *App) installedRow(ctx *ui.Context, in backend.InstalledApp, ups map[str
 				Child(ui.Text(name).FontSize(14).Medium().Truncate().Shrink(0)).
 				Child(ui.If(summary != "", ui.Text(summary).FontSize(13).TextColor(t.TextMuted).Truncate()))).
 			Child(metaLine(ctx, parts...))
-		if match.Data != nil {
+		if match.Data != nil || fromLink {
 			text = text.Cursor(ui.CursorPointer).OnClick(func() { a.openApp(appID) }).
 				Role(access.RoleLink).Label(name + " details").TabIndex(0)
 		}

@@ -525,3 +525,29 @@ func (d *DB) Packages(ctx context.Context, src SourceID, distro string) (map[str
 	}
 	return out, rows.Err()
 }
+
+// ByRepo returns the app whose code is in a release source's repo ("owner/name" on src.Host()), whatever
+// the case of the name: the app with that repo's release listing, else an app whose source code link is the
+// repo, the most popular if several are. Shell extensions are left out. It returns ErrNotFound when no app
+// is.
+func (d *DB) ByRepo(ctx context.Context, src SourceID, repo string) (*App, error) {
+	ref := repo
+	if src != SourceGitHub {
+		ref = src.Host() + "/" + repo
+	}
+	web := "https://" + src.Host() + "/" + repo
+	var id string
+	err := d.db.QueryRowContext(ctx, `
+		SELECT l.app_id FROM listings l JOIN apps a ON a.id = l.app_id
+		WHERE a.kind != 'shell-extension' AND (
+			(l.source = ?1 AND lower(l.ref) = lower(?2)) OR
+			lower(rtrim(json_extract(l.data, '$.vcs_url'), '/')) IN (lower(?3), lower(?3) || '.git'))
+		ORDER BY l.source != ?1, a.popularity DESC, l.app_id LIMIT 1`, string(src), ref, web).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%s: %w", web, ErrNotFound)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d.App(ctx, id)
+}

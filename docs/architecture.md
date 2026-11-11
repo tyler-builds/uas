@@ -393,6 +393,39 @@ type Backend interface {
   as root in a Fedora 45 container (November 2026); layering was not tested live, since enabling a repo needs
   a password.
 
+### Install from URL
+
+`internal/client/fromurl`, `session/fromurl.go`. The catalog leaves out most small GitHub projects (they fall
+under the searches' star bars or the trust score's), so a user can paste a link to the app's repo instead:
+into the search box, the "Install from a link" dialog (on the empty search page), or `uas install <url>` and
+`uas info <url>`. `fromurl.Parse` reads repo pages and any page under them (releases, a release, a release
+file's download link, code), `.git` and `git@` addresses, on github.com and codeberg.org; a bare `owner/name`
+is not a link, since it could be an app's name. A link to a repo the catalog has (its release listing, or any
+listing whose source code link is the repo, as a Flathub app's `vcs-browser`) opens that app's usual page,
+without asking GitHub.
+
+Otherwise the client reads the repo itself, the way the indexer does (`github.Fetcher.Live`, beside the
+GraphQL fetcher so file picking, `trust.GitHub`, release notes and AppImage reading are the same code):
+GitHub's REST API for the repo and its eight newest releases, keyless (60 requests an hour per address), then
+range requests into the release's AppImage for the app's name, icon, categories and metainfo, and the README
+or the repo's files for screenshots or an icon (at most two more API requests). What it read is kept per
+release file under `~/.cache/uas/live`, icons included, and each repo's result for an hour in memory. Unlike
+the catalog it keeps archived repos and forks (flagged in the trust score), projects below the score bar, and
+releases with nothing installable, so the page can say why: only system packages (midscroll ships an `.rpm`
+and a `.deb`; uas installs packages only from repos), no file for the architecture, or no checksum. The
+listing has `Live` set and the app the ID a GitHub-only catalog app would have (`github:owner/name`), so the
+app page, Install, the confirmation (always a warning), Open and Remove are the catalog's. The page and the
+install notes say the app isn't in the catalog and that uas installs only the release file, checked against
+GitHub's checksum, never the project's scripts.
+
+The install is recorded in the state file like a catalog one, with `from_url`. The GitHub backend's updates
+ask the catalog first, and for such an install, when the catalog doesn't have it, the repo (`Backend.Live`,
+without the AppImage read: two requests an hour per app at most). Once the catalog has the app, its listing
+takes over and `from_url` is cleared at the next update. Installed lists it with "installed from a link"
+and opens its page; exports carry `from_url`, and a restore reads such an app from its repo again (older
+versions of uas list it as not in the catalog). Codeberg links open catalog apps only: Codeberg publishes no
+checksums, so an app read from it now would have nothing to check the download against.
+
 ### Background update checks
 
 `internal/client/updatecheck`, off until the user turns it on (Settings → Updates, or

@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/paths"
+	"github.com/tyler-builds/uas/internal/client/platform"
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/selfinstall"
 	"github.com/tyler-builds/uas/internal/client/session"
@@ -30,8 +31,8 @@ const usage = `usage: uas <command> [flags] [args]
 commands:
   refresh              download the latest catalog
   search <words>       find apps
-  info <app-id>        show one app and where it is available
-  install <app-id>     install an app
+  info <app-id|url>    show one app and where it is available
+  install <app-id|url> install an app, from the catalog or from a link to its GitHub repo
   add <file.AppImage>  add a downloaded AppImage: uas moves it into its folder and keeps it updated
   remove <app-id>      remove an installed app
   update <app-id>      update an installed app
@@ -268,7 +269,7 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 		return err
 	}
 	if len(ids) != 1 {
-		return errors.New("info: give exactly one app ID (see \"uas search\")")
+		return errors.New("info: give exactly one app ID (see \"uas search\") or a link to the app's repo")
 	}
 	db, err := openCatalogAt(ctx, *catalogPath)
 	if err != nil {
@@ -276,7 +277,9 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 	}
 	defer db.Close()
 
-	a, err := db.Resolve(ctx, ids[0])
+	// A session without detected backends is enough to read an app from a link.
+	e := &session.Session{CatalogPath: *catalogPath, Platform: platform.Detect(platform.System())}
+	a, err := e.ResolveApp(ctx, db, ids[0])
 	if err != nil {
 		return err
 	}
@@ -289,6 +292,9 @@ func runInfo(ctx context.Context, w io.Writer, args []string) error {
 	fmt.Fprintf(w, "%s (%s)\n", a.Name, a.ID)
 	if a.Summary != "" {
 		fmt.Fprintln(w, a.Summary)
+	}
+	if a.Live() {
+		fmt.Fprintln(w, "Not in uas's catalog: read from its repo just now. Nobody has reviewed it.")
 	}
 	fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

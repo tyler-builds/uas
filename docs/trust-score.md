@@ -61,6 +61,13 @@ Shown whatever the score:
 - Listings scoring below 35 are left out. In the first full run (November 2026) 2,010 repos were checked,
   1,389 kept and 4 dropped for a low score; the median score was 78.
 
+## Apps installed from a link
+
+An app the user installs from a link to its GitHub repo (Install from URL) skips the rules above: the
+client reads the repo and scores it on the spot with the same signals, and keeps archived repos, forks and
+scores under 35, adding "Archived" and "A fork" to the warnings. Its page and the install confirmation say
+it isn't in the catalog. What the client enforces below applies to it all the same.
+
 ## What the client enforces
 
 - uas installs a GitHub AppImage only if it has a published SHA-256, and refuses the file if the download

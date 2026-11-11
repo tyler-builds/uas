@@ -85,6 +85,8 @@ type Fetcher struct {
 	Endpoint     string
 	Log          *slog.Logger
 	Now          func() time.Time
+	// UserAgent is sent with REST requests; empty sends the indexer's.
+	UserAgent string
 }
 
 // Source implements fetch.Fetcher.
@@ -566,13 +568,24 @@ func (f *Fetcher) queryOnce(ctx context.Context, query string, vars map[string]a
 	return false, json.Unmarshal(out.Data, dst)
 }
 
+// toListing is the catalog's listing of a repo, or false when the catalog leaves it out: an archived repo, a
+// fork, or one whose latest stable release has no Linux file.
 func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 	if r.IsArchived || r.IsFork {
 		return catalog.Listing{}, false
 	}
+	l, err := listingOf(r, arch, now)
+	return l, err == nil && len(l.Assets) > 0
+}
+
+// errNoRelease is returned for a repo with no stable release.
+var errNoRelease = errors.New("has no stable release")
+
+// listingOf builds a repo's listing from its latest stable release, which may have no Linux file (no Assets).
+func listingOf(r repo, arch string, now time.Time) (catalog.Listing, error) {
 	latest := r.LatestRelease
 	if latest == nil || latest.IsPrerelease || latest.IsDraft {
-		return catalog.Listing{}, false
+		return catalog.Listing{}, errNoRelease
 	}
 	releasesLastYear, prereleases, inYear := 0, 0, 0
 	for _, rel := range r.Releases.Nodes {
@@ -591,9 +604,6 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 	// Every release read is from the past year, so there may be more than were read.
 	more := inYear == len(r.Releases.Nodes) && len(r.Releases.Nodes) == recentReleases
 	assets := pickAssets(r.NameWithOwner, latest, arch)
-	if len(assets) == 0 {
-		return catalog.Listing{}, false
-	}
 	downloads := 0
 	for _, a := range latest.ReleaseAssets.Nodes {
 		downloads += a.DownloadCount
@@ -604,7 +614,7 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 	}
 	t := trust.GitHub(trust.RepoFacts{
 		Created: r.CreatedAt, Stars: r.StargazerCount, Downloads: downloads, LastRelease: latest.PublishedAt,
-		ReleasesLastYear: releasesLastYear, PrereleasesLastYear: prereleases, MoreReleases: more, License: license, HasChecksum: assets[0].SHA256 != "",
+		ReleasesLastYear: releasesLastYear, PrereleasesLastYear: prereleases, MoreReleases: more, License: license, HasChecksum: len(assets) > 0 && assets[0].SHA256 != "",
 	}, now)
 
 	kind := catalog.KindDesktopApp
@@ -629,7 +639,7 @@ func toListing(r repo, arch string, now time.Time) (catalog.Listing, bool) {
 			changelog.Add(&l, strings.TrimPrefix(rel.TagName, "v"), rel.PublishedAt, rel.Description, rel.URL)
 		}
 	}
-	return l, true
+	return l, nil
 }
 
 var (
