@@ -259,7 +259,7 @@ of everything in the binaries in `licenses/`.
 
 ## License
 
-uas is licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Tyler Carr.
+uas is licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 tyler-builds.
 
 Release builds use the `no_gpl` build tag, which leaves out the GPL-2.0 LZO decompressor that the SquashFS
 library would otherwise include; uas then can't read the rare AppImage compressed with LZO. A build without
