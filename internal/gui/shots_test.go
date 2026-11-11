@@ -2,7 +2,10 @@ package gui
 
 import (
 	"context"
+	"image"
+	"image/draw"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -141,11 +144,44 @@ func TestShots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			png.Encode(f, u.Screenshot())
+			png.Encode(f, roundCorners(u.Screenshot(), windowRadius))
 			f.Close()
 			u.Close()
 		}
 	}
+}
+
+// windowRadius is the radius of the window's corners, as jamb rounds a frameless window with app.CornersRound
+// (its Linux platform draws them; uitest renders only the content).
+const windowRadius = 12
+
+// roundCorners clears the corners of img outside a circle of radius r, antialiased, so a shot shows the
+// window's rounded corners.
+func roundCorners(img image.Image, r float64) *image.NRGBA {
+	b := img.Bounds()
+	out := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(out, out.Bounds(), img, b.Min, draw.Src)
+	w, h := out.Bounds().Dx(), out.Bounds().Dy()
+	const n = 4 // samples per axis per pixel
+	for y := 0; y < int(math.Ceil(r)); y++ {
+		for x := 0; x < int(math.Ceil(r)); x++ {
+			in := 0
+			for sy := 0; sy < n; sy++ {
+				for sx := 0; sx < n; sx++ {
+					dx, dy := r-(float64(x)+(float64(sx)+0.5)/n), r-(float64(y)+(float64(sy)+0.5)/n)
+					if dx*dx+dy*dy <= r*r {
+						in++
+					}
+				}
+			}
+			for _, p := range [][2]int{{x, y}, {w - 1 - x, y}, {x, h - 1 - y}, {w - 1 - x, h - 1 - y}} {
+				c := out.NRGBAAt(p[0], p[1])
+				c.A = uint8(int(c.A) * in / (n * n))
+				out.SetNRGBA(p[0], p[1], c)
+			}
+		}
+	}
+	return out
 }
 
 // useBundledFont makes fontconfig answer "sans-serif" with the bundled Inter, so the shots show the font the

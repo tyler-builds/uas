@@ -58,7 +58,7 @@ COPR packages, searched and installed from one place.
     <td align="center">Search</td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/installed.png" alt="Installed apps from Flathub and Homebrew, with available updates"></td>
+    <td width="50%"><img src="docs/screenshots/installed.png" alt="Installed apps from Flathub, Homebrew and an AppImage, with available updates"></td>
     <td width="50%"><img src="docs/screenshots/home-light.png" alt="The home page in the light theme"></td>
   </tr>
   <tr>
