@@ -27,7 +27,7 @@ mkdir -p "$dir/share/applications"
 
 ldflags="-s -w -X github.com/tyler-builds/uas/internal/version.Version=$version"
 for cmd in uas uas-gui; do
-  CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -trimpath -ldflags "$ldflags" -o "$dir/$cmd" "./cmd/$cmd"
+  CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -tags no_gpl -trimpath -ldflags "$ldflags" -o "$dir/$cmd" "./cmd/$cmd"
 done
 cp packaging/linux/io.github.tyler_builds.uas.desktop "$dir/share/applications/"
 cp -r packaging/linux/icons "$dir/share/"
