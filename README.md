@@ -8,7 +8,7 @@
 Flathub, Homebrew, the Snap Store, GitHub and Codeberg releases, and Fedora, Debian, Ubuntu, Arch and
 COPR packages, searched and installed from one place.
 
-![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.27-00ADD8)
 ![Platform](https://img.shields.io/badge/platform-Linux-0f766e)
 ![Display](https://img.shields.io/badge/display-Wayland-555)
 
@@ -253,4 +253,19 @@ Actions tab. It needs the `UAS_SIGNING_KEY` and `UAS_UPLOAD_TOKEN` secrets. The 
 ## Acknowledgements
 
 Built with [jamb](https://github.com/tyler-builds/jamb). Interface font: [Inter](https://rsms.me/inter/)
-(SIL Open Font License). Source logos: [Simple Icons](https://simpleicons.org/).
+(SIL Open Font License). Source logos: the official Debian, GitHub and Codeberg logos, unchanged; see
+[internal/gui/logos/README.md](internal/gui/logos/README.md). Release archives carry the licenses and notices
+of everything in the binaries in `licenses/`.
+
+## License
+
+uas is licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Tyler Carr.
+
+Release builds use the `no_gpl` build tag, which leaves out the GPL-2.0 LZO decompressor that the SquashFS
+library would otherwise include; uas then can't read the rare AppImage compressed with LZO. A build without
+the tag, such as `go install` from source, includes that GPL-2.0 code.
+
+**Trademarks.** uas is not affiliated with or endorsed by any of the projects and companies whose sources it
+lists. Their names and logos are trademarks of their owners, used only to say where an app comes from. Debian
+is a registered trademark owned by Software in the Public Interest, Inc. GitHub and the Invertocat logo are
+trademarks of GitHub, Inc. Codeberg and the Codeberg Logo are trademarks of Codeberg e.V.

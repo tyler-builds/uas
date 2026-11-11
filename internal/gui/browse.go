@@ -161,7 +161,7 @@ func (a *App) sourcesPage(ctx *ui.Context) ui.Element {
 		}
 		list = list.Child(ui.Card().Gap(space2).
 			Child(ui.Div().Row().Align(ui.Center).Gap(space3).
-				Child(ui.Icon(sourceIcons[s]).Size(20).Color(sourceColor(ctx, s))).
+				Child(sourceMark(ctx, s, 20, sourceColor(ctx, s))).
 				Child(ui.Div().Grow(1).Child(subhead(s.Name()))).
 				Child(status)).
 			Child(ui.Text(notes[s]).FontSize(14)).

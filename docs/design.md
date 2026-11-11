@@ -59,11 +59,16 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   primary, muted (summaries) and subtle (metadata). Teal (`#14897e` dark, `#0f766e` light) is kept to primary
   actions, links and focus; the sidebar selection and counts are neutral. `gui.Themes()` builds both themes
   over jamb's, so every widget picks them up, and the window follows the system's light or dark mode.
-- **Sources:** each has a color and its own logo (`sourceIcons`): Flathub blue, Fedora violet, Homebrew amber,
-  GitHub gray, COPR a rose hammer. The logos are Simple Icons SVGs made into ordinary jamb icons with
-  `icons.MustNew` (`internal/gui/logos.go`). They show in color where a source is the subject (the source
-  strip, the source picker, the app page's Source row); in lists, sources are quiet words. A Flathub-verified
-  publisher gets a green shield. Hovering any of them explains it.
+- **Sources:** each has a color (`sourceTints`) and a mark (`sourceMark` in `internal/gui/logos.go`). A logo
+  is never recolored, tinted, cropped or redrawn: a source's mark is its owner's official logo file,
+  unchanged and in its own colors (with the owner's dark-background variant in the dark theme), drawn as an
+  SVG image that no tint or high-contrast mode changes. That's Debian, GitHub and Codeberg. Where the
+  owner's trademark policy doesn't clearly allow its unaltered logo here, or there is no logo, the mark is a
+  neutral Lucide icon in the source's color: Flathub a blue store, Fedora a violet package, Homebrew an
+  amber terminal, COPR a rose hammer, and so on. `internal/gui/logos/README.md` has the policy behind each.
+  Marks show where a source is the subject (the source strip, the source picker, the app page's Source
+  row); in lists, sources are quiet words. A Flathub-verified publisher gets a green shield. Hovering any of
+  them explains it.
 - **Missing icons:** an app without an icon gets a monogram, its initial on a tile tinted by its name.
 - **Surfaces:** cards and lists are a fill a step lighter than the page with a hairline border; hovering a
   clickable one lightens it. Cards are jamb `ui.Card`s, styled once in the theme (`Theme.Card`).

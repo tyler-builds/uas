@@ -192,7 +192,7 @@ func (a *App) sourceTiles(ctx *ui.Context) ui.Element {
 			Cursor(ui.CursorPointer).Hover(ui.Style{Background: t.SurfaceHover}).
 			Role(access.RoleButton).Label(s.Name()).TabIndex(0).Tooltip(sourceTips[s]).
 			OnClick(func() { a.open(view{page: pageSource, arg: string(s)}) }).
-			Child(ui.Icon(sourceIcons[s]).Size(18).Color(c)).
+			Child(sourceMark(ctx, s, 18, c)).
 			Child(ui.Div().Column().Gap(1).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 				Child(subhead(s.Name()).Truncate()).
 				Child(caption(ctx, plural(counts.Data[s], "app", "apps")))))

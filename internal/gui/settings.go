@@ -140,9 +140,9 @@ func settingsRow(ctx *ui.Context, icon ui.Element, titleText, sub string, right 
 		Child(ui.If(right != nil, ui.Div().Row().Align(ui.Center).Shrink(0).Child(right)))
 }
 
-// sourceIcon is a source's icon in its color, with what the source is as its tooltip.
+// sourceIcon is a source's mark (see sourceMark), with what the source is as its tooltip.
 func sourceIcon(ctx *ui.Context, s catalog.SourceID) ui.Element {
-	return ui.Div().Tooltip(sourceTips[s]).Child(ui.Icon(sourceIcons[s]).Size(18).Color(sourceColor(ctx, s)))
+	return ui.Div().Tooltip(sourceTips[s]).Child(sourceMark(ctx, s, 18, sourceColor(ctx, s)))
 }
 
 // checkCatalog downloads a newer catalog if there is one. loud says to report "already up to date" too.
