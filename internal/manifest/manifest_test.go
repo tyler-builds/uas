@@ -85,3 +85,35 @@ func TestVerifyRejects(t *testing.T) {
 		t.Error("signed a bad catalog path")
 	}
 }
+
+func TestReleaseFiles(t *testing.T) {
+	file := func(path string) ReleaseFile {
+		return ReleaseFile{Arch: "x86_64", Path: path, SHA256: strings.Repeat("a", 64), Size: 1}
+	}
+	at := time.Unix(1770000000, 0)
+	for _, tc := range []struct {
+		name string
+		r    Release
+		ok   bool
+	}{
+		{"program and archive", Release{Version: "0.6.0", Released: at, Files: []ReleaseFile{file(ReleasePath("0.6.0", "x86_64"))},
+			Programs: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}, true},
+		{"program only", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}, true},
+		{"nothing", Release{Version: "0.6.0", Released: at}, false},
+		{"archive as program", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file(ReleasePath("0.6.0", "x86_64"))}}, false},
+		{"program as archive", Release{Version: "0.6.0", Released: at, Files: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}, false},
+		{"other version", Release{Version: "0.6.0", Released: at, Programs: []ReleaseFile{file(ProgramPath("0.5.0", "x86_64"))}}, false},
+	} {
+		if err := tc.r.Validate(); (err == nil) != tc.ok {
+			t.Errorf("%s: Validate = %v", tc.name, err)
+		}
+	}
+	r := Release{Version: "0.6.0", Released: at, Files: []ReleaseFile{file(ReleasePath("0.6.0", "x86_64"))},
+		Programs: []ReleaseFile{file(ProgramPath("0.6.0", "x86_64"))}}
+	if f, ok := r.File("x86_64"); !ok || f.Archive() {
+		t.Errorf("File = %+v, %v; want the program", f, ok)
+	}
+	if _, ok := r.File("aarch64"); ok {
+		t.Error("a build for aarch64 that isn't there")
+	}
+}

@@ -1,4 +1,6 @@
-// Command uas finds and installs apps from every source your system supports.
+// Command uas finds and installs apps from every source your system supports. It is both the CLI and the
+// desktop app ("uas gui", or uas-gui, a link to it), and a release is this one program, which installs
+// itself when run from where it was downloaded to (see selfinstall.go).
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -17,6 +20,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/paths"
 	"github.com/tyler-builds/uas/internal/client/refresh"
+	"github.com/tyler-builds/uas/internal/client/selfinstall"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/version"
 )
@@ -38,7 +42,11 @@ commands:
   check-updates        refresh the catalog and list updates; -notify shows a desktop notification
   export [-o file]     save the list of installed apps, to install them elsewhere
   restore <file>       install the apps of an export that aren't installed yet
-  self-update [-check]  update uas itself to the latest release
+  gui [--page <page>]  open the desktop app (uas-gui does too)
+  self-update [-check] update uas itself to the latest release
+  self-install         install this uas for you: ~/.local/bin/uas, and the app in your app menu
+  self-uninstall       remove uas (the apps you installed with it stay)
+  licenses             show the licenses of uas and of what it is built from
   version              show this uas's version
   permissions <app-id> show or change what a Flatpak app may reach (network, files, devices…)
   extensions [command] list and manage GNOME Shell extensions (list, search, install, remove, enable, disable)
@@ -48,14 +56,30 @@ Run "uas <command> -h" for a command's flags.
 `
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+	args := os.Args[1:]
+	if filepath.Base(os.Args[0]) == selfinstall.GUI && (len(args) == 0 || args[0] != "gui") {
+		args = append([]string{"gui"}, args...) // uas-gui opens the app
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if len(args) == 0 {
+		if downloadedCopy() {
+			if err := runFirstInstall(ctx, os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, "uas:", err)
+				os.Exit(1)
+			}
+			return
+		}
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	if args[0] != "self-uninstall" {
+		refreshInstall()
+	}
 	var err error
-	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	switch cmd, args := args[0], args[1:]; cmd {
+	case "gui":
+		err = runGUI(args)
 	case "refresh":
 		err = runRefresh(ctx, os.Stdout, args)
 	case "search":
@@ -86,6 +110,12 @@ func main() {
 		err = runRestore(ctx, os.Stdout, args)
 	case "self-update":
 		err = runSelfUpdate(ctx, os.Stdout, args)
+	case "self-install":
+		err = runSelfInstall(ctx, os.Stdout, args)
+	case "self-uninstall":
+		err = runSelfUninstall(ctx, os.Stdout, args)
+	case "licenses", "license":
+		err = runLicenses(os.Stdout, args)
 	case "version", "-version", "--version":
 		fmt.Println("uas " + version.Version)
 		return

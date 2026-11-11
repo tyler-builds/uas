@@ -1,10 +1,11 @@
-// Command uas-release publishes release archives of uas beside the catalog, with a signed
-// releases/latest.json that clients check before updating themselves.
+// Command uas-release publishes a release of uas beside the catalog: the program for each architecture, the
+// archives that uas 0.5.0 and older update from, and a signed releases/latest.json that clients check before
+// updating themselves.
 //
-//	uas-release -version 0.2.0 -publish https://uas-catalog.example.workers.dev dist/*.tar.gz
+//	uas-release -version 0.2.0 -publish https://uas-catalog.example.workers.dev dist/uas-0.2.0-linux-*
 //
-// It needs $UAS_SIGNING_KEY (the catalog's signing key) and, with -publish, $UAS_UPLOAD_TOKEN. Archives come
-// from packaging/linux/build-release.sh. A version older than the published one is refused.
+// It needs $UAS_SIGNING_KEY (the catalog's signing key) and, with -publish, $UAS_UPLOAD_TOKEN. The files
+// come from packaging/linux/build-release.sh. A version older than the published one is refused.
 package main
 
 import (
@@ -28,7 +29,8 @@ import (
 	"github.com/tyler-builds/uas/internal/manifest"
 )
 
-var archiveName = regexp.MustCompile(`^uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)\.tar\.gz$`)
+// fileName matches a release's files: the program, and with .tar.gz, its archive.
+var fileName = regexp.MustCompile(`^uas-(\d+\.\d+\.\d+)-linux-(x86_64|aarch64)(\.tar\.gz)?$`)
 
 func main() {
 	ver := flag.String("version", "", "the version to publish, such as 0.2.0 (required)")
@@ -41,13 +43,13 @@ func main() {
 	}
 }
 
-func run(ver, publishURL, publishDir string, archives []string) error {
+func run(ver, publishURL, publishDir string, files []string) error {
 	ver = strings.TrimPrefix(ver, "v")
 	if _, err := manifest.ParseVersion(ver); err != nil {
 		return err
 	}
-	if len(archives) == 0 {
-		return errors.New("give the release archives to publish")
+	if len(files) == 0 {
+		return errors.New("give the release's files to publish")
 	}
 	key, err := manifest.ParsePrivateKey(os.Getenv("UAS_SIGNING_KEY"))
 	if err != nil {
@@ -73,25 +75,47 @@ func run(ver, publishURL, publishDir string, archives []string) error {
 			return err
 		}
 	}
-	rel := manifest.Release{Version: ver, Released: time.Now().UTC().Truncate(time.Second)}
-	for _, a := range archives {
-		m := archiveName.FindStringSubmatch(filepath.Base(a))
+	// Every architecture needs both: the program is what installs and updates, and uas 0.5.0 and older update
+	// only from archives.
+	have := map[string]int{}
+	for _, a := range files {
+		m := fileName.FindStringSubmatch(filepath.Base(a))
 		if m == nil || m[1] != ver {
-			return fmt.Errorf("%s is not a uas %s archive", a, ver)
+			return fmt.Errorf("%s is not a file of uas %s", a, ver)
 		}
+		have[m[2]+m[3]]++
+	}
+	for name := range have {
+		arch := strings.TrimSuffix(name, ".tar.gz")
+		if have[arch] != 1 || have[arch+".tar.gz"] != 1 {
+			return fmt.Errorf("give the program and the archive for %s, once each", arch)
+		}
+	}
+
+	rel := manifest.Release{Version: ver, Released: time.Now().UTC().Truncate(time.Second)}
+	for _, a := range files {
+		m := fileName.FindStringSubmatch(filepath.Base(a))
 		b, err := os.ReadFile(a)
 		if err != nil {
 			return err
 		}
 		sum := sha256.Sum256(b)
-		f := manifest.ReleaseFile{Arch: m[2], Path: manifest.ReleasePath(ver, m[2]),
+		f := manifest.ReleaseFile{Arch: m[2], Path: manifest.ProgramPath(ver, m[2]),
 			SHA256: hex.EncodeToString(sum[:]), Size: int64(len(b))}
-		// Archives first: latest.json points at them.
-		if err := store.Put(ctx, f.Path, bytes.NewReader(b), f.Size, "application/gzip"); err != nil {
+		contentType := "application/octet-stream"
+		if m[3] != "" {
+			f.Path, contentType = manifest.ReleasePath(ver, m[2]), "application/gzip"
+		}
+		// The files first: latest.json points at them.
+		if err := store.Put(ctx, f.Path, bytes.NewReader(b), f.Size, contentType); err != nil {
 			return err
 		}
 		fmt.Printf("uploaded %s (%d bytes, sha256 %s)\n", f.Path, f.Size, f.SHA256)
-		rel.Files = append(rel.Files, f)
+		if f.Archive() {
+			rel.Files = append(rel.Files, f)
+		} else {
+			rel.Programs = append(rel.Programs, f)
+		}
 	}
 	signed, err := manifest.SignRelease(rel, key)
 	if err != nil {

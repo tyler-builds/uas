@@ -23,3 +23,8 @@ jobs:
       # Releases build with no_gpl (see packaging/linux/build-release.sh), so test that build.
       - run: go vet -tags no_gpl ./...
       - run: go test -tags no_gpl ./...
+      # A release program installs itself into a clean home, refreshes an old install, and uninstalls.
+      - name: Packaging
+        run: |
+          packaging/linux/build-release.sh 0.0.1 x86_64 "$RUNNER_TEMP/dist"
+          packaging/linux/test-install.sh "$RUNNER_TEMP/dist/uas-0.0.1-linux-x86_64"

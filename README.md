@@ -125,19 +125,23 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
 ## Install
 
-From a release: download `uas-<version>-linux-x86_64.tar.gz`
-(`https://uas-catalog.tyler-builds.workers.dev/releases/uas-<version>-linux-x86_64.tar.gz`), unpack it and run
-`./install.sh`. uas then updates itself (Settings → About, or `uas self-update`).
+Download uas ([x86_64](https://uas-catalog.tyler-builds.workers.dev/releases/uas-linux-x86_64),
+[aarch64](https://uas-catalog.tyler-builds.workers.dev/releases/uas-linux-aarch64)), allow it to run (in
+its Properties, or with `chmod +x`), and open it. It installs itself, with no root needed, and opens. uas is
+then in your app menu, `uas` is in `~/.local/bin`, and it updates itself (Settings → About, or
+`uas self-update`).
 
-From source, with Go 1.27 or newer, in a clone of this repo:
+Or from a terminal:
 
 ```sh
-go install ./cmd/uas-gui ./cmd/uas      # to ~/go/bin; make sure it's on your PATH
-
-# launcher entry and icon
-cp packaging/linux/io.github.tyler_builds.uas.desktop ~/.local/share/applications/
-cp -r packaging/linux/icons ~/.local/share/
+curl -fLo uas https://uas-catalog.tyler-builds.workers.dev/releases/uas-linux-$(uname -m) && chmod +x uas && ./uas self-install && rm uas
 ```
+
+To uninstall, use Settings → About → Uninstall uas, or `uas self-uninstall`. Apps you installed with uas
+stay installed.
+
+From source, with Go 1.27 or newer: `go build -o /tmp/uas ./cmd/uas && /tmp/uas self-install` (builds from
+source don't update themselves).
 
 ## CLI
 
@@ -166,7 +170,10 @@ uas install org.mozilla.firefox
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
 | `migrate [-n] [-y] [-all]` | Hand AppImages that other tools or you set up over to uas |
 | `extensions [list \| search <words> \| install\|remove\|enable\|disable\|settings <uuid>]` | List and manage GNOME Shell extensions |
+| `gui [--page <page>]` | Open the desktop app |
 | `self-update` | Update uas to the latest signed release |
+| `self-install` / `self-uninstall` | Install uas for you, or remove it |
+| `licenses` | Show the licenses of uas and what it is built from |
 | `version` | Show uas's version |
 
 ## FAQ
@@ -214,7 +221,7 @@ No. It downloads the catalog and app icons, and talks to the sources you install
   Cloudflare Worker + R2 (a catalog per kind of system)
                     │
           ┌─────────┴─────────┐
-       uas-gui              uas (CLI)      verify, search, install
+       uas gui              uas (CLI)      verify, search, install
           └─────────┬─────────┘            through the native tools
                     ▼
                 your system
@@ -226,7 +233,7 @@ More in [docs/architecture.md](docs/architecture.md) and [docs/design.md](docs/d
 
 ```sh
 go test ./...
-go run ./cmd/uas-gui
+go run ./cmd/uas gui
 ```
 
 Build and use a local catalog:

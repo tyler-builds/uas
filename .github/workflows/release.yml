@@ -1,8 +1,10 @@
 name: Release
 
-# Builds uas for x86_64 and aarch64 and publishes the archives beside the catalog, with a signed
-# releases/latest.json that installed copies of uas update from. Push a tag such as v0.2.0 to release; run it
-# by hand to build the archives without publishing (or with publish checked, to publish the given version).
+# Builds uas for x86_64 and aarch64 (the program, and the archive that uas 0.5.0 and older update from) and
+# publishes them beside the catalog, with a signed releases/latest.json that installed copies of uas update
+# from. Push a tag such as v0.2.0 to release; run it by hand to build without publishing (or with publish
+# checked, to publish the given version). The catalog Worker in deploy/cloudflare must accept the programs
+# (deploy it before the first release that has them).
 on:
   push:
     tags: ["v*.*.*"]
@@ -12,7 +14,7 @@ on:
         description: "Version to build, such as 0.2.0"
         required: true
       publish:
-        description: "Publish it (otherwise only build the archives)"
+        description: "Publish it (otherwise only build it)"
         type: boolean
         default: false
 
@@ -39,7 +41,7 @@ jobs:
           v="${v#v}"
           [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version $v"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      # The archives build with no_gpl (see packaging/linux/build-release.sh).
+      # Releases build with no_gpl (see packaging/linux/build-release.sh).
       - run: go vet -tags no_gpl ./...
       - run: go test -tags no_gpl ./...
       - name: Build
@@ -48,20 +50,23 @@ jobs:
           for arch in x86_64 aarch64; do
             packaging/linux/build-release.sh "${{ steps.version.outputs.version }}" "$arch" dist
           done
-          sha256sum dist/*.tar.gz
+          sha256sum dist/*
+      # The x86_64 program installs itself into a clean home, refreshes an old install, and uninstalls.
+      - run: packaging/linux/test-install.sh dist/uas-${{ steps.version.outputs.version }}-linux-x86_64
       - uses: actions/upload-artifact@v7
         with:
           name: uas-${{ steps.version.outputs.version }}
-          path: dist/*.tar.gz
+          path: dist/*
       - name: Publish
         if: github.event_name == 'push' || inputs.publish
-        run: go run ./cmd/uas-release -version "${{ steps.version.outputs.version }}" -publish "$CATALOG_URL" dist/*.tar.gz
+        run: go run ./cmd/uas-release -version "${{ steps.version.outputs.version }}" -publish "$CATALOG_URL" dist/*
         env:
           CATALOG_URL: https://uas-catalog.tyler-builds.workers.dev
           UAS_SIGNING_KEY: ${{ secrets.UAS_SIGNING_KEY }}
           UAS_UPLOAD_TOKEN: ${{ secrets.UAS_UPLOAD_TOKEN }}
       - name: GitHub release
         if: github.event_name == 'push'
-        run: gh release create "${{ github.ref_name }}" dist/*.tar.gz --title "uas ${{ steps.version.outputs.version }}" --generate-notes
+        # The programs only: the archives are for old copies of uas to update from.
+        run: gh release create "${{ github.ref_name }}" dist/uas-*-linux-x86_64 dist/uas-*-linux-aarch64 --title "uas ${{ steps.version.outputs.version }}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

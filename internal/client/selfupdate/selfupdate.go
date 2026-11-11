@@ -1,9 +1,13 @@
 // Package selfupdate updates uas itself from its signed releases, published beside the catalog.
 //
 // A release is a signed description (releases/latest.json, checked against the keys the catalog is checked
-// against) and an archive per architecture with uas and uas-gui. Updating downloads the archive, checks its
-// size and SHA-256, and replaces both programs where they are installed, if that folder is the user's.
+// against) and the uas program for each architecture, which is both the CLI and the app. Updating downloads
+// it, checks its size and SHA-256, and puts it in place of the running program, if that folder is the user's.
 // Builds from source ("dev") never update themselves.
+//
+// Releases also carry archives for copies of uas that predate the single program (see manifest.Release).
+// Those copies updated uas and uas-gui from them, each to a copy of the new program; the new program then
+// makes uas-gui a link to itself (selfinstall.Layout.Refresh).
 package selfupdate
 
 import (
@@ -23,12 +27,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tyler-builds/uas/internal/client/selfinstall"
 	"github.com/tyler-builds/uas/internal/manifest"
 	"github.com/tyler-builds/uas/internal/version"
 )
-
-// Programs are the files a release replaces, found in the folder of the running program.
-var Programs = []string{"uas", "uas-gui"}
 
 // Updater checks for and installs releases.
 type Updater struct {
@@ -80,7 +82,7 @@ func (u *Updater) Check(ctx context.Context) (*Available, error) {
 	return &Available{Release: rel, File: f}, nil
 }
 
-// Install downloads a release and puts its programs in place of the running ones.
+// Install downloads a release and puts its program in place of the running one.
 func (u *Updater) Install(ctx context.Context, a *Available, progress func(string)) error {
 	dir, err := u.dir()
 	if err != nil {
@@ -96,53 +98,39 @@ func (u *Updater) Install(ctx context.Context, a *Available, progress func(strin
 	os.Remove(probe.Name())
 
 	report(progress, "Downloading uas "+a.Release.Version)
-	archive, err := u.get(ctx, a.File.Path, a.File.Size+1)
+	b, err := u.get(ctx, a.File.Path, a.File.Size+1)
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(archive)
-	if int64(len(archive)) != a.File.Size || hex.EncodeToString(sum[:]) != a.File.SHA256 {
+	sum := sha256.Sum256(b)
+	if int64(len(b)) != a.File.Size || hex.EncodeToString(sum[:]) != a.File.SHA256 {
 		return errors.New("the downloaded release doesn't match its signed checksum")
 	}
 	report(progress, "Checksum verified")
-	files, err := extract(archive)
-	if err != nil {
-		return err
-	}
-	// Write every program first, then swap them in, so a failure leaves the old ones.
-	var tmps []string
-	defer func() {
-		for _, t := range tmps {
-			os.Remove(t)
-		}
-	}()
-	for _, name := range Programs {
-		b, ok := files[name]
-		if !ok {
-			return fmt.Errorf("the release has no %s", name)
-		}
-		t := filepath.Join(dir, "."+name+".update")
-		if err := os.WriteFile(t, b, 0o755); err != nil {
+	if a.File.Archive() {
+		if b, err = extract(b, selfinstall.Program); err != nil {
 			return err
 		}
-		tmps = append(tmps, t)
 	}
-	for i, name := range Programs {
-		// Only programs that are installed here are replaced: someone may have only the CLI.
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil && name != filepath.Base(u.self()) {
-			continue
-		}
-		if err := os.Rename(tmps[i], filepath.Join(dir, name)); err != nil {
+
+	// Written beside the old program and swapped in whole, so a failure leaves the old one.
+	tmp := filepath.Join(dir, "."+selfinstall.Program+".update")
+	defer os.Remove(tmp)
+	if err := os.WriteFile(tmp, b, 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, filepath.Join(dir, selfinstall.Program)); err != nil {
+		return err
+	}
+	// uas-gui, where there is one, opens the new program too.
+	l := selfinstall.Layout{Bin: dir}
+	if _, err := os.Lstat(l.GUIPath()); err == nil {
+		if err := l.LinkGUI(); err != nil {
 			return err
 		}
 	}
 	report(progress, "Updated to uas "+a.Release.Version)
 	return nil
-}
-
-func (u *Updater) self() string {
-	exe, _ := os.Executable()
-	return exe
 }
 
 func (u *Updater) dir() (string, error) {
@@ -159,42 +147,27 @@ func (u *Updater) dir() (string, error) {
 	return filepath.Dir(exe), nil
 }
 
-// extract reads the programs out of a release archive. Archive entries are
-// "uas-<version>-linux-<arch>/<file>"; only top-level files named in Programs are kept.
-func extract(archive []byte) (map[string][]byte, error) {
+// extract reads a program out of a release archive. Archive entries are "uas-<version>-linux-<arch>/<file>".
+func extract(archive []byte, name string) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, err
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
-	out := map[string][]byte{}
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
-			break
+			return nil, fmt.Errorf("the release has no %s", name)
 		}
 		if err != nil {
 			return nil, err
 		}
-		if h.Typeflag != tar.TypeReg {
-			continue
-		}
-		parts := strings.Split(path.Clean(h.Name), "/")
-		if len(parts) != 2 {
-			continue
-		}
-		for _, p := range Programs {
-			if parts[1] == p {
-				b, err := io.ReadAll(io.LimitReader(tr, 512<<20))
-				if err != nil {
-					return nil, err
-				}
-				out[p] = b
-			}
+		if parts := strings.Split(path.Clean(h.Name), "/"); h.Typeflag == tar.TypeReg && len(parts) == 2 &&
+			parts[1] == name {
+			return io.ReadAll(io.LimitReader(tr, 512<<20))
 		}
 	}
-	return out, nil
 }
 
 func (u *Updater) get(ctx context.Context, name string, limit int64) ([]byte, error) {

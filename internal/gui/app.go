@@ -97,6 +97,11 @@ type App struct {
 	// Restart closes the app and starts it again, as its installed program now is. The program that runs the
 	// app sets it; without it the About row only says to restart.
 	Restart func()
+	// Uninstall removes uas itself (its programs, launcher and background update check), and Quit closes the
+	// app. The program that runs the app sets them; without Uninstall, Settings has no Uninstall row.
+	Uninstall    func(context.Context) error
+	Quit         func()
+	uninstalling *ui.Signal[bool] // the Uninstall dialog is open
 
 	extTab   *ui.Signal[string]        // the Extensions page's tab: extInstalled or extBrowse
 	extOrder *ui.Signal[catalog.Order] // how its Browse tab is sorted
@@ -136,6 +141,7 @@ func New(s *session.Session) *App {
 		restore:        ui.NewSignal[*restorePlan](nil),
 		whatsNew:       ui.NewSignal[*whatsNew](nil),
 		updatedTo:      ui.NewSignal(""),
+		uninstalling:   ui.NewSignal(false),
 		migrate:        ui.NewSignal[*migratePlan](nil),
 		scanMigrations: s.ScanMigrations,
 		migrateOne: func(ctx context.Context, m session.Migration, p func(backend.Progress)) error {
@@ -291,6 +297,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.whatsNewDialog(ctx)).
 		Child(a.extRemoveDialog(ctx)).
 		Child(a.migrateDialog(ctx)).
+		Child(a.uninstallDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
 }
 

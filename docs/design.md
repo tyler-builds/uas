@@ -53,7 +53,7 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   The app draws it with `ui.SVG` (`brandMark`), cropped to the tile. The same file, with its margin, is the
   desktop icon in [`packaging/linux`](../packaging/linux), next to the `.desktop` file.
 - **Font:** Inter (SIL Open Font License, [`internal/gui/fonts`](../internal/gui/fonts)), embedded and
-  registered as the UI font in `cmd/uas-gui` (`gui.Fonts()`), so the app looks the same on every desktop.
+  registered as the UI font in `cmd/uas/gui.go` (`gui.Fonts()`), so the app looks the same on every desktop.
 - **Palette:** neutral near-black surfaces in the dark theme (page `#0e0e10`, sidebar `#08080a`, cards
   `#19191d`, borders `#222227`) and white with light grays in the light theme. Text comes in three tiers:
   primary, muted (summaries) and subtle (metadata). Teal (`#14897e` dark, `#0f766e` light) is kept to primary
@@ -106,7 +106,7 @@ renders bold (the test's font lookup has no semibold face).
 
 ## Installing the desktop entry
 
-`go install ./cmd/uas-gui` puts the app on your PATH (`~/go/bin`; make sure it's on PATH). For a user install,
-copy `packaging/linux/io.github.tyler_builds.uas.desktop` to `~/.local/share/applications` and the icon tree
-under `packaging/linux/icons` to `~/.local/share/icons`. The app ID, `io.github.tyler_builds.uas`, is the
+`go build -o /tmp/uas ./cmd/uas && /tmp/uas self-install` installs a build from source as a release
+installs itself: `~/.local/bin/uas`, `uas-gui` linked to it, the launcher from `packaging/linux` (with the
+full path) and its icon. The app ID, `io.github.tyler_builds.uas`, is the
 Wayland app ID, which the desktop matches to the `.desktop` file for the dock's name and icon.

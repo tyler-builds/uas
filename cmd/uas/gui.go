@@ -1,13 +1,8 @@
-// Command uas-gui is the uas desktop app.
-//
-//	uas-gui                    open the app
-//	uas-gui --page updates     open it on a page: updates, installed, extensions or settings
-//	uas-gui --check-updates    check for updates and notify, without opening a window (run by the
-//	                           background check's systemd timer)
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -24,26 +19,29 @@ import (
 	"github.com/tyler-builds/uas/internal/gui"
 )
 
-func main() {
-	page := flag.String("page", "", "open on this page: updates, installed, extensions or settings")
-	check := flag.Bool("check-updates", false, "check for updates, notify, and exit without opening a window")
-	flag.Parse()
+// runGUI is the desktop app, which "uas gui" and the uas-gui link open:
+//
+//	uas gui                    open the app
+//	uas gui --page updates     open it on a page: updates, installed, extensions or settings
+//	uas gui --check-updates    check for updates and notify, without opening a window (run by the
+//	                           background check's systemd timer)
+func runGUI(args []string) error {
+	fs := flag.NewFlagSet("gui", flag.ContinueOnError)
+	page := fs.String("page", "", "open on this page: updates, installed, extensions or settings")
+	check := fs.Bool("check-updates", false, "check for updates, notify, and exit without opening a window")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	catalogPath, err := paths.Catalog()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "uas-gui:", err)
-		os.Exit(1)
+		return err
 	}
 	if *check {
-		if err := checkUpdates(catalogPath); err != nil {
-			fmt.Fprintln(os.Stderr, "uas-gui:", err)
-			os.Exit(1)
-		}
-		return
+		return checkUpdatesInBackground(catalogPath)
 	}
 	s, err := session.Load(context.Background(), "", catalogPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "uas-gui:", err)
-		os.Exit(1)
+		return err
 	}
 	g := gui.New(s)
 	g.StartOn(*page)
@@ -58,6 +56,8 @@ func main() {
 			app.Quit()
 		}
 	}
+	g.Uninstall = uninstallSelf
+	g.Quit = app.Quit
 	light, dark := gui.Themes()
 	// The app ID is the Wayland app ID, which the desktop matches to packaging/linux's .desktop file for the
 	// name and icon in the dock.
@@ -78,15 +78,24 @@ func main() {
 		Corners:    app.CornersRound,
 	})
 	if restart.Load() {
-		err := syscall.Exec(exe, []string{exe, "--page", "settings"}, os.Environ())
-		fmt.Fprintln(os.Stderr, "uas-gui: could not restart:", err) // Exec only returns when it fails
-		os.Exit(1)
+		err := syscall.Exec(exe, []string{exe, "gui", "--page", "settings"}, os.Environ())
+		return errors.New("could not restart: " + err.Error()) // Exec only returns when it fails
 	}
+	return nil
 }
 
-// checkUpdates runs one background check: a notification for new updates, which opens this app on its
-// Updates page when clicked.
-func checkUpdates(catalogPath string) error {
+// guiCommand is the command that opens the app: this program, with "gui".
+func guiCommand() ([]string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return []string{exe, "gui"}, nil
+}
+
+// checkUpdatesInBackground runs one background check: a notification for new updates, which opens this app
+// on its Updates page when clicked.
+func checkUpdatesInBackground(catalogPath string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s, err := session.Load(ctx, "", catalogPath)
@@ -97,9 +106,9 @@ func checkUpdates(catalogPath string) error {
 	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
+	open, err := guiCommand()
 	if err != nil {
-		return err
+		return fmt.Errorf("find uas: %w", err)
 	}
-	return updatecheck.Notify(ctx, r, time.Hour, func() error { return updatecheck.OpenUpdates(exe) })
+	return updatecheck.Notify(ctx, r, time.Hour, func() error { return updatecheck.OpenUpdates(open) })
 }
