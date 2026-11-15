@@ -1,0 +1,8 @@
+Checking out tree 4272c61...done
+Enabled rpm-md repositories: updates fedora updates-archive
+Importing rpm-md...done
+Resolving dependencies...done
+Installing 2 packages:
+  libfoo-2.1-1.fc45.x86_64 (updates)
+  foo-tool-2.1-1.fc45.x86_64 (updates)
+Exiting because of '--dry-run' option

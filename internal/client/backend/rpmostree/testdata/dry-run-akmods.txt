@@ -1,0 +1,29 @@
+Checking out tree 4272c61...done
+Enabled rpm-md repositories: updates fedora updates-archive
+Importing rpm-md...done
+rpm-md repo 'updates' (cached); generated: 2026-11-15T01:52:38Z solvables: 11535
+rpm-md repo 'fedora' (cached); generated: 2026-10-28T20:17:49Z solvables: 75855
+rpm-md repo 'updates-archive' (cached); generated: 2026-11-14T22:24:33Z solvables: 8929
+Resolving dependencies...done
+Installing 20 packages:
+  akmods-0.6.2-14.fc45.noarch (fedora)
+  debugedit-5.4-1.fc45.x86_64 (updates)
+  ed-1.22.6-1.fc45.x86_64 (fedora)
+  elfutils-0.197-1.fc45.x86_64 (updates)
+  fakeroot-1.37.1-5.fc45.x86_64 (fedora)
+  fakeroot-libs-1.37.1-5.fc45.x86_64 (fedora)
+  gdb-minimal-18.1-1.fc45.x86_64 (updates)
+  gnome-tweaks-49.0-4.fc45.noarch (fedora)
+  grubby-8.40-91.fc45.x86_64 (fedora)
+  kmodtool-1.2.1-2.fc45.noarch (fedora)
+  patch-2.8-6.fc45.x86_64 (fedora)
+  python3-progressbar2-4.5.0-8.fc45.noarch (fedora)
+  python3-rpm-6.1.0-1.fc45.x86_64 (fedora)
+  python3-rpmautospec-0.8.4-5.fc45.noarch (fedora)
+  python3-rpmautospec-core-0.1.5-12.fc45.noarch (fedora)
+  python3-utils-3.9.1-5.fc45.noarch (fedora)
+  rpm-build-6.1.0-1.fc45.x86_64 (fedora)
+  rpmdevtools-9.6-15.fc45.noarch (fedora)
+  systemd-rpm-macros-262.1-1.fc45.noarch (updates)
+  yama-ptrace-enable-0.197-1.fc45.noarch (updates)
+Exiting because of '--dry-run' option

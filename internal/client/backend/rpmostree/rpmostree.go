@@ -1,7 +1,7 @@
 // Package rpmostree installs Fedora packages on image-based systems by layering them with rpm-ostree.
 //
 // Layering adds packages on top of the system image. Changes go into a new deployment that takes effect at
-// the next restart. If the system already has an update staged (for example a new Fedora release), new
+// the next restart, unless they only add packages and are applied live (see CheckLive). If the system already has an update staged (for example a new Fedora release), new
 // layers go onto that staged deployment, so the backend targets the release of the newest deployment, not
 // the running one.
 package rpmostree
@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -39,13 +40,19 @@ type Backend struct {
 	release func() int
 	// Exclude, if set, hides layered packages that another backend (COPR) accounts for.
 	Exclude func(pkg string) bool
+	// Rescan, if set, gets the desktop to show launchers added by a live install (see RescanLaunchers).
+	Rescan func()
+	// PKCheck is the pkcheck binary, which tells whether polkit lets uas run rpm-ostree transactions without
+	// asking (see CheckWithoutPrompt). Empty means it can't tell.
+	PKCheck string
+	txn     txns // makes uas's transactions take turns
 }
 
 // New creates a backend. Which Fedora release new layers will target is worked out on the first call to
 // Release, since asking rpm-ostree takes tens of milliseconds; fallbackRelease (the running system's release)
 // is used if rpm-ostree cannot say. ctx bounds that first call.
 func New(ctx context.Context, runner run.Runner, path, rpm string, fallbackRelease int) *Backend {
-	b := &Backend{Runner: runner, Path: path, RPM: rpm}
+	b := &Backend{Runner: runner, Path: path, RPM: rpm, Rescan: RescanLaunchers, PKCheck: "pkcheck"}
 	b.release = sync.OnceValue(func() int {
 		if st, err := b.status(ctx); err == nil && len(st.Deployments) > 0 {
 			if r := st.Deployments[0].fedoraRelease(); r > 0 {
@@ -64,7 +71,8 @@ func (b *Backend) Release() int { return b.release() }
 // Source implements backend.Backend.
 func (b *Backend) Source() catalog.SourceID { return catalog.SourceFedora }
 
-// NeedsRestart implements backend.Restarter.
+// NeedsRestart implements backend.Restarter. Installs that only add packages can skip the restart; see
+// CheckLive.
 func (b *Backend) NeedsRestart() bool { return true }
 
 // Supports implements backend.Backend: only listings for the targeted Fedora release can be layered.
@@ -90,6 +98,21 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 			booted = d
 		}
 	}
+	// Packages layered since the system started wait for a restart, unless they were applied live.
+	var waiting []string
+	for _, p := range newest.RequestedPackages {
+		if !slices.Contains(booted.RequestedPackages, p) {
+			waiting = append(waiting, p)
+		}
+	}
+	for _, p := range newest.RequestedLocalPackages {
+		if !slices.Contains(booted.RequestedLocalPackages, p) {
+			waiting = append(waiting, p)
+		}
+	}
+	live := b.appliedLive(ctx, booted, newest, waiting)
+	pending := func(p string) bool { return slices.Contains(waiting, p) && !live[p] }
+
 	var apps []backend.InstalledApp
 	for _, p := range newest.RequestedPackages {
 		if b.Exclude != nil && b.Exclude(p) {
@@ -97,16 +120,58 @@ func (b *Backend) Installed(ctx context.Context) ([]backend.InstalledApp, error)
 		}
 		apps = append(apps, backend.InstalledApp{
 			Source: catalog.SourceFedora, Ref: p, AppID: p, Name: p, Package: p, Scope: "system",
-			Origin: "layered", Pending: !slices.Contains(booted.RequestedPackages, p),
+			Origin: "layered", Pending: pending(p),
 		})
 	}
 	for _, p := range newest.RequestedLocalPackages {
 		apps = append(apps, backend.InstalledApp{
 			Source: catalog.SourceFedora, Ref: p, AppID: p, Name: p, Scope: "system", Origin: "local file",
-			Pending: !slices.Contains(booted.RequestedLocalPackages, p),
+			Pending: pending(p),
 		})
 	}
 	return apps, nil
+}
+
+// appliedLive returns which of pkgs, layered in newest but not in the booted deployment, the running system
+// has anyway because they were applied live. When newest is the commit applied live, all of them; when more
+// was layered for the next restart since, the running system's rpm database tells.
+func (b *Backend) appliedLive(ctx context.Context, booted, newest deployment, pkgs []string) map[string]bool {
+	if booted.LiveReplaced == "" || len(pkgs) == 0 {
+		return nil
+	}
+	live := map[string]bool{}
+	if booted.LiveReplaced == newest.Checksum {
+		for _, p := range pkgs {
+			live[p] = true
+		}
+		return live
+	}
+	var names []string
+	for _, p := range pkgs {
+		if packageName.MatchString(p) {
+			names = append(names, p)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	// rpm -q fails when any package is missing, and says which on standard output.
+	out, _ := b.Runner.Run(ctx, b.RPM, append([]string{"-q"}, names...), nil)
+	if strings.TrimSpace(out) == "" {
+		return nil // rpm prints a line for each package; it didn't run
+	}
+	missing := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(strings.TrimSpace(line), "package "); ok {
+			if p, ok := strings.CutSuffix(p, " is not installed"); ok {
+				missing[p] = true
+			}
+		}
+	}
+	for _, p := range names {
+		live[p] = !missing[p]
+	}
+	return live
 }
 
 // Install implements backend.Backend.
@@ -123,6 +188,12 @@ func (b *Backend) Install(ctx context.Context, l catalog.Listing, progress func(
 
 // Layer adds a package to the system image, unless the running image already has it.
 func (b *Backend) Layer(ctx context.Context, pkg string, progress func(backend.Progress)) error {
+	return b.layer(ctx, pkg, false, progress)
+}
+
+// layer adds a package to the system image and, if live, applies it to the running system too. It never
+// passes --allow-replacement: apply-live refuses a transaction that changes packages of the image.
+func (b *Backend) layer(ctx context.Context, pkg string, live bool, progress func(backend.Progress)) error {
 	if !packageName.MatchString(pkg) {
 		return fmt.Errorf("rpm-ostree: refusing malformed package name %q", pkg)
 	}
@@ -130,10 +201,17 @@ func (b *Backend) Layer(ctx context.Context, pkg string, progress func(backend.P
 	if _, err := b.Runner.Run(ctx, b.RPM, []string{"-q", "--quiet", pkg}, nil); err == nil {
 		return fmt.Errorf("%s: %w", pkg, ErrInImage)
 	}
-	report(progress, "Adding "+pkg+" to the system image")
-	_, err := b.Runner.Run(ctx, b.Path, []string{"install", "--idempotent", pkg},
-		func(line string) { report(progress, line) })
-	return err
+	args := []string{"install", "--idempotent", pkg}
+	msg := "Adding " + pkg + " to the system image"
+	if live {
+		args = []string{"install", "--idempotent", "--apply-live", pkg}
+		msg += " and the running system"
+	}
+	report(progress, msg)
+	return b.txn.change(ctx, waiting(progress), func() error {
+		_, err := b.Runner.Run(ctx, b.Path, args, func(line string) { report(progress, line) })
+		return err
+	})
 }
 
 // Unlayer removes a layered package.
@@ -142,8 +220,15 @@ func (b *Backend) Unlayer(ctx context.Context, pkg string, progress func(backend
 		return fmt.Errorf("rpm-ostree: refusing malformed package name %q", pkg)
 	}
 	report(progress, "Removing "+pkg+" from the system image")
-	_, err := b.Runner.Run(ctx, b.Path, []string{"uninstall", pkg}, func(line string) { report(progress, line) })
-	return err
+	return b.txn.change(ctx, waiting(progress), func() error {
+		_, err := b.Runner.Run(ctx, b.Path, []string{"uninstall", pkg}, func(line string) { report(progress, line) })
+		return err
+	})
+}
+
+// waiting reports that a change waits for another rpm-ostree job.
+func waiting(progress func(backend.Progress)) func() {
+	return func() { report(progress, "Waiting for another rpm-ostree job to finish") }
 }
 
 // Update implements backend.Backend.
@@ -170,6 +255,9 @@ type deployment struct {
 	Booted                 bool                       `json:"booted"`
 	Staged                 bool                       `json:"staged"`
 	Version                string                     `json:"version"`
+	Checksum               string                     `json:"checksum"`
+	BaseChecksum           string                     `json:"base-checksum"` // set when packages are layered
+	LiveReplaced           string                     `json:"live-replaced"` // the commit applied live, if any
 	RequestedPackages      []string                   `json:"requested-packages"`
 	RequestedLocalPackages []string                   `json:"requested-local-packages"`
 	BaseCommitMeta         map[string]json.RawMessage `json:"base-commit-meta"`

@@ -381,9 +381,14 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 			Child(sourceMark(ctx, catalog.SourceAppImage, 14, sourceColor(ctx, catalog.SourceAppImage))).
 			Child(value("Your AppImage")))
 	} else if listing.Source != "" {
-		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).
+		src := ui.Div().Row().Align(ui.Center).Gap(6).
 			Child(sourceMark(ctx, listing.Source, 14, sourceColor(ctx, listing.Source))).
-			Child(value(listing.Source.Name())))
+			Child(value(listing.Source.Name()))
+		if a.liveReady(ctx, app, listing) {
+			src = src.Child(ui.Div().Shrink(0).Role(access.RoleImage).Label(liveLabel).Tooltip(liveTip).
+				Child(ui.Icon(icons.Zap).Size(14).Color(t.Success)))
+		}
+		field("Source", src)
 	}
 	if app.License != "" {
 		field("License", ui.Div().Tooltip(app.License).Child(value(licenseName(app.License))))
@@ -690,17 +695,110 @@ func (a *App) install(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
 		func(c context.Context, p func(backend.Progress)) error { return a.s.Install(c, l, p) })
 }
 
+// liveKeyPrefix starts the query keys of live checks (see liveQuery), and liveQuietKeyPrefix those of
+// whether a check can run without asking for a password (see liveReady).
+const (
+	liveKeyPrefix      = "live:"
+	liveQuietKeyPrefix = "live-quiet:"
+)
+
+// The live install mark's name and tooltip.
+const (
+	liveLabel = "Installs without a restart"
+	liveTip   = "Installs without a restart. It's added to the running system now, and stays after a restart."
+)
+
+// liveQuery checks whether installing l can skip the restart (see session.CheckLive). The app page and the
+// install dialog share the answer, so Install doesn't run the dry run again; it stays fresh for a few
+// minutes, and jobs that change the system invalidate it. Leaving the page cancels a check in flight.
+func (a *App) liveQuery(ctx *ui.Context, l catalog.Listing, enabled bool) ui.QueryResult[backend.Live] {
+	return ui.Query(ctx, liveKeyPrefix+listingKey(l), func(c context.Context) (backend.Live, error) {
+		return a.s.CheckLive(c, l), nil
+	}, ui.QueryStaleTime(3*time.Minute), ui.QueryEnabled(enabled))
+}
+
+// liveReady reports whether the app page should mark l as installing without a restart. It checks in the
+// background, only for a source that can (layered Fedora packages) and an app that isn't installed, and
+// says no while the check runs and when it says no or can't tell. The user hasn't asked to install, so the
+// check must not ask for a password: it runs only right after polkit has said, without asking, that it
+// may (see session.CheckWithoutPrompt).
+func (a *App) liveReady(ctx *ui.Context, app *catalog.App, l catalog.Listing) bool {
+	if !a.s.CanInstallLive(l) {
+		return false
+	}
+	installed := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	have := installed.Loading
+	for _, in := range installed.Data {
+		if in.Matches(l) {
+			have = true
+		}
+	}
+	if _, ok := a.addedCopy(ctx, app, l); ok {
+		have = true
+	}
+	if _, ok := a.s.SystemApp(app); ok {
+		have = true
+	}
+	// Not while the app's own job runs or the installed list refreshes after one: the app may be installed
+	// by now, and the check would be a wasted dry run.
+	_, busy := a.running(app.ID)
+	// Asked again each time the page opens (stale at once), and trusted only once that answer is in.
+	quiet := ui.Query(ctx, liveQuietKeyPrefix+string(l.Source), func(c context.Context) (bool, error) {
+		return a.s.CheckWithoutPrompt(c, l), nil
+	}, ui.QueryEnabled(!have))
+	allowed := quiet.Data && !quiet.Fetching
+	res := a.liveQuery(ctx, l, allowed && !have && !busy && !installed.Fetching)
+	return allowed && !have && !res.Fetching && res.Data.OK
+}
+
+// installLive installs into the running system too, so the app works without a restart.
+func (a *App) installLive(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
+	a.startJob(ctx, app.ID, "Installing "+app.Name, false, app.Name+" is installed and ready to use",
+		func(c context.Context, p func(backend.Progress)) error { return a.s.InstallLive(c, l, p) })
+}
+
 // confirmDialog asks before installing from a source that is unreviewed or changes the system image.
 func (a *App) confirmDialog(ctx *ui.Context) ui.Element {
 	p := a.confirm.Get()
 	if p == nil {
 		return ui.Div().Display(false)
 	}
+	// A component of its own, so the live check and the choice start over for each install. The install
+	// runs on the app's context, which outlives the dialog.
+	appCtx := ctx
+	return ui.Component(func(ctx *ui.Context) ui.Element { return a.confirmBox(ctx, appCtx, p) }).
+		Key("confirm:" + listingKey(p.listing))
+}
+
+func (a *App) confirmBox(ctx, appCtx *ui.Context, p *pending) ui.Element {
+	t := ctx.Theme()
 	l := p.listing
 	title := fmt.Sprintf("Install %s from %s?", p.app.Name, listingLabel(l))
 	body := ui.Div().Column().Gap(8)
 	for _, n := range a.s.InstallNotes(l) {
 		body = body.Child(ui.Text(n).FontSize(13))
+	}
+	// A layered package that only adds packages can go into the running system too: check, and offer it.
+	checking, live := false, false
+	nowOrLater := ui.Local(ctx, "live", true)
+	if a.s.CanInstallLive(l) {
+		res := a.liveQuery(ctx, l, true)
+		checking = res.Loading || res.Fetching
+		live = !checking && res.Data.OK
+		switch {
+		case checking:
+			body = body.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
+				Child(ui.ProgressRing().Size(ui.RingSmall).Label("Checking")).
+				Child(ui.Text("Checking whether it can work without a restart…").FontSize(13).
+					TextColor(t.TextMuted)))
+		case live:
+			body = body.Child(ui.RadioGroup(nowOrLater,
+				ui.Option[bool]{Value: true, Label: "Install now (no restart needed)"},
+				ui.Option[bool]{Value: false, Label: "Install at the next restart"}).
+				Label("When it takes effect"))
+		default:
+			body = body.Child(ui.Text("It takes effect after a restart: " + res.Data.Why + ".").FontSize(13))
+		}
 	}
 	if l.Trust != nil {
 		body = body.Child(trustPanel(ctx, l))
@@ -721,8 +819,13 @@ func (a *App) confirmDialog(ctx *ui.Context) ui.Element {
 	return ui.AlertDialog(title, message).Intent(intent).Body(body).
 		Confirm("Install", func() {
 			a.confirm.Set(nil)
-			a.install(ctx, p.app, l)
+			if live && nowOrLater.Peek() {
+				a.installLive(appCtx, p.app, l)
+			} else {
+				a.install(appCtx, p.app, l)
+			}
 		}).
+		ConfirmLoading(checking).
 		Cancel("", func() { a.confirm.Set(nil) })
 }
 

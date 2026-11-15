@@ -354,6 +354,49 @@ func (s *Session) Install(ctx context.Context, l catalog.Listing, progress func(
 	return err
 }
 
+// CanInstallLive reports whether l's backend can sometimes install it into the running system, without the
+// restart its installs otherwise need (see CheckLive).
+func (s *Session) CanInstallLive(l catalog.Listing) bool {
+	_, ok := s.Backends[l.Source].(backend.LiveInstaller)
+	return ok && s.Available(l)
+}
+
+// CheckLive says whether installing l can take effect at once, without a restart. It changes nothing, and
+// can take a while: rpm-ostree works out the whole transaction.
+func (s *Session) CheckLive(ctx context.Context, l catalog.Listing) backend.Live {
+	li, ok := s.Backends[l.Source].(backend.LiveInstaller)
+	if !ok || !s.Available(l) {
+		return backend.Live{Why: "it can't be installed without a restart here"}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	return li.CheckLive(ctx, l)
+}
+
+// CheckWithoutPrompt reports whether CheckLive for l can run now without asking for a password. Only run a
+// check the user didn't ask for, such as one for an app's page, when it can.
+func (s *Session) CheckWithoutPrompt(ctx context.Context, l catalog.Listing) bool {
+	li, ok := s.Backends[l.Source].(backend.LiveInstaller)
+	if !ok || !s.Available(l) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return li.CheckWithoutPrompt(ctx)
+}
+
+// InstallLive installs l into the running system as well, so it works without a restart. Use it only when
+// CheckLive says so.
+func (s *Session) InstallLive(ctx context.Context, l catalog.Listing, progress func(backend.Progress)) error {
+	li, ok := s.Backends[l.Source].(backend.LiveInstaller)
+	if !ok {
+		return fmt.Errorf("%s can't install without a restart", l.Source.Name())
+	}
+	err := li.InstallLive(ctx, l, progress)
+	s.emit("install", l.Source, err)
+	return err
+}
+
 // Remove removes an installed app.
 func (s *Session) Remove(ctx context.Context, a backend.InstalledApp, progress func(backend.Progress)) error {
 	b := s.Backends[a.Source]
@@ -494,8 +537,12 @@ func (s *Session) InstallNotes(l catalog.Listing) []string {
 	}
 	switch {
 	case s.NeedsRestart(l.Source):
-		notes = append(notes, "Adds the package to your system image (layering). It takes effect after a restart.",
-			"Layered packages can hold up system updates if they conflict with a new image.")
+		layer := "Adds the package to your system image (layering). It takes effect after a restart."
+		if s.CanInstallLive(l) {
+			layer = "Adds the package to your system image (layering). It works right away if it only adds " +
+				"packages, or else after a restart."
+		}
+		notes = append(notes, layer, "Layered packages can hold up system updates if they conflict with a new image.")
 	case l.Source.Distribution():
 		if pm, ok := s.Backends[l.Source].(*pkgmgr.Backend); ok {
 			notes = append(notes, fmt.Sprintf("Installs with %s for all users. Asks for your password.", pm.Kind))

@@ -159,7 +159,8 @@ func Traits(l catalog.Listing, sys System) []string {
 	case catalog.SourceFedora, catalog.SourceDebian, catalog.SourceUbuntu, catalog.SourceArch:
 		t = append(t, "Packaged, reviewed and signed by "+l.Source.Name())
 		if layered {
-			t = append(t, "Layered into the system image: takes effect after a restart",
+			t = append(t, "Layered into the system image: works right away if it only adds packages, or else "+
+				"after a restart",
 				"Layered packages can hold up system updates if they conflict with a new image")
 		} else {
 			t = append(t, "Installed system-wide with your package manager; asks for your password")

@@ -1,0 +1,12 @@
+Checking out tree 4272c61...done
+Enabled rpm-md repositories: updates fedora updates-archive
+Importing rpm-md...done
+rpm-md repo 'updates' (cached); generated: 2026-11-15T01:52:38Z solvables: 11535
+rpm-md repo 'fedora' (cached); generated: 2026-10-28T20:17:49Z solvables: 75855
+rpm-md repo 'updates-archive' (cached); generated: 2026-11-14T22:24:33Z solvables: 8929
+Resolving dependencies...done
+Installing 3 packages:
+  gnome-tweaks-49.0-4.fc45.noarch (fedora)
+  kernel-debug-core-7.3.3-300.fc45.x86_64 (updates)
+  kernel-debug-modules-core-7.3.3-300.fc45.x86_64 (updates)
+Exiting because of '--dry-run' option

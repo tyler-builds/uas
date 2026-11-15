@@ -32,7 +32,7 @@ func (f *fakeRunner) Run(_ context.Context, name string, args []string, _ func(s
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	if err := f.fail[call]; err != nil {
-		return "", err
+		return f.outputs[call], err // as run.Exec, which returns the output of a failed command too
 	}
 	return f.outputs[call], nil
 }
@@ -41,8 +41,12 @@ func newBackend(r *fakeRunner) *Backend {
 	if r.outputs == nil {
 		r.outputs = map[string]string{}
 	}
-	r.outputs["rpm-ostree status --json"] = statusJSON
-	return New(context.Background(), r, "rpm-ostree", "rpm", 44)
+	if _, ok := r.outputs["rpm-ostree status --json"]; !ok {
+		r.outputs["rpm-ostree status --json"] = statusJSON
+	}
+	b := New(context.Background(), r, "rpm-ostree", "rpm", 44)
+	b.Rescan = nil // tests don't touch the real applications folder
+	return b
 }
 
 func listing(distro, pkg string) catalog.Listing {
