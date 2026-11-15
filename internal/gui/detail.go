@@ -695,8 +695,12 @@ func (a *App) install(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
 		func(c context.Context, p func(backend.Progress)) error { return a.s.Install(c, l, p) })
 }
 
-// liveKeyPrefix starts the query keys of live checks (see liveQuery).
-const liveKeyPrefix = "live:"
+// liveKeyPrefix starts the query keys of live checks (see liveQuery), and liveQuietKeyPrefix those of
+// whether a check can run without asking for a password (see liveReady).
+const (
+	liveKeyPrefix      = "live:"
+	liveQuietKeyPrefix = "live-quiet:"
+)
 
 // The live install mark's name and tooltip.
 const (
@@ -715,7 +719,9 @@ func (a *App) liveQuery(ctx *ui.Context, l catalog.Listing, enabled bool) ui.Que
 
 // liveReady reports whether the app page should mark l as installing without a restart. It checks in the
 // background, only for a source that can (layered Fedora packages) and an app that isn't installed, and
-// says no while the check runs and when it says no or can't tell.
+// says no while the check runs and when it says no or can't tell. The user hasn't asked to install, so the
+// check must not ask for a password: it runs only right after polkit has said, without asking, that it
+// may (see session.CheckWithoutPrompt).
 func (a *App) liveReady(ctx *ui.Context, app *catalog.App, l catalog.Listing) bool {
 	if !a.s.CanInstallLive(l) {
 		return false
@@ -736,8 +742,13 @@ func (a *App) liveReady(ctx *ui.Context, app *catalog.App, l catalog.Listing) bo
 	// Not while the app's own job runs or the installed list refreshes after one: the app may be installed
 	// by now, and the check would be a wasted dry run.
 	_, busy := a.running(app.ID)
-	res := a.liveQuery(ctx, l, !have && !busy && !installed.Fetching)
-	return !have && !res.Fetching && res.Data.OK
+	// Asked again each time the page opens (stale at once), and trusted only once that answer is in.
+	quiet := ui.Query(ctx, liveQuietKeyPrefix+string(l.Source), func(c context.Context) (bool, error) {
+		return a.s.CheckWithoutPrompt(c, l), nil
+	}, ui.QueryEnabled(!have))
+	allowed := quiet.Data && !quiet.Fetching
+	res := a.liveQuery(ctx, l, allowed && !have && !busy && !installed.Fetching)
+	return allowed && !have && !res.Fetching && res.Data.OK
 }
 
 // installLive installs into the running system too, so the app works without a restart.

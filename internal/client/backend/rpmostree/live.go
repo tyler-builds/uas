@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,6 +93,24 @@ func (b *Backend) judge(ctx context.Context, out string) backend.Live {
 }
 
 func no(why string) backend.Live { return backend.Live{Why: why} }
+
+// installAction is the polkit action rpm-ostree checks for installs, dry runs included.
+const installAction = "org.projectatomic.rpmostree1.install-uninstall-packages"
+
+// CheckWithoutPrompt implements backend.LiveInstaller. A dry run needs the same polkit authorization as an
+// install, which Fedora Atomic's rules grant without a password only to wheel users in an active, local
+// session; anyone else would be asked. pkcheck, without --allow-user-interaction, never asks: it exits 0
+// only when the action is allowed as things stand (by a rule, or a password given in the last few minutes),
+// and otherwise 1 (not allowed), 2 (would have to ask) or 3 (dismissed). The subject is uas's own process,
+// which has the same user and session as the rpm-ostree it runs.
+func (b *Backend) CheckWithoutPrompt(ctx context.Context) bool {
+	if b.PKCheck == "" {
+		return false
+	}
+	_, err := b.Runner.Run(ctx, b.PKCheck, []string{"--action-id", installAction,
+		"--process", strconv.Itoa(os.Getpid())}, nil)
+	return err == nil
+}
 
 // InstallLive implements backend.LiveInstaller: it layers the package and applies it to the running system,
 // where it stays after a restart too. Call CheckLive first.

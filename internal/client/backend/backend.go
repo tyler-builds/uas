@@ -155,5 +155,8 @@ type Live struct {
 // tell, it says no, and the install waits for a restart as usual.
 type LiveInstaller interface {
 	CheckLive(ctx context.Context, l catalog.Listing) Live
+	// CheckWithoutPrompt reports whether CheckLive can run now without asking for a password. A check the
+	// user didn't ask for (an app's page opening) runs only when it can.
+	CheckWithoutPrompt(ctx context.Context) bool
 	InstallLive(ctx context.Context, l catalog.Listing, progress func(Progress)) error
 }

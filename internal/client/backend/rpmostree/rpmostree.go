@@ -42,14 +42,17 @@ type Backend struct {
 	Exclude func(pkg string) bool
 	// Rescan, if set, gets the desktop to show launchers added by a live install (see RescanLaunchers).
 	Rescan func()
-	txn    txns // makes uas's transactions take turns
+	// PKCheck is the pkcheck binary, which tells whether polkit lets uas run rpm-ostree transactions without
+	// asking (see CheckWithoutPrompt). Empty means it can't tell.
+	PKCheck string
+	txn     txns // makes uas's transactions take turns
 }
 
 // New creates a backend. Which Fedora release new layers will target is worked out on the first call to
 // Release, since asking rpm-ostree takes tens of milliseconds; fallbackRelease (the running system's release)
 // is used if rpm-ostree cannot say. ctx bounds that first call.
 func New(ctx context.Context, runner run.Runner, path, rpm string, fallbackRelease int) *Backend {
-	b := &Backend{Runner: runner, Path: path, RPM: rpm, Rescan: RescanLaunchers}
+	b := &Backend{Runner: runner, Path: path, RPM: rpm, Rescan: RescanLaunchers, PKCheck: "pkcheck"}
 	b.release = sync.OnceValue(func() int {
 		if st, err := b.status(ctx); err == nil && len(st.Deployments) > 0 {
 			if r := st.Deployments[0].fedoraRelease(); r > 0 {

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/tyler-builds/uas/internal/client/backend"
+	"github.com/tyler-builds/uas/internal/client/run"
 )
 
 // A trimmed rpm-ostree status on Bazzite after "rpm-ostree install --apply-live gnome-tweaks": the staged
@@ -294,5 +296,40 @@ func TestInstalledAfterLiveApply(t *testing.T) {
 	}
 	if !reflect.DeepEqual(pending, map[string]bool{"gnome-tweaks": false, "htop": true}) {
 		t.Errorf("pending = %v", pending)
+	}
+}
+
+func TestCheckWithoutPrompt(t *testing.T) {
+	ctx := context.Background()
+	call := "pkcheck --action-id org.projectatomic.rpmostree1.install-uninstall-packages --process " +
+		strconv.Itoa(os.Getpid())
+
+	// Allowed as things stand: pkcheck exits 0.
+	r := liveRunner("")
+	b := newBackend(r)
+	if !b.CheckWithoutPrompt(ctx) {
+		t.Error("pkcheck allowed it, but CheckWithoutPrompt says no")
+	}
+	if last := r.calls[len(r.calls)-1]; last != call {
+		t.Errorf("ran %q, want %q (never --allow-user-interaction)", last, call)
+	}
+
+	// It would have to ask (exit 2), isn't allowed (1), or pkcheck is missing: no.
+	for _, err := range []error{
+		&run.Error{Cmd: "pkcheck", Err: errors.New("exit status 2"), Stderr: "Authorization requires authentication " +
+			"but no agent is available."},
+		&run.Error{Cmd: "pkcheck", Err: errors.New("exit status 1"), Stderr: "Not authorized."},
+		os.ErrNotExist,
+	} {
+		r := liveRunner("")
+		r.fail[call] = err
+		if newBackend(r).CheckWithoutPrompt(ctx) {
+			t.Errorf("CheckWithoutPrompt = true after %v", err)
+		}
+	}
+	b = newBackend(liveRunner(""))
+	b.PKCheck = ""
+	if b.CheckWithoutPrompt(ctx) {
+		t.Error("CheckWithoutPrompt = true without pkcheck")
 	}
 }

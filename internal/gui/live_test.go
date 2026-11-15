@@ -21,9 +21,17 @@ import (
 type liveBackend struct {
 	fakeBackend
 	checks, liveInstalls int
+	// prompt is true when a check would ask for a password (polkit doesn't allow it as things stand).
+	prompt bool
 }
 
 func (f *liveBackend) NeedsRestart() bool { return true }
+
+func (f *liveBackend) CheckWithoutPrompt(context.Context) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.prompt
+}
 
 func (f *liveBackend) CheckLive(_ context.Context, l catalog.Listing) backend.Live {
 	f.mu.Lock()
@@ -121,4 +129,39 @@ func TestNoLiveMarkWhenItNeedsARestart(t *testing.T) {
 		return u.HasRole(access.RoleAlertDialog, "Install akmods from Fedora 45 · 1.0?") &&
 			u.HasName("It takes effect after a restart: it includes akmods, which works only after a restart.")
 	})
+}
+
+// Without authorization granted up front, opening the page runs no dry run, which would ask for a password;
+// the install dialog still checks, since the user asked to install.
+func TestNoPageCheckWhenItWouldPrompt(t *testing.T) {
+	a, fedora := liveTestApp(t)
+	fedora.prompt = true
+	u := uitest.New(t, a.Root, uitest.Size(1100, 760))
+	defer u.Close()
+
+	a.openApp("htop")
+	u.WaitFor("the app page", func() bool { return u.Has("detail:htop") })
+	u.WaitForQueries()
+	if checks, _ := fedora.counts(); checks != 0 {
+		t.Errorf("the page ran %d checks", checks)
+	}
+	if u.HasRole(access.RoleImage, liveLabel) {
+		t.Error("the mark is shown without a check")
+	}
+
+	clickButton(u, "Install")
+	u.WaitFor("the choice", func() bool { return u.HasName("Install now (no restart needed)") })
+	if checks, _ := fedora.counts(); checks != 1 {
+		t.Errorf("%d checks after Install, want 1", checks)
+	}
+	u.Press("escape")
+
+	// Once polkit allows it without asking, opening the page again checks and marks it.
+	fedora.mu.Lock()
+	fedora.prompt = false
+	fedora.mu.Unlock()
+	a.openApp("akmods")
+	u.WaitFor("the akmods page", func() bool { return u.Has("detail:akmods") })
+	a.openApp("htop")
+	u.WaitFor("the mark", func() bool { return u.HasRole(access.RoleImage, liveLabel) })
 }

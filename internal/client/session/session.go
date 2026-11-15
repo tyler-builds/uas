@@ -373,6 +373,18 @@ func (s *Session) CheckLive(ctx context.Context, l catalog.Listing) backend.Live
 	return li.CheckLive(ctx, l)
 }
 
+// CheckWithoutPrompt reports whether CheckLive for l can run now without asking for a password. Only run a
+// check the user didn't ask for, such as one for an app's page, when it can.
+func (s *Session) CheckWithoutPrompt(ctx context.Context, l catalog.Listing) bool {
+	li, ok := s.Backends[l.Source].(backend.LiveInstaller)
+	if !ok || !s.Available(l) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return li.CheckWithoutPrompt(ctx)
+}
+
 // InstallLive installs l into the running system as well, so it works without a restart. Use it only when
 // CheckLive says so.
 func (s *Session) InstallLive(ctx context.Context, l catalog.Listing, progress func(backend.Progress)) error {

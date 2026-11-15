@@ -390,7 +390,11 @@ type Backend interface {
   booted deployment's `live-replaced` commit (or `rpm -q`) shows it's in the running system. The app page
   runs the check in the background for a layered Fedora listing of an app that isn't installed (never for
   lists: each dry run takes seconds, and rpm-ostree runs one transaction at a time) and marks the source
-  with a bolt when it passes; the install dialog reuses the answer (fresh for 3 minutes, dropped after any
+  with a bolt when it passes. A dry run needs the same polkit action as an install
+  (`org.projectatomic.rpmostree1.install-uninstall-packages`), so the page runs it only right after
+  `pkcheck` (without `--allow-user-interaction`, for uas's own process) exits 0; otherwise (a user not in
+  `wheel`, a remote session, no such rule) it skips the check and shows no bolt, rather than ask for a
+  password for looking at an app; the install dialog reuses the answer (fresh for 3 minutes, dropped after any
   job). uas's own rpm-ostree transactions take turns: an install or removal cancels a check in flight, and
   retries for up to 2 minutes while rpm-ostree says "Transaction in progress" (a cancelled dry run keeps the
   daemon busy for a few seconds, and so do jobs uas didn't start).
