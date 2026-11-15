@@ -2,6 +2,7 @@ package appearance
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"path"
 	"regexp"
@@ -47,6 +48,8 @@ type Contents struct {
 	Themes  []Theme
 	Entries int
 	Bytes   int64
+	// Skipped are the links that are left out, with why: links that lead nowhere in the archive.
+	Skipped map[string]string
 
 	index map[string]entry // every entry by name
 	dirs  map[string]bool  // every folder, named or implied by an entry inside it
@@ -134,15 +137,18 @@ func Inspect(p string, lim Limits) (*Contents, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Every link must lead to a file or a folder in the archive.
+	// A link that leads nowhere in the archive (to a missing file, to an absolute path, out of the archive,
+	// round in a circle, or to a folder it is in) is left out: nothing is written for it. Themes often have a
+	// stray one, a link to an icon of another theme, and refusing the whole theme for it would be no safer.
+	c.Skipped = map[string]string{}
 	for _, e := range c.index {
 		if e.typ == typeSymlink || e.typ == typeHardlink {
 			target, err := c.resolve(e.name, 0)
-			if err != nil {
-				return nil, err
-			}
-			if strings.HasPrefix(e.name, target+"/") {
-				return nil, refuse("%q is a link to a folder it is in", e.name)
+			switch {
+			case err != nil:
+				c.Skipped[e.name] = err.Error()
+			case strings.HasPrefix(e.name, target+"/"):
+				c.Skipped[e.name] = fmt.Sprintf("%q is a link to a folder it is in", e.name)
 			}
 		}
 	}

@@ -99,12 +99,15 @@ func emptyDir(root *os.Root) error {
 
 // needs marks the files an entry needs written: itself, or what it leads to.
 func (c *Contents) needs(name string, need map[string]bool, depth int) error {
+	if _, skip := c.Skipped[name]; skip {
+		return nil
+	}
 	if depth > 40 {
 		return refuse("%q leads round in a circle", name)
 	}
 	target, err := c.resolve(name, 0)
 	if err != nil {
-		return err
+		return nil // through a skipped link
 	}
 	if e, ok := c.index[target]; ok && e.typ == typeFile {
 		need[target] = true
@@ -176,12 +179,12 @@ func (m *materializer) put(dst, src string, depth int) error {
 	if depth > 40 {
 		return refuse("%q leads round in a circle", src)
 	}
-	if path.Base(dst) == "icon-theme.cache" {
+	if _, skip := m.c.Skipped[src]; skip || path.Base(dst) == "icon-theme.cache" {
 		return nil
 	}
 	target, err := m.c.resolve(src, 0)
 	if err != nil {
-		return err
+		return nil // through a skipped link
 	}
 	e, isEntry := m.c.index[target]
 	if isEntry && e.typ == typeFile {
@@ -192,7 +195,7 @@ func (m *materializer) put(dst, src string, depth int) error {
 	}
 	// A folder, named in the archive or implied by what is in it.
 	if strings.HasPrefix(src+"/", target+"/") && src != target {
-		return refuse("%q is a link to a folder it is in", src)
+		return nil // a link to a folder it is in, which Inspect skipped
 	}
 	if err := m.root.MkdirAll(dst, 0o755); err != nil {
 		return err

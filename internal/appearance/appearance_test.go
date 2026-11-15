@@ -249,16 +249,6 @@ func TestInspectRefuses(t *testing.T) {
 		{"path traversal", append(good, file("../evil", "x")), DefaultLimits, "outside the archive"},
 		{"traversal inside", append(good, file("Good/../../evil", "x")), DefaultLimits, "outside the archive"},
 		{"absolute path", append(good, file("/etc/evil", "x")), DefaultLimits, "absolute path"},
-		{"symlink out of the archive", append(good, symlink("Good/cursors/x", "../../../../etc/passwd")), DefaultLimits,
-			"outside the archive"},
-		{"absolute symlink", append(good, symlink("Good/cursors/x", "/etc/passwd")), DefaultLimits, "outside the archive"},
-		{"dangling symlink", append(good, symlink("Good/cursors/x", "nothing")), DefaultLimits, "isn't in the archive"},
-		{"hard link out", append(good, member{name: "Good/cursors/x", hardlink: "../etc/passwd"}), DefaultLimits,
-			"outside the archive"},
-		{"link loop", append(good, symlink("Good/cursors/a", "b"), symlink("Good/cursors/b", "a")), DefaultLimits,
-			"circle"},
-		{"folder link to its own folder", append(good, symlink("Good/cursors/up", "..")), DefaultLimits,
-			"folder it is in"},
 		{"device", append(good, member{name: "Good/dev", typ: tar.TypeChar}), DefaultLimits, "device"},
 		{"ELF program", append(good, file("Good/cursors/tool", "\x7fELF\x02\x01")), DefaultLimits, "a program"},
 		{"script by shebang", append(good, file("Good/setup", "#!/bin/sh\nrm -rf ~")), DefaultLimits, "a script"},
@@ -292,15 +282,57 @@ func TestInspectRefuses(t *testing.T) {
 			}
 		})
 	}
-	// A zip's symlink pointing out, and formats uas doesn't open.
-	if _, err := Inspect(writeZip(t, append(good, symlink("Good/cursors/x", "../../../etc/passwd"))),
-		DefaultLimits); !IsRefused(err) {
-		t.Errorf("zip with an escaping link: %v", err)
-	}
 	seven := filepath.Join(t.TempDir(), "x.7z")
 	os.WriteFile(seven, []byte("7z\xbc\xaf\x27\x1c rest"), 0o644)
 	if _, err := Inspect(seven, DefaultLimits); !IsRefused(err) || !strings.Contains(err.Error(), "7-Zip") {
 		t.Errorf("7z: %v", err)
+	}
+}
+
+// TestBadLinksSkipped checks that links leading nowhere in the archive are left out, and that nothing is
+// written for them or through them, while the rest of the theme installs.
+func TestBadLinksSkipped(t *testing.T) {
+	members := append(cursorTheme("Good"),
+		symlink("Good/cursors/out", "../../../../etc/passwd"),
+		symlink("Good/cursors/abs", "/etc/passwd"),
+		symlink("Good/cursors/dangling", "nothing"),
+		member{name: "Good/cursors/hardout", hardlink: "../etc/passwd"},
+		symlink("Good/cursors/a", "b"), symlink("Good/cursors/b", "a"), // a loop
+		symlink("Good/cursors/up", ".."),   // a folder it is in
+		symlink("Good/cursors/via", "out"), // a link to a skipped link
+		symlink("Good/icons", "/usr/share/icons"),
+	)
+	// Zip has no hard links.
+	zipped := slices.DeleteFunc(slices.Clone(members), func(m member) bool { return m.hardlink != "" })
+	for _, p := range []string{writeTar(t, members, false), writeZip(t, zipped)} {
+		c, err := Inspect(p, DefaultLimits)
+		if err != nil {
+			t.Fatal(p, err)
+		}
+		if want := map[bool]int{true: 8, false: 9}[strings.HasSuffix(p, ".zip")]; len(c.Skipped) != want {
+			t.Errorf("%s: Skipped = %v", p, c.Skipped)
+		}
+		dst := t.TempDir()
+		if _, err := Extract(p, catalog.KindCursorTheme, dst, DefaultLimits); err != nil {
+			t.Fatal(p, err)
+		}
+		var written []string
+		filepath.WalkDir(dst, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				rel, _ := filepath.Rel(dst, path)
+				written = append(written, rel)
+				if fi, _ := os.Lstat(path); fi.Mode()&os.ModeSymlink != 0 {
+					t.Errorf("%s: %s is a symbolic link", p, rel)
+				}
+			}
+			return nil
+		})
+		slices.Sort(written)
+		want := []string{"Good/cursors/default", "Good/cursors/hand1", "Good/cursors/hand2", "Good/cursors/left_ptr",
+			"Good/cursors/pointer", "Good/index.theme"}
+		if !slices.Equal(written, want) {
+			t.Errorf("%s: wrote %v, want %v", p, written, want)
+		}
 	}
 }
 

@@ -3,11 +3,12 @@
 // the caller made for it. The indexer uses it to keep archives that can't be installed out of the catalog,
 // and the client to install them.
 //
-// What it refuses:
+// What it refuses, and what it leaves out:
 //   - entries with absolute paths or paths that leave the archive ("../x"), and device files and pipes;
-//   - links (symbolic or hard) that point outside the archive, or at nothing in it. Themes use links a lot
-//     (a cursor theme names one cursor many ways), so a link to a file inside the archive is kept, but
-//     written as a hard link between the files this package wrote, never as a symbolic link;
+//   - symbolic links and hard links as such: none is ever written. Themes use links a lot (a cursor theme
+//     names one cursor many ways), so a link to a file or folder inside the archive becomes a hard link
+//     between files this package wrote (or a copy). A link that leads anywhere else (out of the archive, to
+//     an absolute path, to nothing) is left out, and so is what it pointed at;
 //   - programs and scripts anywhere in the archive: ELF files, files starting with "#!", and files named like
 //     scripts, libraries, launchers, QML or JavaScript (see forbidden). Nothing in an archive is ever run;
 //   - archives with more files or bytes than Limits allow;
@@ -32,6 +33,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
+
+// RulesVersion changes when Inspect accepts or refuses archives differently, so the indexer checks the
+// archives it refused before again. Version 2 leaves out links that lead nowhere instead of refusing.
+const RulesVersion = 2
 
 // RefusedError is an archive this package won't install, with why, in words for people.
 type RefusedError struct{ Reason string }

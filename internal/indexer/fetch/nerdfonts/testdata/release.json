@@ -1,0 +1,62 @@
+{
+ "url": "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/374244625",
+ "assets_url": "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/374244625/assets",
+ "upload_url": "https://uploads.github.com/repos/ryanoasis/nerd-fonts/releases/374244625/assets{?name,label}",
+ "html_url": "https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1",
+ "id": 374244625,
+ "node_id": "RE_kwDOAaTAks4WToUR",
+ "tag_name": "v3.5.1",
+ "target_commitish": "master",
+ "name": "v3.5.1",
+ "draft": false,
+ "immutable": false,
+ "prerelease": false,
+ "created_at": "2026-08-21T14:14:43Z",
+ "updated_at": "2026-08-21T16:28:11Z",
+ "published_at": "2026-08-21T15:21:46Z",
+ "assets": [
+  {
+   "name": "0xProto.tar.xz",
+   "size": 2275004,
+   "digest": "sha256:3f2d36e4fa8b3af2f97b14b57c5b0f57f4c1bda5a59533fb913a9ff3344db7ce",
+   "browser_download_url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/0xProto.tar.xz",
+   "download_count": 26808,
+   "content_type": "application/x-xz"
+  },
+  {
+   "name": "FontPatcher.zip",
+   "size": 3268407,
+   "digest": "sha256:42bcb32145499a35732274c7fc48deb434ad0d2e0e118f98527c1479c6fa251a",
+   "browser_download_url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/FontPatcher.zip",
+   "download_count": 8248,
+   "content_type": "application/zip"
+  },
+  {
+   "name": "JetBrainsMono.tar.xz",
+   "size": 7284244,
+   "digest": "sha256:04d5e8f903693f9dd13e16f867e994834e681eb3c72c0d337a770dcda09010cf",
+   "browser_download_url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz",
+   "download_count": 287289,
+   "content_type": "application/x-xz"
+  },
+  {
+   "name": "JetBrainsMono.zip",
+   "size": 133975870,
+   "digest": "sha256:fab782a66f7d3019da64f6572db9fc5d3a4bcb19f9fa13e2d8a62e3693d6396e",
+   "browser_download_url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.zip",
+   "download_count": 232389,
+   "content_type": "application/zip"
+  },
+  {
+   "name": "SourceCodePro.tar.xz",
+   "size": 3308312,
+   "digest": "sha256:50ead7bb7addce27cf4b55f4fffb669b5f1899fece675fad623a2a75a478c8c7",
+   "browser_download_url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/SourceCodePro.tar.xz",
+   "download_count": 32323,
+   "content_type": "application/x-xz"
+  }
+ ],
+ "tarball_url": "https://api.github.com/repos/ryanoasis/nerd-fonts/tarball/v3.5.1",
+ "zipball_url": "https://api.github.com/repos/ryanoasis/nerd-fonts/zipball/v3.5.1",
+ "body": "It was too hot, we need a bugfix release this time.\r\n\r\n### Bugs\r\n\r\n - Actually put in the new promised Devicons #2057\r\n - SpaceMono: Remove fi/fl ligs #2062\r\n - Flatten forgotten font subdirs\r\n\r\n**Full Changelog**: https://github.com/ryanoasis/nerd-fonts/compare/v3.5.0...v3.5.1\r\n\r\nFind the SHA check"
+}
