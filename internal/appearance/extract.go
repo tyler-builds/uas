@@ -51,7 +51,10 @@ func Extract(p string, kind catalog.Kind, dir string, lim Limits) ([]Theme, erro
 	if err := c.writeRaw(p, root, need, lim); err != nil {
 		return nil, err
 	}
-	m := &materializer{c: c, root: root, max: lim.MaxEntries * 2}
+	// Links to folders are written out in full, file by file: what is written can be several times what the
+	// archive holds. Papirus's 100,000 entries, whose variants link most of their folders to each other's and
+	// whose @2x folders link to the 1x ones, make about 890,000.
+	m := &materializer{c: c, root: root, max: lim.MaxEntries * 8}
 	for _, t := range themes {
 		if err := root.Mkdir(t.Name, 0o755); err != nil {
 			return nil, err

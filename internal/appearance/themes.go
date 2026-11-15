@@ -51,8 +51,9 @@ type Contents struct {
 	// Skipped are the links that are left out, with why: links that lead nowhere in the archive.
 	Skipped map[string]string
 
-	index map[string]entry // every entry by name
-	dirs  map[string]bool  // every folder, named or implied by an entry inside it
+	index  map[string]entry // every entry by name
+	sorted []string         // the entries' names, sorted; see within
+	dirs   map[string]bool  // every folder, named or implied by an entry inside it
 }
 
 // Of returns the archive's themes of kind.
@@ -217,12 +218,7 @@ func (c *Contents) findThemes(indexFiles map[string][]byte) error {
 
 // hasFiles reports whether a folder has a file or link in it.
 func (c *Contents) hasFiles(dir string) bool {
-	for name, e := range c.index {
-		if e.typ != typeDir && strings.HasPrefix(name, dir+"/") {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(c.within(dir), func(e entry) bool { return e.typ != typeDir })
 }
 
 // parseIndex reads an index.theme: the [Icon Theme] section's Name and Inherits, and whether it lists icon
@@ -312,14 +308,20 @@ func localPath(p string) bool {
 	return p != "." && p != "" && !strings.HasPrefix(p, "../") && p != ".." && !strings.HasPrefix(p, "/")
 }
 
-// within returns the entries under a folder, nearest first.
+// within returns the entries under a folder, by name.
 func (c *Contents) within(dir string) []entry {
-	var out []entry
-	for name, e := range c.index {
-		if strings.HasPrefix(name, dir+"/") {
-			out = append(out, e)
+	if c.sorted == nil {
+		c.sorted = make([]string, 0, len(c.index))
+		for name := range c.index {
+			c.sorted = append(c.sorted, name)
 		}
+		slices.Sort(c.sorted)
 	}
-	slices.SortFunc(out, func(a, b entry) int { return strings.Compare(a.name, b.name) })
+	// Names under a folder sort together.
+	prefix := dir + "/"
+	var out []entry
+	for i, _ := slices.BinarySearch(c.sorted, prefix); i < len(c.sorted) && strings.HasPrefix(c.sorted[i], prefix); i++ {
+		out = append(out, c.index[c.sorted[i]])
+	}
 	return out
 }
