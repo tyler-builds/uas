@@ -2,8 +2,8 @@
 // pling.com), through OpenDesktop's OCS API.
 //
 // The API lists a category's items most downloaded first, 100 a page, with each item's files. Only items with
-// at least MinDownloads are kept (in November 2026, 10,000 downloads kept about 400 icon themes and 260 cursor
-// themes). Each file is downloaded once, through the list's own download link, checked against the MD5 Pling
+// at least MinDownloads are kept, a lower floor for cursor themes, which are downloaded less: in November
+// 2026, 10,000 downloads kept about 300 icon themes and 3,000 about 300 cursor themes. Each file is downloaded once, through the list's own download link, checked against the MD5 Pling
 // publishes, and read with internal/appearance: its SHA-256 and the themes inside are pinned in the catalog,
 // and a file uas wouldn't install (a script inside, no theme, a layout it can't tell apart) is left out, with
 // the item if none of its files is left. What was found is kept on disk by item, file name and MD5, so a file
@@ -58,9 +58,10 @@ var Categories = []Category{{132, catalog.KindIconTheme}, {107, catalog.KindCurs
 
 // Defaults.
 const (
-	DefaultMinDownloads = 10_000
-	DefaultMaxFiles     = 30
-	DefaultMaxFileBytes = 200 << 20
+	DefaultMinDownloads       = 10_000
+	DefaultMinCursorDownloads = 3_000
+	DefaultMaxFiles           = 30
+	DefaultMaxFileBytes       = 200 << 20
 	// PinVersion changes when what is recorded per file changes, so files are read again.
 	PinVersion = 1
 )
@@ -74,8 +75,10 @@ type Fetcher struct {
 	API    string // API, or a test server
 	// CacheDir keeps what was found per file (pins/).
 	CacheDir string
-	// MinDownloads leaves out items downloaded fewer times; DefaultMinDownloads when zero.
-	MinDownloads int
+	// MinDownloads leaves out icon themes downloaded fewer times, and MinCursorDownloads cursor themes;
+	// DefaultMinDownloads and DefaultMinCursorDownloads when zero.
+	MinDownloads       int
+	MinCursorDownloads int
 	// MaxItems caps the items read per category (0: no cap), for development.
 	MaxItems int
 	// MaxFiles caps the files read per item; DefaultMaxFiles when zero. Some items carry a file per color.
@@ -175,10 +178,17 @@ type listPage struct {
 // list reads a category's items, most downloaded first, down to MinDownloads.
 func (f *Fetcher) list(ctx context.Context, cat Category) ([]item, error) {
 	api, minDL := f.API, f.MinDownloads
+	if cat.Kind == catalog.KindCursorTheme {
+		minDL = f.MinCursorDownloads
+	}
 	if api == "" {
 		api = API
 	}
-	if minDL == 0 {
+	switch {
+	case minDL > 0:
+	case cat.Kind == catalog.KindCursorTheme:
+		minDL = DefaultMinCursorDownloads
+	default:
 		minDL = DefaultMinDownloads
 	}
 	var out []item

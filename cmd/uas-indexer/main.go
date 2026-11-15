@@ -56,7 +56,9 @@ func main() {
 	editionsDir := flag.String("editions-dir", "", "also write one catalog per edition (kind of system) here;\n"+
 		"publishing writes them next to -out when this is empty")
 	plingMin := flag.Int("pling-min-downloads", pling.DefaultMinDownloads,
-		"list Pling themes downloaded at least this many times")
+		"list Pling icon themes downloaded at least this many times")
+	plingMinCursors := flag.Int("pling-min-cursor-downloads", pling.DefaultMinCursorDownloads,
+		"list Pling cursor themes downloaded at least this many times")
 	plingItems := flag.Int("pling-max-items", 0, "read at most this many Pling items per category (0: no cap)")
 	plingFiles := flag.Int("pling-max-files", pling.DefaultMaxFiles, "read at most this many files per Pling item")
 	plingPins := flag.Int("pling-pin-files", 400, "download at most this many new Pling files a run (0: no cap)")
@@ -168,11 +170,11 @@ func main() {
 	// sources, for less long (-appearance-cache-for), so each scheduled run pins more. Nerd Fonts' checksums come
 	// from GitHub, so it only reads one release.
 	available["pling"] = &fetch.Cached{Fetcher: &pling.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "pling"),
-		MinDownloads: *plingMin, MaxItems: *plingItems, MaxFiles: *plingFiles, PinCount: *plingPins,
+		MinDownloads: *plingMin, MinCursorDownloads: *plingMinCursors, MaxItems: *plingItems, MaxFiles: *plingFiles, PinCount: *plingPins,
 		PinBytes: *plingPinMB << 20, Log: log},
 		Dir: filepath.Join(*cache, "results"), For: *lookCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
-		Key: fmt.Sprintf("schema=%d v=1 pin=%d min=%d items=%d files=%d", catalog.SchemaVersion, pling.PinVersion,
-			*plingMin, *plingItems, *plingFiles)}
+		Key: fmt.Sprintf("schema=%d v=1 pin=%d min=%d/%d items=%d files=%d", catalog.SchemaVersion,
+			pling.PinVersion, *plingMin, *plingMinCursors, *plingItems, *plingFiles)}
 	available["google-fonts"] = &fetch.Cached{Fetcher: &googlefonts.Fetcher{Client: client,
 		Token: os.Getenv("GITHUB_TOKEN"), CacheDir: filepath.Join(*cache, "google-fonts"), PinBytes: *fontPinMB << 20,
 		MaxFamilies: *fontFamilies, Log: log},

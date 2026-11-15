@@ -236,7 +236,7 @@ func TestFetchBudgetAndFloor(t *testing.T) {
 	}
 	// A floor above Papirus and every cursor theme.
 	f = &Fetcher{Client: srv.Client(), API: srv.URL, CacheDir: cache, Every: time.Millisecond,
-		MinDownloads: 3_000_000}
+		MinDownloads: 3_000_000, MinCursorDownloads: 3_000_000}
 	ls, err = f.Fetch(context.Background())
 	if err != nil || len(ls) != 1 || ls[0].Ref != "1305251" {
 		t.Errorf("with a floor: %v, %v", ls, err)
