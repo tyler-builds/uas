@@ -6,6 +6,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,9 @@ import (
 	"github.com/tyler-builds/jamb/ui"
 	"github.com/tyler-builds/jamb/ui/uitest"
 
+	archives "github.com/tyler-builds/uas/internal/appearance"
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/appearance"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/github"
 	"github.com/tyler-builds/uas/internal/client/fromurl"
@@ -132,6 +135,20 @@ func TestShots(t *testing.T) {
 			a.search.Set(q)
 			a.goTo(view{page: pageSearch})
 		}, 520, "", 0},
+		// Fonts and themes, with nothing installed. A catalog from before them shows why there are none.
+		{"appearance-fonts", func(a *App) { a.goTo(view{page: pageAppearance}) }, 1000, "", 0},
+		{"appearance-icons", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookIcons) }, 1000, "", 0},
+		{"appearance-cursors", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookCursors) }, 1000,
+			"", 0},
+		{"look-icons", func(a *App) {
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookIcons)
+			a.openLook(catalog.AppearanceAppID(catalog.SourcePling, "1166289")) // Papirus
+		}, 1200, "", 0},
+		{"look-font", func(a *App) {
+			a.goTo(view{page: pageAppearance})
+			a.openLook(catalog.AppearanceAppID(catalog.SourceGoogleFonts, "inter"))
+		}, 1000, "", 0},
 	}
 	only := map[string]bool{}
 	for _, n := range strings.Split(os.Getenv("UAS_SHOTS_ONLY"), ",") {
@@ -148,6 +165,7 @@ func TestShots(t *testing.T) {
 				continue
 			}
 			s := &session.Session{Links: links, Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path,
+				Looks:    shotLooks(t),
 				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true, LibFUSE2: true}, Tools: ujust.Detect(),
 				SysApps: map[string]sysapps.App{"com.valvesoftware.Steam": {ID: "com.valvesoftware.Steam", Name: "Steam",
 					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
@@ -309,4 +327,15 @@ func shotWhatsNew(a *App, id string) *whatsNew {
 		w.update = func() {}
 	}
 	return w
+}
+
+// shotLooks installs fonts and themes into a temporary folder, with GNOME's settings faked.
+func shotLooks(t *testing.T) *appearance.Installer {
+	dir := t.TempDir()
+	gs := newFakeGNOME()
+	cache := filepath.Join(os.TempDir(), "uas-shot-fonts") // font previews, kept between runs
+	return &appearance.Installer{Data: filepath.Join(dir, "data"), Cache: cache,
+		State:  state.Store{Path: filepath.Join(dir, "state.json")},
+		Client: &http.Client{Timeout: time.Minute}, Runner: gs, Desktop: &appearance.GNOME{Runner: gs},
+		PlingAPI: appearance.PlingAPI, Limits: archives.DefaultLimits}
 }
