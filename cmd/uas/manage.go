@@ -55,6 +55,9 @@ func runInstall(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s is a GNOME extension, which GNOME Shell installs: run \"uas extensions install %s\"",
 			app.Name, app.Listings[0].Ref)
 	}
+	if app.Kind.Appearance() {
+		return fmt.Errorf("%s is a font or theme: run \"uas appearance install %s\"", app.Name, app.ID)
+	}
 	choice, err := e.Choose(app, catalog.SourceID(*source))
 	if err != nil {
 		return err

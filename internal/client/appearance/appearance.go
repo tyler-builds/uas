@@ -241,6 +241,14 @@ func (in *Installer) stage() (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	// What an install that was stopped half-way left behind.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > 24*time.Hour {
+				os.RemoveAll(filepath.Join(dir, e.Name()))
+			}
+		}
+	}
 	return os.MkdirTemp(dir, "install-")
 }
 
