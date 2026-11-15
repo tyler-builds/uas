@@ -69,11 +69,110 @@ type FileAppImage struct {
 	InstalledAt time.Time `json:"installed_at"`
 }
 
+// AppearanceInstall is a font family, icon theme or cursor theme uas installed for the user.
+type AppearanceInstall struct {
+	ID     string `json:"id"` // the catalog's ID for it, such as "pling:1411743"
+	Source string `json:"source"`
+	Ref    string `json:"ref"`
+	Kind   string `json:"kind"` // "font", "icon-theme" or "cursor-theme"
+	Name   string `json:"name"`
+	// Version is the catalog's version when it was installed, which may be empty.
+	Version string `json:"version,omitempty"`
+	// Asset is the file it came from, for a theme archive or a font archive.
+	Asset string `json:"asset,omitempty"`
+	// SHA256 is the SHA-256 of that file, or for a family of font files, the digest of their SHA-256s (see
+	// appearance.Digest). An update is a catalog listing whose file has another.
+	SHA256 string `json:"sha256"`
+	// Themes are the theme folders it put in ~/.local/share/icons, by name; Families the font families it
+	// installed.
+	Themes   []string `json:"themes,omitempty"`
+	Families []string `json:"families,omitempty"`
+	// Paths are what it wrote, absolute: the theme folders, or the folder of the font files.
+	Paths       []string  `json:"paths"`
+	InstalledAt time.Time `json:"installed_at"`
+}
+
+// SavedSetting is a desktop setting uas changed to use a font or theme, with the value it had before uas
+// first changed it, for Revert.
+type SavedSetting struct {
+	Desktop  string    `json:"desktop"` // "gnome" or "plasma"
+	Key      string    `json:"key"`     // "icon-theme", "cursor-theme", "font-name" and the like
+	Previous string    `json:"previous"`
+	Value    string    `json:"value"` // what uas set it to last
+	At       time.Time `json:"at"`
+}
+
 // State is everything recorded.
 type State struct {
-	GitHub    []GitHubInstall `json:"github"`
-	COPR      []COPRInstall   `json:"copr,omitempty"`
-	AppImages []FileAppImage  `json:"appimages,omitempty"`
+	GitHub     []GitHubInstall     `json:"github"`
+	COPR       []COPRInstall       `json:"copr,omitempty"`
+	AppImages  []FileAppImage      `json:"appimages,omitempty"`
+	Appearance []AppearanceInstall `json:"appearance,omitempty"`
+	Saved      []SavedSetting      `json:"saved_settings,omitempty"`
+}
+
+// FindAppearance returns the appearance install with a catalog ID.
+func (s *State) FindAppearance(id string) (AppearanceInstall, bool) {
+	for _, a := range s.Appearance {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return AppearanceInstall{}, false
+}
+
+// PutAppearance adds or replaces the appearance install with a.ID.
+func (s *State) PutAppearance(a AppearanceInstall) {
+	for i := range s.Appearance {
+		if s.Appearance[i].ID == a.ID {
+			s.Appearance[i] = a
+			return
+		}
+	}
+	s.Appearance = append(s.Appearance, a)
+}
+
+// DeleteAppearance removes the appearance install with a catalog ID.
+func (s *State) DeleteAppearance(id string) {
+	out := s.Appearance[:0]
+	for _, a := range s.Appearance {
+		if a.ID != id {
+			out = append(out, a)
+		}
+	}
+	s.Appearance = out
+}
+
+// FindSaved returns the saved setting of a desktop's key.
+func (s *State) FindSaved(desktop, key string) (SavedSetting, bool) {
+	for _, v := range s.Saved {
+		if v.Desktop == desktop && v.Key == key {
+			return v, true
+		}
+	}
+	return SavedSetting{}, false
+}
+
+// PutSaved adds or replaces the saved setting of v.Desktop and v.Key.
+func (s *State) PutSaved(v SavedSetting) {
+	for i := range s.Saved {
+		if s.Saved[i].Desktop == v.Desktop && s.Saved[i].Key == v.Key {
+			s.Saved[i] = v
+			return
+		}
+	}
+	s.Saved = append(s.Saved, v)
+}
+
+// DeleteSaved removes the saved setting of a desktop's key.
+func (s *State) DeleteSaved(desktop, key string) {
+	out := s.Saved[:0]
+	for _, v := range s.Saved {
+		if v.Desktop != desktop || v.Key != key {
+			out = append(out, v)
+		}
+	}
+	s.Saved = out
 }
 
 // FindAppImage returns the added AppImage with id.

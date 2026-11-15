@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/appearance"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/backend/copr"
 	"github.com/tyler-builds/uas/internal/client/backend/flatpak"
@@ -53,6 +54,10 @@ type Session struct {
 	// Extensions manages GNOME Shell extensions, in a GNOME session; nil elsewhere. Extensions aren't apps:
 	// the Shell installs and runs them, so they have no backend and aren't in Installed.
 	Extensions *shellext.Manager
+	// Looks installs fonts and icon and cursor themes, and uses them on the desktop. Like extensions they
+	// aren't apps, so they have no backend and aren't in Installed. Nil only when the home folder can't be
+	// found.
+	Looks *appearance.Installer
 	// SysApps are the apps that came with the system, by AppStream ID (see SystemApps). Nil reads them on
 	// first use; tests set it.
 	SysApps map[string]sysapps.App
@@ -127,6 +132,11 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		CatalogPath:  catalogPath,
 		Tools:        ujust.Detect(),
 		Extensions:   shellext.Detect(),
+	}
+	if looks, err := appearance.New(run.Exec{}, appearance.DetectDesktop(s.Platform.Desktop, run.Exec{})); err == nil {
+		s.Looks = looks
+		// Flatpak apps see the user's fonts only if the folder is there when they start.
+		_ = looks.EnsureFontsDir()
 	}
 	p := s.Platform
 	gh, ghErr := s.releaseBackend(catalog.SourceGitHub)
