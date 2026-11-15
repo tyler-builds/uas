@@ -38,6 +38,11 @@ COPR packages, searched and installed from one place.
 - **GNOME extensions.** On GNOME, an Extensions page lists every extension on the system, whichever app
   installed it, with its switch, settings and removal, and searches the ones extensions.gnome.org has for
   your version of GNOME. GNOME Shell does the installing, and its extension updates show under Updates.
+- **Fonts, icon themes and cursor themes.** An Appearance page browses fonts from Google Fonts and Nerd Fonts
+  (with previews drawn in the font itself) and icon and cursor themes from Pling (gnome-look.org), installs
+  them for your account with no root, and on GNOME (icons and cursors on KDE Plasma too) uses them in one
+  click, with Revert. Theme archives are checked against a checksum the catalog pins, and uas installs only
+  images and theme files from them, never scripts. Updates show under Updates.
 - **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
   Waydroid, audio tweaks…) are listed by group and run in a terminal window.
 - **Update notifications.** Optionally, uas checks once a day and tells you when updates are ready. It never
@@ -111,6 +116,7 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | Snap Store | `snap` with snapd running | Any distro with snapd |
 | COPR | `rpm-ostree`, or `dnf` and `pkexec` | Fedora Atomic (layered), or package-based Fedora |
 | GNOME Shell extensions | A GNOME session | GNOME 45 and newer |
+| Fonts, icon and cursor themes | — (Use and Revert: GNOME, or KDE Plasma for icons and cursors) | Any distro; installed only on other desktops |
 
 The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
@@ -195,6 +201,7 @@ uas install https://github.com/owner/app   # an app that isn't in the catalog
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
 | `migrate [-n] [-y] [-all]` | Hand AppImages that other tools or you set up over to uas |
 | `extensions [list \| search <words> \| install\|remove\|enable\|disable\|settings <uuid>]` | List and manage GNOME Shell extensions |
+| `appearance [list \| search -kind fonts\|icons\|cursors <words> \| info\|install\|remove <id> \| use\|revert <setting> \| themes \| updates]` | Install, use and remove fonts and icon and cursor themes |
 | `gui [--page <page>]` | Open the desktop app |
 | `self-update` | Update uas to the latest signed release |
 | `self-install` / `self-uninstall` | Install uas for you, or remove it |
@@ -232,6 +239,16 @@ whether its code is safe. An app installed from a link isn't in the catalog at a
 uas still installs only its AppImage or Flatpak bundle, checked against GitHub's checksum; it never runs
 install scripts from the project.
 
+**Is installing themes from Pling safe?**<br>
+Pling (gnome-look.org) is open to anyone and nobody reviews uploads, so uas is strict about what it installs
+from there. When it builds the catalog it downloads each theme once, records its SHA-256 and the themes
+inside, and leaves out any archive with a program, script, library, launcher, QML or JavaScript in it, or
+whose themes it can't tell apart. On your computer it asks Pling for a fresh download link, refuses a file
+whose checksum differs from the catalog's, unpacks only into a new folder, never writes a link (links between
+a theme's own files become plain files), and runs nothing from the archive. Pling themes get a trust score
+like GitHub apps, lower by design. Fonts come from Google's curated Google Fonts repository or the Nerd Fonts
+releases on GitHub.
+
 **Does uas collect data?**<br>
 No. It downloads the catalog and app icons, and talks to the sources you install from.
 
@@ -240,7 +257,7 @@ No. It downloads the catalog and app icons, and talks to the sources you install
 ```
  Flathub · Homebrew · Snap · GitHub · Codeberg
  Fedora · Debian · Ubuntu · Arch · COPR
- extensions.gnome.org
+ extensions.gnome.org · Pling · Google Fonts · Nerd Fonts
                     │
             uas-indexer (every 6h)        merge, rank, score, sign
                     │
