@@ -5,9 +5,10 @@
 // at least MinDownloads are kept, a lower floor for cursor themes, which are downloaded less: in November
 // 2026, 10,000 downloads kept about 300 icon themes and 3,000 about 300 cursor themes. Each file is downloaded once, through the list's own download link, checked against the MD5 Pling
 // publishes, and read with internal/appearance: its SHA-256 and the themes inside are pinned in the catalog,
-// and a file uas wouldn't install (a script inside, no theme, a layout it can't tell apart) is left out, with
-// the item if none of its files is left. What was found is kept on disk by item, file name and MD5, so a file
-// is downloaded again only when its author replaces it. Download links expire and can't be reused much, so
+// and a file uas wouldn't install (a program inside, no theme, a layout it can't tell apart) is left out, with
+// the item if none of its files is left. Scripts and the like inside a file are left out of it, not the file
+// (see appearance), and counted on its asset. What was found is kept on disk by item, file name and MD5, so a
+// file is downloaded again only when its author replaces it. Download links expire and can't be reused much, so
 // the catalog holds none; the client asks Pling for a fresh one at install time.
 //
 // Pling publishes no rate limit; requests (pages and downloads alike) are spaced a second apart.
@@ -87,6 +88,11 @@ type Fetcher struct {
 	MaxFileBytes int64
 	// PinCount and PinBytes cap the files downloaded in one run (0: no cap). An item with a file not yet
 	// downloaded is left out until a later run has read them all.
+	//
+	// Each category gets a fair share first, so that icon themes, which come first and are much larger, don't
+	// spend it all before any cursor theme is read: of what is left, a category may spend its part (half for
+	// icon themes, all that is left for cursor themes, the last). What the shares leave then goes to the items
+	// still waiting, in the same order.
 	PinCount int
 	PinBytes int64
 	Every    time.Duration // the pause between requests; every when zero
@@ -98,9 +104,20 @@ type Fetcher struct {
 	next      time.Time
 	pins      int
 	pinBytes  int64
+	capPins   int   // what f.pins may reach in this part of the run (0: no cap)
+	capBytes  int64 // and f.pinBytes
 	refusals  map[string]int
 	postponed int
 }
+
+// outcome is what became of an item.
+type outcome int
+
+const (
+	listed    outcome = iota
+	leftOut           // no file of it can be installed
+	postponed         // a file of it wasn't downloaded yet for the run's budget
+)
 
 // Source implements fetch.Fetcher.
 func (f *Fetcher) Source() catalog.SourceID { return catalog.SourcePling }
@@ -108,20 +125,43 @@ func (f *Fetcher) Source() catalog.SourceID { return catalog.SourcePling }
 // Fetch implements fetch.Fetcher.
 func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	f.pins, f.pinBytes, f.postponed, f.refusals = 0, 0, 0, map[string]int{}
+	type waiting struct {
+		it   item
+		kind catalog.Kind
+	}
 	var out []catalog.Listing
-	for _, cat := range Categories {
+	var later []waiting
+	for i, cat := range Categories {
 		items, err := f.list(ctx, cat)
 		if err != nil {
 			return nil, fmt.Errorf("pling: category %d: %w", cat.ID, err)
 		}
+		f.share(len(Categories) - i)
 		for _, it := range items {
-			l, ok := f.listing(ctx, it, cat.Kind)
+			l, res := f.listing(ctx, it, cat.Kind)
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if ok {
+			switch res {
+			case listed:
 				out = append(out, l)
+			case postponed:
+				later = append(later, waiting{it, cat.Kind})
 			}
+		}
+	}
+	// What the shares left goes to the items still waiting, most downloaded first within each category.
+	f.capPins, f.capBytes = f.PinCount, f.PinBytes
+	for _, w := range later {
+		l, res := f.listing(ctx, w.it, w.kind)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		switch res {
+		case listed:
+			out = append(out, l)
+		case postponed:
+			f.postponed++
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
@@ -134,6 +174,20 @@ func (f *Fetcher) Fetch(ctx context.Context) ([]catalog.Listing, error) {
 	}
 	return out, nil
 }
+
+// share sets the caps for the next category, of left categories still to read: an equal part of what the
+// run's budget has left.
+func (f *Fetcher) share(left int) {
+	f.capPins, f.capBytes = 0, 0
+	if f.PinCount > 0 {
+		f.capPins = f.pins + ceilDiv(max(f.PinCount-f.pins, 0), left)
+	}
+	if f.PinBytes > 0 {
+		f.capBytes = f.pinBytes + ceilDiv(max(f.PinBytes-f.pinBytes, 0), int64(left))
+	}
+}
+
+func ceilDiv[T int | int64](a, b T) T { return (a + b - 1) / b }
 
 // item is one entry of a list: its fixed fields, and its numbered download fields by name.
 type item struct {
@@ -305,9 +359,9 @@ func (fl file) archive() bool {
 	return false
 }
 
-// listing makes a listing of an item, pinning its files; ok is false when no file is kept, or one wasn't
-// downloaded yet for the run's budget.
-func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (catalog.Listing, bool) {
+// listing makes a listing of an item, pinning its files. It is listed when a file of it can be installed;
+// it is postponed, with nothing recorded, when a file wasn't downloaded yet for the run's budget.
+func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (catalog.Listing, outcome) {
 	maxFiles := f.MaxFiles
 	if maxFiles == 0 {
 		maxFiles = DefaultMaxFiles
@@ -317,9 +371,11 @@ func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (cata
 		maxBytes = DefaultMaxFileBytes
 	}
 	if it.Name == "" {
-		return catalog.Listing{}, false
+		return catalog.Listing{}, leftOut
 	}
 	var assets []catalog.Asset
+	type refusal struct{ file, why string }
+	var refusals []refusal
 	seen := map[string]bool{}
 	tried := 0
 	for _, fl := range it.Files {
@@ -327,7 +383,7 @@ func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (cata
 			continue
 		}
 		if fl.SizeKiB*1024 > maxBytes {
-			f.refused("larger than the size cap")
+			refusals = append(refusals, refusal{fl.Name, "larger than the size cap"})
 			continue
 		}
 		if tried++; tried > maxFiles {
@@ -336,14 +392,10 @@ func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (cata
 		seen[fl.MD5] = true
 		p, ok := f.pin(ctx, it, fl)
 		if !ok {
-			f.postponed++
-			return catalog.Listing{}, false // not read yet: a later run lists it whole
+			return catalog.Listing{}, postponed // not read yet: a later pass or run lists it whole
 		}
 		if p.Problem != "" {
-			f.refused(p.Problem)
-			if f.Log != nil {
-				f.Log.Debug("pling file left out", "item", it.ID, "name", it.Name, "file", fl.Name, "why", p.Problem)
-			}
+			refusals = append(refusals, refusal{fl.Name, p.Problem})
 			continue
 		}
 		var themes []string
@@ -353,14 +405,31 @@ func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (cata
 			}
 		}
 		if len(themes) == 0 {
-			f.refused("no " + kindWord(kind) + " inside")
+			refusals = append(refusals, refusal{fl.Name, "no " + kindWord(kind) + " inside"})
 			continue
 		}
 		assets = append(assets, catalog.Asset{Kind: catalog.AssetTheme, Name: fl.Name, Size: p.Size,
-			SHA256: p.SHA256, Slot: fl.Slot, MD5: fl.MD5, Themes: themes})
+			SHA256: p.SHA256, Slot: fl.Slot, MD5: fl.MD5, Themes: themes, LeftOut: p.LeftOut})
+	}
+	// Each refusal is logged with the item, so that a theme missing from the catalog can be traced from the
+	// run's log alone.
+	for _, r := range refusals {
+		f.refused(r.why)
+		if f.Log != nil {
+			f.Log.Info("pling file refused", "item", it.ID, "name", it.Name, "kind", kind, "file", r.file,
+				"why", r.why)
+		}
 	}
 	if len(assets) == 0 {
-		return catalog.Listing{}, false
+		if f.Log != nil {
+			why := "every file refused"
+			if len(refusals) == 0 {
+				why = "no file uas can read (links to web pages, other formats)"
+			}
+			f.Log.Info("pling item left out", "item", it.ID, "name", it.Name, "kind", kind,
+				"downloads", it.Downloads, "why", why)
+		}
+		return catalog.Listing{}, leftOut
 	}
 	now := time.Now()
 	if f.Now != nil {
@@ -392,7 +461,7 @@ func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (cata
 			l.Keywords = append(l.Keywords, t)
 		}
 	}
-	return l, true
+	return l, listed
 }
 
 func kindWord(k catalog.Kind) string {
@@ -448,6 +517,8 @@ type pinned struct {
 	SHA256 string             `json:"sha256,omitempty"`
 	Size   int64              `json:"size,omitempty"`
 	Themes []appearance.Theme `json:"themes,omitempty"`
+	// LeftOut counts the files inside that could be run, which uas leaves out (appearance.Contents.LeftOut).
+	LeftOut int `json:"left_out,omitempty"`
 	// Problem is why the file is left out: a refusal, which stands until the file changes, or a download
 	// that failed, tried again after a day.
 	Problem string `json:"problem,omitempty"`
@@ -473,14 +544,18 @@ func (f *Fetcher) pin(ctx context.Context, it item, fl file) (pinned, bool) {
 		os.Chtimes(cache, now, now) // in use: keep it from cache pruning
 		return p, true
 	}
-	if (f.PinCount > 0 && f.pins >= f.PinCount) || (f.PinBytes > 0 && f.pinBytes+fl.SizeKiB*1024 > f.PinBytes) {
+	if (f.capPins > 0 && f.pins >= f.capPins) || (f.capBytes > 0 && f.pinBytes+fl.SizeKiB*1024 > f.capBytes) {
 		return pinned{}, false
 	}
 	f.pins++
 	f.pinBytes += fl.SizeKiB * 1024
-	p = f.download(ctx, fl)
+	p, left := f.download(ctx, fl)
 	if ctx.Err() != nil {
 		return p, true
+	}
+	if len(left) > 0 && f.Log != nil {
+		f.Log.Info("pling file read, files that could run left out", "item", it.ID, "name", it.Name,
+			"file", fl.Name, "left_out", len(left), "first", left[:min(len(left), 5)])
 	}
 	p.At, p.Rules = now, appearance.RulesVersion
 	if raw, err := json.Marshal(p); err == nil && os.MkdirAll(filepath.Dir(cache), 0o755) == nil {
@@ -489,46 +564,47 @@ func (f *Fetcher) pin(ctx context.Context, it item, fl file) (pinned, bool) {
 	return p, true
 }
 
-// download fetches a file into a fresh temporary folder, checks its MD5, hashes it and reads it.
-func (f *Fetcher) download(ctx context.Context, fl file) pinned {
+// download fetches a file into a fresh temporary folder, checks its MD5, hashes it and reads it. It also
+// returns the files inside that are left out, sorted.
+func (f *Fetcher) download(ctx context.Context, fl file) (pinned, []string) {
 	maxBytes := f.MaxFileBytes
 	if maxBytes == 0 {
 		maxBytes = DefaultMaxFileBytes
 	}
 	if !strings.HasPrefix(fl.Link, "https://") && !strings.HasPrefix(fl.Link, "http://") {
-		return pinned{Problem: "no download link"}
+		return pinned{Problem: "no download link"}, nil
 	}
 	dir, err := os.MkdirTemp("", "uas-pling-*")
 	if err != nil {
-		return pinned{Problem: err.Error()}
+		return pinned{Problem: err.Error()}, nil
 	}
 	defer os.RemoveAll(dir)
 	tmp := filepath.Join(dir, "download")
 	out, err := os.Create(tmp)
 	if err != nil {
-		return pinned{Problem: err.Error()}
+		return pinned{Problem: err.Error()}, nil
 	}
 	if err := f.wait(ctx); err != nil {
 		out.Close()
-		return pinned{Problem: err.Error()}
+		return pinned{Problem: err.Error()}, nil
 	}
 	// Pling's links aren't URL-encoded: a file name may hold a raw space.
 	link := strings.ReplaceAll(fl.Link, " ", "%20")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
 		out.Close()
-		return pinned{Problem: err.Error()}
+		return pinned{Problem: err.Error()}, nil
 	}
 	req.Header.Set("User-Agent", fetch.UserAgent)
 	resp, err := f.Client.Do(req)
 	if err != nil {
 		out.Close()
-		return pinned{Problem: err.Error()}
+		return pinned{Problem: err.Error()}, nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		out.Close()
-		return pinned{Problem: "download: " + resp.Status}
+		return pinned{Problem: "download: " + resp.Status}, nil
 	}
 	sh, mh := sha256.New(), md5.New()
 	n, err := io.Copy(io.MultiWriter(out, sh, mh), io.LimitReader(resp.Body, maxBytes+1))
@@ -537,11 +613,11 @@ func (f *Fetcher) download(ctx context.Context, fl file) pinned {
 	}
 	switch {
 	case err != nil:
-		return pinned{Problem: "download: " + err.Error()}
+		return pinned{Problem: "download: " + err.Error()}, nil
 	case n > maxBytes:
-		return pinned{Problem: "larger than the size cap", Refused: true}
+		return pinned{Problem: "larger than the size cap", Refused: true}, nil
 	case hex.EncodeToString(mh.Sum(nil)) != fl.MD5:
-		return pinned{Problem: "download: the file doesn't match Pling's MD5"}
+		return pinned{Problem: "download: the file doesn't match Pling's MD5"}, nil
 	}
 	p := pinned{SHA256: hex.EncodeToString(sh.Sum(nil)), Size: n}
 	lim := f.Limits
@@ -550,10 +626,15 @@ func (f *Fetcher) download(ctx context.Context, fl file) pinned {
 	}
 	c, err := appearance.Inspect(tmp, lim)
 	if err != nil {
-		return pinned{Problem: err.Error(), Refused: appearance.IsRefused(err)}
+		return pinned{Problem: err.Error(), Refused: appearance.IsRefused(err)}, nil
 	}
-	p.Themes = c.Themes
-	return p
+	p.Themes, p.LeftOut = c.Themes, len(c.LeftOut)
+	left := make([]string, 0, len(c.LeftOut))
+	for name := range c.LeftOut {
+		left = append(left, name)
+	}
+	sort.Strings(left)
+	return p, left
 }
 
 // wait spaces requests.

@@ -48,8 +48,12 @@ type Contents struct {
 	Themes  []Theme
 	Entries int
 	Bytes   int64
-	// Skipped are the links that are left out, with why: links that lead nowhere in the archive.
+	// Skipped are the links that are left out, with why: links that lead nowhere in the archive, or to a file
+	// in LeftOut.
 	Skipped map[string]string
+	// LeftOut are the files and links left out because they could be run, with why: scripts, launchers,
+	// build scripts and archives inside the archive (see forbidden). None is ever written.
+	LeftOut map[string]string
 
 	index  map[string]entry // every entry by name
 	sorted []string         // the entries' names, sorted; see within
@@ -84,7 +88,7 @@ var reservedThemes = map[string]bool{"default": true, "hicolor": true, "locolor"
 // or the themes can't be told apart cleanly: one inside another, two of the same name, a theme with no
 // folder of its own, or a name no desktop would take.
 func Inspect(p string, lim Limits) (*Contents, error) {
-	c := &Contents{index: map[string]entry{}, dirs: map[string]bool{}}
+	c := &Contents{LeftOut: map[string]string{}, index: map[string]entry{}, dirs: map[string]bool{}}
 	indexFiles := map[string][]byte{} // the index.theme files, by folder
 	err := walk(p, func(e entry, r io.Reader) error {
 		c.Entries++
@@ -97,41 +101,53 @@ func Inspect(p string, lim Limits) (*Contents, error) {
 			}
 			return refuse("%q is in it twice", e.name)
 		}
-		c.index[e.name] = e
-		for d := path.Dir(e.name); d != "."; d = path.Dir(d) {
-			c.dirs[d] = true
+		if _, ok := c.LeftOut[e.name]; ok {
+			return refuse("%q is in it twice", e.name)
 		}
+		var head []byte
 		switch e.typ {
-		case typeDir:
-			c.dirs[e.name] = true
-			return nil
 		case typeSymlink, typeHardlink:
 			if e.link == "" {
 				return refuse("%q is a link to nothing", e.name)
 			}
-			if why := forbidden(e.name, nil); why != "" {
+		case typeFile:
+			if e.size > lim.MaxFileBytes {
+				return refuse("%q is larger than %s", e.name, size(lim.MaxFileBytes))
+			}
+			c.Bytes += e.size
+			if c.Bytes > lim.MaxBytes {
+				return refuse("it unpacks to more than %s", size(lim.MaxBytes))
+			}
+			head = make([]byte, 4)
+			n, _ := io.ReadFull(r, head)
+			head = head[:n:n]
+		}
+		if e.typ != typeDir {
+			// A file left out is kept out of the index altogether, so nothing that follows (links that lead
+			// to it, folders written whole, the themes found) can see it, let alone write it.
+			if why, refuses := forbidden(e.name, head); refuses || (why != "" && required(e.name)) {
 				return refuse("it contains %s", why)
+			} else if why != "" {
+				c.LeftOut[e.name] = why
+				return nil
+			}
+		}
+		c.index[e.name] = e
+		for d := path.Dir(e.name); d != "."; d = path.Dir(d) {
+			c.dirs[d] = true
+		}
+		if e.typ != typeFile {
+			if e.typ == typeDir {
+				c.dirs[e.name] = true
 			}
 			return nil
-		}
-		if e.size > lim.MaxFileBytes {
-			return refuse("%q is larger than %s", e.name, size(lim.MaxFileBytes))
-		}
-		c.Bytes += e.size
-		if c.Bytes > lim.MaxBytes {
-			return refuse("it unpacks to more than %s", size(lim.MaxBytes))
-		}
-		head := make([]byte, 4)
-		n, _ := io.ReadFull(r, head)
-		if why := forbidden(e.name, head[:n]); why != "" {
-			return refuse("it contains %s", why)
 		}
 		if path.Base(e.name) == "index.theme" && e.size <= 256<<10 {
 			rest, err := io.ReadAll(io.LimitReader(r, 256<<10))
 			if err != nil {
 				return refuse("the archive is damaged: %v", err)
 			}
-			indexFiles[path.Dir(e.name)] = append(head[:n:n], rest...)
+			indexFiles[path.Dir(e.name)] = append(head, rest...)
 		}
 		return nil
 	})
@@ -157,6 +173,13 @@ func Inspect(p string, lim Limits) (*Contents, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// required reports whether an archive path is one a theme can't do without, which is never left out: an
+// index.theme, or a file in a cursors folder. One that looks runnable refuses the archive instead, so a theme
+// is never listed or installed without what makes it a theme.
+func required(name string) bool {
+	return path.Base(name) == "index.theme" || path.Base(path.Dir(name)) == "cursors"
 }
 
 // findThemes finds the archive's themes, refusing a layout that isn't clean.
@@ -188,6 +211,12 @@ func (c *Contents) findThemes(indexFiles map[string][]byte) error {
 		}
 		theme(parent).Cursors = true
 	}
+	// A folder with an index.theme and a cursors folder with nothing written in it is no theme.
+	for dir, t := range candidates {
+		if !t.Icons && !t.Cursors {
+			delete(candidates, dir)
+		}
+	}
 	if len(candidates) == 0 {
 		return refuse("it holds no icon or cursor theme: no folder has an index.theme for icons or a cursors folder")
 	}
@@ -216,9 +245,13 @@ func (c *Contents) findThemes(indexFiles map[string][]byte) error {
 	return nil
 }
 
-// hasFiles reports whether a folder has a file or link in it.
+// hasFiles reports whether a folder has a file or link in it that is written: a cursors folder of links
+// that are all left out makes no cursor theme.
 func (c *Contents) hasFiles(dir string) bool {
-	return slices.ContainsFunc(c.within(dir), func(e entry) bool { return e.typ != typeDir })
+	return slices.ContainsFunc(c.within(dir), func(e entry) bool {
+		_, skipped := c.Skipped[e.name]
+		return e.typ != typeDir && !skipped
+	})
 }
 
 // parseIndex reads an index.theme: the [Icon Theme] section's Name and Inherits, and whether it lists icon
@@ -262,13 +295,16 @@ func join(dir, name string) string {
 }
 
 // resolve follows a link (and links to links) to the file or folder it leads to, by archive path. It refuses
-// a link that leads outside the archive, to nothing, or round in a circle.
+// a link that leads outside the archive, to nothing, to a file left out, or round in a circle.
 func (c *Contents) resolve(name string, depth int) (string, error) {
 	if depth > 40 {
 		return "", refuse("%q is a link that goes round in a circle", name)
 	}
 	e, ok := c.index[name]
 	if !ok {
+		if _, out := c.LeftOut[name]; out {
+			return "", refuse("a link in it leads to %q, which is left out", name)
+		}
 		if c.dirs[name] {
 			return name, nil
 		}

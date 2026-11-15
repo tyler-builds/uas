@@ -242,10 +242,12 @@ install scripts from the project.
 **Is installing themes from Pling safe?**<br>
 Pling (gnome-look.org) is open to anyone and nobody reviews uploads, so uas is strict about what it installs
 from there. When it builds the catalog it downloads each theme once, records its SHA-256 and the themes
-inside, and leaves out any archive with a program, script, library, launcher, QML or JavaScript in it, or
-whose themes it can't tell apart. On your computer it asks Pling for a fresh download link, refuses a file
-whose checksum differs from the catalog's, unpacks only into a new folder, never writes a link (links between
-a theme's own files become plain files), and runs nothing from the archive. Pling themes get a trust score
+inside, and leaves out any archive with a compiled program or library in it, or whose themes it can't tell
+apart. Scripts, launchers, QML, JavaScript and archives inside an archive (many themes carry a helper script)
+are skipped: the theme is listed, and those files are never written to disk, by the indexer or on your
+computer. On your computer it asks Pling for a fresh download link, refuses a file whose checksum differs
+from the catalog's, unpacks only into a new folder, never writes a link (links between a theme's own files
+become plain files), and runs nothing from the archive. Pling themes get a trust score
 like GitHub apps, lower by design. Fonts come from Google's curated Google Fonts repository or the Nerd Fonts
 releases on GitHub.
 

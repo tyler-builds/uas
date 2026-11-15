@@ -9,8 +9,12 @@
 //     names one cursor many ways), so a link to a file or folder inside the archive becomes a hard link
 //     between files this package wrote (or a copy). A link that leads anywhere else (out of the archive, to
 //     an absolute path, to nothing) is left out, and so is what it pointed at;
-//   - programs and scripts anywhere in the archive: ELF files, files starting with "#!", and files named like
-//     scripts, libraries, launchers, QML or JavaScript (see forbidden). Nothing in an archive is ever run;
+//   - files that could be run are never written. Scripts (files starting with "#!" and files named like
+//     scripts), launchers, QML, JavaScript, build scripts and archives inside the archive are left out, and
+//     the rest of the archive installs: many themes carry a helper script, such as one that rebuilds the icon
+//     cache. Compiled programs and libraries (ELF files, and files named like shared libraries) refuse the
+//     whole archive, since a theme has no use for them. A theme's index.theme and its cursors are never
+//     left out: one that looks runnable refuses the archive. See forbidden. Nothing in an archive is ever run;
 //   - archives with more files or bytes than Limits allow;
 //   - archives whose themes can't be told apart cleanly (see Inspect).
 package appearance
@@ -35,8 +39,9 @@ import (
 )
 
 // RulesVersion changes when Inspect accepts or refuses archives differently, so the indexer checks the
-// archives it refused before again. Version 2 leaves out links that lead nowhere instead of refusing.
-const RulesVersion = 2
+// archives it refused before again. Version 2 leaves out links that lead nowhere instead of refusing. Version
+// 3 leaves out scripts, launchers and nested archives instead of refusing.
+const RulesVersion = 3
 
 // RefusedError is an archive this package won't install, with why, in words for people.
 type RefusedError struct{ Reason string }
@@ -242,7 +247,7 @@ func cleanName(name string, dir bool) (string, error) {
 }
 
 // forbiddenExt are file extensions of programs, scripts, libraries, launchers and plugins. A theme or a font
-// needs none of them, and refusing them keeps anything runnable off the disk.
+// needs none of them; none is ever written.
 var forbiddenExt = map[string]bool{
 	".sh": true, ".bash": true, ".zsh": true, ".fish": true, ".csh": true, ".ksh": true, ".py": true,
 	".pyc": true, ".pl": true, ".pm": true, ".rb": true, ".php": true, ".lua": true, ".tcl": true,
@@ -261,26 +266,35 @@ var forbiddenNames = map[string]bool{
 	"configure": true,
 }
 
-// forbidden says why a file can't be in an archive, from its name and first bytes, or "".
-func forbidden(name string, head []byte) string {
+// forbidden says why a file can't be written, from its name and first bytes, or "" when it can. refuses is
+// true when the file refuses the whole archive rather than being left out.
+//
+// Leaving a file out is as safe as refusing the archive: either way nothing runnable reaches the disk, since
+// a left-out file is never written and links that lead to it are left out too. Scripts, launchers, build
+// scripts and nested archives are left out, because themes often carry one (a script to rebuild the icon
+// cache, a .desktop file, the theme's own source archive) and refusing the theme for it keeps out well-known
+// themes for nothing. Compiled code refuses the archive: an ELF program or a shared library has no place in
+// a theme, can't be read the way a script can, and is a sign the archive is something other than what it
+// says. No theme in the first indexing run carried one.
+func forbidden(name string, head []byte) (why string, refuses bool) {
 	base := strings.ToLower(path.Base(name))
 	ext := path.Ext(base)
 	switch {
+	case bytes.HasPrefix(head, []byte("\x7fELF")):
+		return "a program (" + name + ")", true
+	case ext == ".so" || strings.Contains(base, ".so."):
+		return "a library (" + name + ")", true
 	case forbiddenExt[ext]:
 		if isArchiveExt(ext) {
-			return "another archive inside it (" + name + "), which uas doesn't open"
+			return "another archive inside it (" + name + "), which uas doesn't open", false
 		}
-		return "a program or script (" + name + ")"
-	case strings.Contains(base, ".so."):
-		return "a library (" + name + ")"
+		return "a program or script (" + name + ")", false
 	case forbiddenNames[base]:
-		return "a build or install script (" + name + ")"
-	case bytes.HasPrefix(head, []byte("\x7fELF")):
-		return "a program (" + name + ")"
+		return "a build or install script (" + name + ")", false
 	case bytes.HasPrefix(head, []byte("#!")):
-		return "a script (" + name + ")"
+		return "a script (" + name + ")", false
 	}
-	return ""
+	return "", false
 }
 
 func isArchiveExt(ext string) bool {

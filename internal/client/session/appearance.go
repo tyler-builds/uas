@@ -98,9 +98,18 @@ func (s *Session) UpdateLook(ctx context.Context, u appearance.Update, progress 
 func (s *Session) LookNotes(l catalog.Listing) []string {
 	switch l.Source {
 	case catalog.SourcePling:
-		return []string{"Downloads from Pling (gnome-look.org) and installs into ~/.local/share/icons for your " +
+		notes := []string{"Downloads from Pling (gnome-look.org) and installs into ~/.local/share/icons for your " +
 			"account. Anyone can upload to Pling and nobody reviews it; uas checks the file against the checksum " +
 			"recorded when the catalog was built, and installs only images and theme files from it."}
+		most := 0
+		for _, a := range l.Assets {
+			most = max(most, a.LeftOut)
+		}
+		if most > 0 {
+			notes = append(notes, fmt.Sprintf("Its download also holds files that could be run, such as a helper "+
+				"script (%d at most); uas leaves them out and installs the rest of the theme.", most))
+		}
+		return notes
 	case catalog.SourceGoogleFonts:
 		return []string{"Downloads the font files from Google Fonts' repository on GitHub and installs them into " +
 			"~/.local/share/fonts for your account."}

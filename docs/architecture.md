@@ -169,15 +169,22 @@ All endpoints below need confirming during the first spike.
   preview pictures (linked, like screenshots) and a trust score (`trust.Pling`). Each of an item's files
   (up to 30) is an `AssetTheme`: the indexer downloads it once through the list's own download link,
   checks Pling's MD5, records its SHA-256 and size, and reads it with `internal/appearance` (below), which
-  gives the theme folders inside (`Asset.Themes`, the variants the user picks from) or refuses it. A refused
-  file is left out, and an item with none left is too. In the November 2026 sample, a `.desktop` file inside
-  Candy icons and a theme nested inside another (Layan) were refused. What was found is kept per item, file
+  gives the theme folders inside (`Asset.Themes`, the variants the user picks from) and how many files it
+  leaves out of it for being runnable (`Asset.LeftOut`), or refuses it. A refused file is left out, and an
+  item with none left is too. Each refused file and each item left out is logged (`pling file refused`,
+  `pling item left out`, with the item ID, name and reason), so a theme missing from the catalog can be
+  traced from the run's log. In the November 2026 sample, a theme nested inside another (Layan) was refused;
+  until rules version 3, so were Kora and about 30 other files of the first production run, for a helper
+  script such as `create-new-icon-theme.cache.sh`. What was found is kept per item, file
   name and MD5 (`pling/pins` in the indexer cache), so a file is read again only when its author replaces it,
   or when the rules change (`appearance.RulesVersion`). The links themselves expire after two days, redirect
   to storage valid for an hour, and are refused after a few reuses (429 with `retry-after: 900`), so the
   catalog holds none: the client asks for a fresh one at install time. New files are downloaded within a
   per-run budget (`-pling-pin-files`, `-pling-pin-mb`), and an item waits for a later run until all its
-  files are read, so the first runs fill the catalog in over a day. Pling publishes no rate limit; pages and
+  files are read, so the first runs fill the catalog in over a day. Each category first gets an equal share
+  of what the budget has left (icon themes half, cursor themes the rest), since icon themes come first and
+  are far larger: without shares, the first run spent its 3.3 GB on icon themes and listed no cursor theme.
+  What the shares leave then goes to the items still waiting, most downloaded first within each category. Pling publishes no rate limit; pages and
   downloads are spaced a second apart, with a generic User-Agent.
 - **Fonts from Google Fonts** (`fetch/googlefonts`): the github.com/google/fonts repo at the commit `main`
   points at, not the Google Fonts Developer API (it needs a key, and its terms forbid embedding one in an
@@ -619,9 +626,17 @@ version 1.
 **Reading archives** (`internal/appearance`, shared by the indexer and the client). A theme archive
 (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar.zst` or `.zip`; 7-Zip and RAR are refused) is read entry by entry
 before anything is written. It is refused for an entry with an absolute path or one that leaves the archive,
-a device or pipe, more than 200,000 entries, more than 2 GB unpacked or a file over 64 MB, and for any
-program or script anywhere in it: ELF files, files starting with `#!`, and files named like scripts,
-libraries, launchers, plugins, QML, JavaScript, build files (`Makefile`, `meson.build`) or other archives.
+a device or pipe, more than 200,000 entries, more than 2 GB unpacked or a file over 64 MB, and for compiled
+code anywhere in it: ELF files and files named like shared libraries (`.so`, `.so.1`), which a theme has no
+use for. Other files that could be run are skipped, never written, and the rest installs: files starting
+with `#!`, and files named like scripts, launchers, plugins, QML, JavaScript, build files (`Makefile`,
+`meson.build`) or other archives (`Contents.LeftOut`). Many themes carry a helper script (Kora's
+`create-new-icon-theme.cache.sh`), and refusing the theme for it would be no safer, since a skipped file
+never reaches the disk. A link that leads to a skipped file is skipped too, and a link to a folder writes
+the folder without them. What makes a theme is never skipped: an `index.theme` or a file in a `cursors`
+folder that looks runnable refuses the archive, and so does an archive left with no theme. The indexer and
+the client run the same checks, so the themes the catalog pins are the ones installed, without the same
+files; the client records how many it left out, and an item whose file holds some says so before install.
 Themes are found by folder: an `index.theme` whose `[Icon Theme]` section lists icon folders is an icon
 theme, a `cursors` folder a cursor theme. The archive is refused when none is found, or they can't be told
 apart cleanly: a theme with no folder of its own, one inside another, two of one name, or a name that would
