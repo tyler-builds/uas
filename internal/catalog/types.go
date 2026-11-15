@@ -39,6 +39,13 @@ const (
 	// (KindShellExtension), not apps: their ref is the extension's UUID, the Shell installs them itself, and
 	// they are listed and searched apart from apps. It is not in SourcePrecedence.
 	SourceGNOMEExtensions SourceID = "gnome-extensions"
+	// SourcePling is the Pling store family (gnome-look.org, store.kde.org, pling.com), read through
+	// OpenDesktop's OCS API. Its listings are icon and cursor themes (KindIconTheme, KindCursorTheme).
+	SourcePling SourceID = "pling"
+	// SourceGoogleFonts is the github.com/google/fonts repo; its listings are font families (KindFont).
+	SourceGoogleFonts SourceID = "google-fonts"
+	// SourceNerdFonts is the Nerd Fonts releases on GitHub; its listings are font families (KindFont).
+	SourceNerdFonts SourceID = "nerd-fonts"
 )
 
 // Name is the source's name for people, such as "Flathub".
@@ -68,6 +75,12 @@ func (s SourceID) Name() string {
 		return "AppImage"
 	case SourceGNOMEExtensions:
 		return "GNOME Extensions"
+	case SourcePling:
+		return "Pling"
+	case SourceGoogleFonts:
+		return "Google Fonts"
+	case SourceNerdFonts:
+		return "Nerd Fonts"
 	}
 	return string(s)
 }
@@ -119,7 +132,29 @@ const (
 	// KindShellExtension is a GNOME Shell extension. Extensions are in the catalog's app tables but have their
 	// own search index, and Search and Browse return them only when asked (see SearchOptions.Extensions).
 	KindShellExtension Kind = "shell-extension"
+	// KindFont, KindIconTheme and KindCursorTheme are appearance items: a font family, an icon theme and a
+	// cursor theme, installed for the user. Like extensions they are in the catalog's app tables with their
+	// own search index (appearance_fts), and Search and Browse return them only when asked for by kind.
+	KindFont        Kind = "font"
+	KindIconTheme   Kind = "icon-theme"
+	KindCursorTheme Kind = "cursor-theme"
 )
+
+// AppearanceKinds are the kinds of appearance items.
+var AppearanceKinds = []Kind{KindFont, KindIconTheme, KindCursorTheme}
+
+// Appearance reports whether k is an appearance item: a font, an icon theme or a cursor theme.
+func (k Kind) Appearance() bool {
+	return k == KindFont || k == KindIconTheme || k == KindCursorTheme
+}
+
+// App reports whether k is an app, not a shell extension or an appearance item.
+func (k Kind) App() bool { return k != KindShellExtension && !k.Appearance() }
+
+// AppearanceSource reports whether s lists appearance items.
+func (s SourceID) AppearanceSource() bool {
+	return s == SourcePling || s == SourceGoogleFonts || s == SourceNerdFonts
+}
 
 // Screenshot is one screenshot of an app.
 type Screenshot struct {
@@ -169,7 +204,8 @@ type Listing struct {
 
 	// Installs is a yearly install count, where the source publishes one (Homebrew: installs on request in the
 	// past year; Flathub: last month's installs times 12). It ranks search results and browsing. For a shell
-	// extension it is the downloads extensions.gnome.org counts, over all time.
+	// extension it is the downloads extensions.gnome.org counts, over all time, and for a Pling theme or a Nerd
+	// Font its downloads over all time (Pling's counts are rough: its list and item views disagree).
 	Installs int `json:"installs,omitempty"`
 
 	// Stars is the GitHub repository's star count, for GitHub listings.
@@ -184,6 +220,11 @@ type Listing struct {
 	// Classic is true for a snap with classic confinement, which runs without the snap sandbox and installs
 	// with "snap install --classic".
 	Classic bool `json:"classic,omitempty"`
+	// Score is a Pling item's rating, 0 to 100. Pling gives an item nobody has rated 50, so 50 says nothing
+	// (see Rated).
+	Score int `json:"score,omitempty"`
+	// Rank is a Google font's place in Google Fonts' popularity order, 1 for the most used.
+	Rank int `json:"rank,omitempty"`
 	// Shells are the GNOME Shell releases a shell extension has a version for, by major version ("48", "51"),
 	// oldest first.
 	Shells []string `json:"shells,omitempty"`
@@ -200,6 +241,19 @@ type Listing struct {
 	// Live is true for a listing uas read from its source just now, because the user gave a link to an app
 	// the catalog doesn't have (Install from URL). The catalog never holds one.
 	Live bool `json:"live,omitempty"`
+}
+
+// Rated reports whether a Pling listing's Score is a real rating: Pling gives an unrated item exactly 50.
+func (l *Listing) Rated() bool { return l.Score > 0 && l.Score != 50 }
+
+// Popularity is the number lists sort by: Installs, or for a ranked Google font a figure that falls with its
+// rank (1,000,000 for the most used, 1,000 for the thousandth), so fonts from both font sources sort
+// together. It is for ordering only, never shown as a count.
+func (l *Listing) Popularity() int {
+	if l.Installs == 0 && l.Rank > 0 {
+		return 1_000_000 / l.Rank
+	}
+	return l.Installs
 }
 
 // Live reports whether the app was read from its source just now rather than from the catalog (see
@@ -234,6 +288,14 @@ const (
 	AssetAppImage = "appimage"
 	AssetFlatpak  = "flatpak"
 	AssetRPM      = "rpm"
+	// AssetFont is one font file (TTF or OTF), installed as it is.
+	AssetFont = "font"
+	// AssetFontArchive is an archive of font files (Nerd Fonts' .tar.xz); only its TTF and OTF files are
+	// installed.
+	AssetFontArchive = "font-archive"
+	// AssetTheme is an archive holding one or more icon or cursor themes (a Pling download). Its URL is
+	// empty: Pling's download links expire, so the client asks Pling for a fresh one by Slot.
+	AssetTheme = "theme"
 )
 
 // Asset is one downloadable release file.
@@ -244,6 +306,16 @@ type Asset struct {
 	Size      int64  `json:"size"`
 	SHA256    string `json:"sha256,omitempty"` // hex; empty when the source publishes no checksum
 	Downloads int    `json:"downloads,omitempty"`
+	// Slot is a Pling file's number on its item ("downloadlink3" is slot 3), and MD5 the checksum Pling
+	// publishes for it. The client finds the file again by name and MD5, since an author can reorder files.
+	Slot int    `json:"slot,omitempty"`
+	MD5  string `json:"md5,omitempty"`
+	// Themes are the theme folders inside a theme archive, as the indexer found them: each is a variant the
+	// user can pick, and installing one installs every theme of the archive, since variants inherit from
+	// each other.
+	Themes []string `json:"themes,omitempty"`
+	// Style names a font file's style, such as "Bold Italic" or "Variable".
+	Style string `json:"style,omitempty"`
 }
 
 // Asset returns the listing's first asset of the given kind.
@@ -274,6 +346,10 @@ type TrustSignal struct {
 // ExtensionAppID returns the catalog ID of the shell extension with a UUID.
 func ExtensionAppID(uuid string) string { return string(SourceGNOMEExtensions) + ":" + uuid }
 
+// AppearanceAppID returns the catalog ID of the appearance item with a ref in a source, such as
+// "pling:1411743".
+func AppearanceAppID(src SourceID, ref string) string { return string(src) + ":" + ref }
+
 // FedoraDistro returns the Distro value for a Fedora release.
 func FedoraDistro(release int) string { return fmt.Sprintf("fedora-%d", release) }
 
@@ -292,7 +368,7 @@ type App struct {
 	Categories  []string
 	Keywords    []string
 	Screenshots []Screenshot
-	// Popularity is the highest Installs of the app's listings.
+	// Popularity is the highest Installs of the app's listings (Listing.Popularity for fonts).
 	Popularity int
 	// Stars is the highest Stars of the app's listings (GitHub).
 	Stars int
@@ -330,6 +406,19 @@ type BuildInfo struct {
 	// Extensions is how fetching shell extensions went, with their count. It is kept out of Sources because
 	// versions of uas from before extensions list every source there and know nothing about this one.
 	Extensions *SourceStatus `json:"extensions,omitempty"`
+	// Appearance is how fetching each source of fonts and themes went, kept out of Sources for the same
+	// reason.
+	Appearance []SourceStatus `json:"appearance,omitempty"`
+}
+
+// AppearanceStatus returns how fetching an appearance source went, if the catalog's build tried it.
+func (b BuildInfo) AppearanceStatus(s SourceID) (SourceStatus, bool) {
+	for _, st := range b.Appearance {
+		if st.Source == s {
+			return st, true
+		}
+	}
+	return SourceStatus{}, false
 }
 
 // SearchResult is one row of search output.

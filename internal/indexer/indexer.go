@@ -100,6 +100,10 @@ func (f *Fetched) Write(ctx context.Context, out string, keep func(catalog.Listi
 			info.Extensions = &st // apart from the app sources; see catalog.BuildInfo
 			continue
 		}
+		if st.Source.AppearanceSource() {
+			info.Appearance = append(info.Appearance, st)
+			continue
+		}
 		info.Sources = append(info.Sources, st)
 	}
 	apps, hidden := merge.Merge(ls)
@@ -110,7 +114,7 @@ func (f *Fetched) Write(ctx context.Context, out string, keep func(catalog.Listi
 		log.Info("unofficial copies hidden", "listings", len(hidden))
 	}
 	for _, a := range apps {
-		if a.Kind != catalog.KindShellExtension {
+		if a.Kind.App() {
 			info.Apps++
 		}
 	}
