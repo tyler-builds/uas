@@ -387,7 +387,13 @@ type Backend interface {
   read means a normal layered install. It never passes `--allow-replacement`. After a live apply it adds
   and removes a hidden launcher in `~/.local/share/applications`, since GNOME Shell doesn't notice the new
   launcher in the live-updated `/usr` otherwise. A package applied live isn't flagged "after restart": the
-  booted deployment's `live-replaced` commit (or `rpm -q`) shows it's in the running system.
+  booted deployment's `live-replaced` commit (or `rpm -q`) shows it's in the running system. The app page
+  runs the check in the background for a layered Fedora listing of an app that isn't installed (never for
+  lists: each dry run takes seconds, and rpm-ostree runs one transaction at a time) and marks the source
+  with a bolt when it passes; the install dialog reuses the answer (fresh for 3 minutes, dropped after any
+  job). uas's own rpm-ostree transactions take turns: an install or removal cancels a check in flight, and
+  retries for up to 2 minutes while rpm-ostree says "Transaction in progress" (a cancelled dry run keeps the
+  daemon busy for a few seconds, and so do jobs uas didn't start).
 - **copr:** If the project's repo isn't enabled, writes the same `.repo` file `dnf copr enable` would (same
   name, `gpgcheck=1` with the project's key) to a temp file and copies it into `/etc/yum.repos.d` with
   `pkexec install`, then layers the package through the rpmostree backend, or on package-based Fedora

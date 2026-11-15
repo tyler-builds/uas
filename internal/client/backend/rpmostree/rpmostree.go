@@ -42,6 +42,7 @@ type Backend struct {
 	Exclude func(pkg string) bool
 	// Rescan, if set, gets the desktop to show launchers added by a live install (see RescanLaunchers).
 	Rescan func()
+	txn    txns // makes uas's transactions take turns
 }
 
 // New creates a backend. Which Fedora release new layers will target is worked out on the first call to
@@ -204,8 +205,10 @@ func (b *Backend) layer(ctx context.Context, pkg string, live bool, progress fun
 		msg += " and the running system"
 	}
 	report(progress, msg)
-	_, err := b.Runner.Run(ctx, b.Path, args, func(line string) { report(progress, line) })
-	return err
+	return b.txn.change(ctx, waiting(progress), func() error {
+		_, err := b.Runner.Run(ctx, b.Path, args, func(line string) { report(progress, line) })
+		return err
+	})
 }
 
 // Unlayer removes a layered package.
@@ -214,8 +217,15 @@ func (b *Backend) Unlayer(ctx context.Context, pkg string, progress func(backend
 		return fmt.Errorf("rpm-ostree: refusing malformed package name %q", pkg)
 	}
 	report(progress, "Removing "+pkg+" from the system image")
-	_, err := b.Runner.Run(ctx, b.Path, []string{"uninstall", pkg}, func(line string) { report(progress, line) })
-	return err
+	return b.txn.change(ctx, waiting(progress), func() error {
+		_, err := b.Runner.Run(ctx, b.Path, []string{"uninstall", pkg}, func(line string) { report(progress, line) })
+		return err
+	})
+}
+
+// waiting reports that a change waits for another rpm-ostree job.
+func waiting(progress func(backend.Progress)) func() {
+	return func() { report(progress, "Waiting for another rpm-ostree job to finish") }
 }
 
 // Update implements backend.Backend.

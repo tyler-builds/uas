@@ -44,7 +44,12 @@ func (b *Backend) CheckLive(ctx context.Context, l catalog.Listing) backend.Live
 	if newest.base() != booted.base() {
 		return no("a system update is waiting for a restart")
 	}
-	out, err := b.Runner.Run(ctx, b.Path, []string{"install", "--dry-run", "--idempotent", l.Package}, nil)
+	// An install or removal that starts meanwhile cancels the dry run (see txns).
+	var out string
+	err = b.txn.check(ctx, func(ctx context.Context) error {
+		out, err = b.Runner.Run(ctx, b.Path, []string{"install", "--dry-run", "--idempotent", l.Package}, nil)
+		return err
+	})
 	if err != nil {
 		return no(cantTell)
 	}

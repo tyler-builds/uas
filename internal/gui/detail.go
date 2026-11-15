@@ -381,9 +381,14 @@ func (a *App) sidePanel(ctx *ui.Context, app *catalog.App, listing catalog.Listi
 			Child(sourceMark(ctx, catalog.SourceAppImage, 14, sourceColor(ctx, catalog.SourceAppImage))).
 			Child(value("Your AppImage")))
 	} else if listing.Source != "" {
-		field("Source", ui.Div().Row().Align(ui.Center).Gap(6).
+		src := ui.Div().Row().Align(ui.Center).Gap(6).
 			Child(sourceMark(ctx, listing.Source, 14, sourceColor(ctx, listing.Source))).
-			Child(value(listing.Source.Name())))
+			Child(value(listing.Source.Name()))
+		if a.liveReady(ctx, app, listing) {
+			src = src.Child(ui.Div().Shrink(0).Role(access.RoleImage).Label(liveLabel).Tooltip(liveTip).
+				Child(ui.Icon(icons.Zap).Size(14).Color(t.Success)))
+		}
+		field("Source", src)
 	}
 	if app.License != "" {
 		field("License", ui.Div().Tooltip(app.License).Child(value(licenseName(app.License))))
@@ -690,6 +695,51 @@ func (a *App) install(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
 		func(c context.Context, p func(backend.Progress)) error { return a.s.Install(c, l, p) })
 }
 
+// liveKeyPrefix starts the query keys of live checks (see liveQuery).
+const liveKeyPrefix = "live:"
+
+// The live install mark's name and tooltip.
+const (
+	liveLabel = "Installs without a restart"
+	liveTip   = "Installs without a restart. It's added to the running system now, and stays after a restart."
+)
+
+// liveQuery checks whether installing l can skip the restart (see session.CheckLive). The app page and the
+// install dialog share the answer, so Install doesn't run the dry run again; it stays fresh for a few
+// minutes, and jobs that change the system invalidate it. Leaving the page cancels a check in flight.
+func (a *App) liveQuery(ctx *ui.Context, l catalog.Listing, enabled bool) ui.QueryResult[backend.Live] {
+	return ui.Query(ctx, liveKeyPrefix+listingKey(l), func(c context.Context) (backend.Live, error) {
+		return a.s.CheckLive(c, l), nil
+	}, ui.QueryStaleTime(3*time.Minute), ui.QueryEnabled(enabled))
+}
+
+// liveReady reports whether the app page should mark l as installing without a restart. It checks in the
+// background, only for a source that can (layered Fedora packages) and an app that isn't installed, and
+// says no while the check runs and when it says no or can't tell.
+func (a *App) liveReady(ctx *ui.Context, app *catalog.App, l catalog.Listing) bool {
+	if !a.s.CanInstallLive(l) {
+		return false
+	}
+	installed := ui.Query(ctx, "installed", a.s.Installed, ui.QueryStaleTime(30*time.Second))
+	have := installed.Loading
+	for _, in := range installed.Data {
+		if in.Matches(l) {
+			have = true
+		}
+	}
+	if _, ok := a.addedCopy(ctx, app, l); ok {
+		have = true
+	}
+	if _, ok := a.s.SystemApp(app); ok {
+		have = true
+	}
+	// Not while the app's own job runs or the installed list refreshes after one: the app may be installed
+	// by now, and the check would be a wasted dry run.
+	_, busy := a.running(app.ID)
+	res := a.liveQuery(ctx, l, !have && !busy && !installed.Fetching)
+	return !have && !res.Fetching && res.Data.OK
+}
+
 // installLive installs into the running system too, so the app works without a restart.
 func (a *App) installLive(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
 	a.startJob(ctx, app.ID, "Installing "+app.Name, false, app.Name+" is installed and ready to use",
@@ -721,9 +771,7 @@ func (a *App) confirmBox(ctx, appCtx *ui.Context, p *pending) ui.Element {
 	checking, live := false, false
 	nowOrLater := ui.Local(ctx, "live", true)
 	if a.s.CanInstallLive(l) {
-		res := ui.Query(ctx, "live:"+listingKey(l), func(c context.Context) (backend.Live, error) {
-			return a.s.CheckLive(c, l), nil
-		}, ui.QueryCacheTime(0))
+		res := a.liveQuery(ctx, l, true)
 		checking = res.Loading || res.Fetching
 		live = !checking && res.Data.OK
 		switch {
