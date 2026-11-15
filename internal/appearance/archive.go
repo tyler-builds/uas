@@ -38,7 +38,9 @@ type RefusedError struct{ Reason string }
 
 func (e *RefusedError) Error() string { return e.Reason }
 
-func refuse(format string, args ...any) error { return &RefusedError{Reason: fmt.Sprintf(format, args...)} }
+func refuse(format string, args ...any) error {
+	return &RefusedError{Reason: fmt.Sprintf(format, args...)}
+}
 
 // IsRefused reports whether err is an archive refused for what is in it, as opposed to one that couldn't be
 // read.

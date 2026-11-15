@@ -25,8 +25,8 @@ type member struct {
 	typ        byte // a tar type to force, such as tar.TypeChar
 }
 
-func file(name, body string) member     { return member{name: name, body: body} }
-func dir(name string) member            { return member{name: name + "/"} }
+func file(name, body string) member      { return member{name: name, body: body} }
+func dir(name string) member             { return member{name: name + "/"} }
 func symlink(name, target string) member { return member{name: name, symlink: target} }
 
 // iconIndex is an icon theme's index.theme.
