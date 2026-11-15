@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyler-builds/uas/internal/appearance"
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/indexer"
 	"github.com/tyler-builds/uas/internal/indexer/fetch"
@@ -173,8 +174,8 @@ func main() {
 		MinDownloads: *plingMin, MinCursorDownloads: *plingMinCursors, MaxItems: *plingItems, MaxFiles: *plingFiles, PinCount: *plingPins,
 		PinBytes: *plingPinMB << 20, Log: log},
 		Dir: filepath.Join(*cache, "results"), For: *lookCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
-		Key: fmt.Sprintf("schema=%d v=1 pin=%d min=%d/%d items=%d files=%d", catalog.SchemaVersion,
-			pling.PinVersion, *plingMin, *plingMinCursors, *plingItems, *plingFiles)}
+		Key: fmt.Sprintf("schema=%d v=1 pin=%d rules=%d min=%d/%d items=%d files=%d", catalog.SchemaVersion,
+			pling.PinVersion, appearance.RulesVersion, *plingMin, *plingMinCursors, *plingItems, *plingFiles)}
 	available["google-fonts"] = &fetch.Cached{Fetcher: &googlefonts.Fetcher{Client: client,
 		Token: os.Getenv("GITHUB_TOKEN"), CacheDir: filepath.Join(*cache, "google-fonts"), PinBytes: *fontPinMB << 20,
 		MaxFamilies: *fontFamilies, Log: log},

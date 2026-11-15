@@ -63,8 +63,9 @@ Pling warnings: "No ratings yet", "Not changed in over 3 years: it may not cover
 
 What gets into the catalog from Pling: items with at least 10,000 downloads (icon themes) or 3,000 (cursor
 themes), not excluded by Pling's moderators, with at least one file uas would install. A file is refused if it
-holds a program, script, library, launcher, plugin, QML or JavaScript anywhere, isn't an archive uas opens,
-or holds no icon or cursor theme it can tell apart (see docs/architecture.md). There is no minimum score.
+holds a compiled program or library anywhere, isn't an archive uas opens, or holds no icon or cursor theme it
+can tell apart. Scripts, launchers, plugins, QML, JavaScript and nested archives inside a file are skipped,
+never written, and the rest of the theme is listed (see docs/architecture.md). There is no minimum score.
 
 Fonts come from Google Fonts' repository, whose families Google's fonts team chooses and checks, and from
 the Nerd Fonts project's releases, checked against GitHub's checksum. They have no trust score.

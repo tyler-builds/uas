@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/tyler-builds/uas/internal/catalog"
@@ -15,28 +16,49 @@ import (
 // rawDir is where Extract writes the archive's files before it puts them into the themes' folders.
 const rawDir = ".raw"
 
+// Extracted is what Extract wrote.
+type Extracted struct {
+	Themes []Theme
+	// LeftOut are the archive's files that could be run and so weren't written (see Contents.LeftOut), by
+	// archive path, sorted. The indexer counts the same files.
+	LeftOut []string
+}
+
 // Extract writes the archive's themes of kind into dir, each as dir/<Name>, and returns them. dir must be a
 // new, empty folder; everything is written through an os.Root on it, so nothing can land outside it. Every
 // theme of the kind in the archive is written, since a variant usually inherits from the others in its
 // archive (Papirus-Dark from Papirus). A link in a theme becomes a hard link to the file it leads to, or a
 // copy where hard links can't be made, never a symbolic link. Files are written without execute
 // permission, and a theme's icon cache, which may not match what was written, is left out.
-func Extract(p string, kind catalog.Kind, dir string, lim Limits) ([]Theme, error) {
+func Extract(p string, kind catalog.Kind, dir string, lim Limits) (Extracted, error) {
+	themes, c, err := extract(p, kind, dir, lim)
+	if err != nil {
+		return Extracted{}, err
+	}
+	out := Extracted{Themes: themes}
+	for name := range c.LeftOut {
+		out.LeftOut = append(out.LeftOut, name)
+	}
+	slices.Sort(out.LeftOut)
+	return out, nil
+}
+
+func extract(p string, kind catalog.Kind, dir string, lim Limits) ([]Theme, *Contents, error) {
 	c, err := Inspect(p, lim)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	themes := c.Of(kind)
 	if len(themes) == 0 {
-		return nil, refuse("it holds no %s", kindName(kind))
+		return nil, nil, refuse("it holds no %s", kindName(kind))
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer root.Close()
 	if err := emptyDir(root); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The files the themes need: their own, and those their links lead to.
@@ -44,12 +66,12 @@ func Extract(p string, kind catalog.Kind, dir string, lim Limits) ([]Theme, erro
 	for _, t := range themes {
 		for _, e := range c.within(t.Path) {
 			if err := c.needs(e.name, need, 0); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
 	if err := c.writeRaw(p, root, need, lim); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Links to folders are written out in full, file by file: what is written can be several times what the
 	// archive holds. Papirus's 100,000 entries, whose variants link most of their folders to each other's and
@@ -57,18 +79,18 @@ func Extract(p string, kind catalog.Kind, dir string, lim Limits) ([]Theme, erro
 	m := &materializer{c: c, root: root, max: lim.MaxEntries * 8}
 	for _, t := range themes {
 		if err := root.Mkdir(t.Name, 0o755); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, e := range c.within(t.Path) {
 			if err := m.put(t.Name+strings.TrimPrefix(e.name, t.Path), e.name, 0); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
 	if err := root.RemoveAll(rawDir); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return themes, nil
+	return themes, c, nil
 }
 
 func kindName(k catalog.Kind) string {
@@ -136,6 +158,9 @@ func (c *Contents) writeRaw(p string, root *os.Root, need map[string]bool, lim L
 	return walk(p, func(e entry, r io.Reader) error {
 		if e.typ != typeFile || !need[e.name] {
 			return nil
+		}
+		if _, out := c.LeftOut[e.name]; out {
+			return fmt.Errorf("extract: %s is left out, but was to be written", e.name) // can't happen
 		}
 		if want, ok := c.index[e.name]; !ok || want.typ != typeFile || want.size != e.size {
 			return fmt.Errorf("extract: the archive changed while it was read")

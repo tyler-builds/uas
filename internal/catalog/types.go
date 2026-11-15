@@ -314,6 +314,9 @@ type Asset struct {
 	// user can pick, and installing one installs every theme of the archive, since variants inherit from
 	// each other.
 	Themes []string `json:"themes,omitempty"`
+	// LeftOut counts the files in a theme archive that uas never writes because they could be run: scripts,
+	// launchers, archives inside the archive. The rest of the archive installs.
+	LeftOut int `json:"left_out,omitempty"`
 	// Style names a font file's style, such as "Bold Italic" or "Variable".
 	Style string `json:"style,omitempty"`
 }

@@ -87,6 +87,9 @@ type AppearanceInstall struct {
 	// installed.
 	Themes   []string `json:"themes,omitempty"`
 	Families []string `json:"families,omitempty"`
+	// LeftOut counts the files of a theme archive that could be run (scripts, launchers, archives inside it)
+	// and so weren't written.
+	LeftOut int `json:"left_out,omitempty"`
 	// Paths are what it wrote, absolute: the theme folders, or the folder of the font files.
 	Paths       []string  `json:"paths"`
 	InstalledAt time.Time `json:"installed_at"`

@@ -133,6 +133,10 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 			what = strings.Join(rec.Families, ", ")
 		}
 		fmt.Fprintf(w, "%s is installed: %s\n", rec.Name, what)
+		if rec.LeftOut > 0 {
+			fmt.Fprintf(w, "Left out %d file(s) of it that could be run, such as scripts; uas never installs those.\n",
+				rec.LeftOut)
+		}
 	case "update":
 		id, err := one("ID (see updates)")
 		if err != nil {

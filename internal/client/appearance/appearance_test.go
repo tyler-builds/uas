@@ -298,16 +298,75 @@ func TestThemeInstallRefuses(t *testing.T) {
 			t.Errorf("Install = %v", err)
 		}
 	})
-	t.Run("archive with a script", func(t *testing.T) {
+	t.Run("archive with a program", func(t *testing.T) {
 		w := newWorld(t)
 		files := cursor("Oreo")
-		files["install.sh"] = "#!/bin/sh\n"
+		files["Oreo/tool"] = "\x7fELF\x02\x01"
 		a := w.offer("c.tar.gz", tarGz(t, files, nil))
 		l := catalog.Listing{Source: catalog.SourcePling, Ref: "1", Kind: catalog.KindCursorTheme, Name: "Oreo",
 			Assets: []catalog.Asset{a}}
 		if _, err := w.in.Install(ctx, l, "", nil); err == nil || !looks.IsRefused(err) {
 			t.Errorf("Install = %v", err)
 		}
+		if _, err := os.Stat(filepath.Join(w.in.IconsDir(), "Oreo")); err == nil {
+			t.Error("installed anyway")
+		}
+	})
+}
+
+// TestThemeWithHelperScript installs an archive shaped like Kora's: an icon theme with a helper script at its
+// top, which the indexer lists. What the indexer pins (the archive's SHA-256, the themes Inspect finds, the
+// files it leaves out) is what the install finds and records, and the script is never written.
+func TestThemeWithHelperScript(t *testing.T) {
+	w := newWorld(t)
+	files := map[string]string{
+		"kora/index.theme":                       "[Icon Theme]\nName=Kora\nDirectories=48/apps\n",
+		"kora/48/apps/firefox.svg":               "<svg/>",
+		"kora/create-new-icon-theme.cache.sh":    "#!/bin/bash\ngtk-update-icon-cache -f .\n",
+		"kora-light/index.theme":                 "[Icon Theme]\nName=Kora Light\nInherits=kora\nDirectories=48/apps\n",
+		"kora-light/48/apps/firefox.svg":         "<svg light/>",
+		"kora-light/create-new-icon-theme.cache": "#!/bin/sh\n",
+	}
+	body := tarGz(t, files, map[string]string{"kora/48/apps/run.svg": "../../create-new-icon-theme.cache.sh"})
+
+	// What the indexer does with the downloaded file.
+	p := filepath.Join(t.TempDir(), "kora-2-0-5.tar.gz")
+	os.WriteFile(p, body, 0o644)
+	c, err := looks.Inspect(p, looks.DefaultLimits)
+	if err != nil {
+		t.Fatalf("Inspect = %v", err)
+	}
+	var pinned []string
+	for _, th := range c.Of(catalog.KindIconTheme) {
+		pinned = append(pinned, th.Name)
+	}
+	a := w.offer("kora-2-0-5.tar.gz", body, pinned...)
+	a.LeftOut = len(c.LeftOut)
+	if !slices.Equal(pinned, []string{"kora", "kora-light"}) || a.LeftOut != 2 {
+		t.Fatalf("pinned themes %v, left out %v", pinned, c.LeftOut)
+	}
+
+	l := catalog.Listing{Source: catalog.SourcePling, Ref: "1256209", Kind: catalog.KindIconTheme, Name: "Kora",
+		Assets: []catalog.Asset{a}}
+	rec, err := w.in.Install(context.Background(), l, "kora", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.SHA256 != a.SHA256 || !sameSet(rec.Themes, pinned) || rec.LeftOut != a.LeftOut {
+		t.Errorf("record = %+v, asset = %+v", rec, a)
+	}
+	if b, err := os.ReadFile(filepath.Join(w.in.IconsDir(), "kora-light", "48", "apps", "firefox.svg")); err != nil ||
+		string(b) != "<svg light/>" {
+		t.Errorf("kora-light icon = %q, %v", b, err)
+	}
+	filepath.WalkDir(w.in.IconsDir(), func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if b, _ := os.ReadFile(path); strings.HasPrefix(string(b), "#!") || strings.Contains(path, "cache.sh") ||
+				strings.HasSuffix(path, "run.svg") {
+				t.Errorf("%s was written", path)
+			}
+		}
+		return nil
 	})
 }
 

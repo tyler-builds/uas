@@ -297,12 +297,12 @@ func (in *Installer) installTheme(ctx context.Context, st state.State, l catalog
 	if err := os.Mkdir(out, 0o755); err != nil {
 		return err
 	}
-	themes, err := looks.Extract(file, kind, out, in.Limits)
+	got, err := looks.Extract(file, kind, out, in.Limits)
 	if err != nil {
 		return fmt.Errorf("%s: %w", a.Name, err)
 	}
 	var names []string
-	for _, t := range themes {
+	for _, t := range got.Themes {
 		names = append(names, t.Name)
 		if err := in.checkThemeName(st, rec.ID, t.Name); err != nil {
 			return err
@@ -328,7 +328,7 @@ func (in *Installer) installTheme(ctx context.Context, st state.State, l catalog
 		}
 		rec.Paths = append(rec.Paths, dst)
 	}
-	rec.Asset, rec.SHA256, rec.Themes = a.Name, a.SHA256, names
+	rec.Asset, rec.SHA256, rec.Themes, rec.LeftOut = a.Name, a.SHA256, names, len(got.LeftOut)
 	return nil
 }
 

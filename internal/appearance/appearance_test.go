@@ -154,7 +154,7 @@ func TestInspectSingleCursorTheme(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(themes) != 1 {
+	if len(themes.Themes) != 1 {
 		t.Fatalf("Extract = %+v", themes)
 	}
 	// Links are written as files with the contents they lead to, never as symbolic links.
@@ -250,15 +250,27 @@ func TestInspectRefuses(t *testing.T) {
 		{"traversal inside", append(good, file("Good/../../evil", "x")), DefaultLimits, "outside the archive"},
 		{"absolute path", append(good, file("/etc/evil", "x")), DefaultLimits, "absolute path"},
 		{"device", append(good, member{name: "Good/dev", typ: tar.TypeChar}), DefaultLimits, "device"},
+		// Odd paths refuse the archive, whatever the file is, scripts included.
+		{"traversal script", append(good, file("../install.sh", "#!/bin/sh")), DefaultLimits, "outside the archive"},
+		{"absolute script", append(good, file("/etc/profile.d/x.sh", "x")), DefaultLimits, "absolute path"},
+		{"backslash", append(good, file(`Good\..\..\evil`, "x")), DefaultLimits, "odd name"},
+		// Compiled code refuses the archive rather than being left out.
 		{"ELF program", append(good, file("Good/cursors/tool", "\x7fELF\x02\x01")), DefaultLimits, "a program"},
-		{"script by shebang", append(good, file("Good/setup", "#!/bin/sh\nrm -rf ~")), DefaultLimits, "a script"},
-		{"install.sh", append(good, file("install.sh", "echo hi")), DefaultLimits, "program or script"},
+		{"ELF named like an icon", append(good, file("Good/48/a.png", "\x7fELF\x02\x01")), DefaultLimits, "a program"},
+		{"ELF named like a script", append(good, file("Good/x.sh", "\x7fELF\x02\x01")), DefaultLimits, "a program"},
 		{"library", append(good, file("Good/libtheme.so.1", "x")), DefaultLimits, "library"},
-		{"shared object", append(good, file("Good/plugin.so", "x")), DefaultLimits, "program or script"},
-		{"desktop file", append(good, file("Good/app.desktop", "[Desktop Entry]")), DefaultLimits, "program or script"},
-		{"QML", append(good, file("Good/main.qml", "Item {}")), DefaultLimits, "program or script"},
-		{"JavaScript", append(good, file("Good/x.js", "alert(1)")), DefaultLimits, "program or script"},
-		{"nested archive", append(good, file("Good-blue.tar.gz", "x")), DefaultLimits, "another archive"},
+		{"shared object", append(good, file("Good/plugin.so", "x")), DefaultLimits, "library"},
+		{"library link", append(good, symlink("Good/libtheme.so", "index.theme")), DefaultLimits, "library"},
+		// What makes a theme is never left out: a theme isn't listed without it.
+		{"index.theme script", append(cursorTheme("Good")[1:], file("Good/index.theme", "#!/bin/sh\n[Icon Theme]")),
+			DefaultLimits, "a script"},
+		{"cursor script", append(good, file("Good/cursors/watch", "#!/bin/sh")), DefaultLimits, "a script"},
+		{"cursor named like a script", append(good, file("Good/cursors/wait.sh", "Xcur")), DefaultLimits,
+			"program or script"},
+		{"no theme left", []member{file("Good/index.theme", "[Icon Theme]\nName=Good\n"),
+			symlink("Good/cursors/default", "../install.sh"), file("Good/install.sh", "#!/bin/sh"),
+			file("Good/cursors.tar.gz", "x")}, DefaultLimits, "no icon or cursor theme"},
+		{"left out twice", append(good, file("Good/x.sh", "a"), file("Good/x.sh", "b")), DefaultLimits, "twice"},
 		{"too many files", append(good, file("Good/a", ""), file("Good/b", ""), file("Good/c", "")), small,
 			"more than 8 files"},
 		{"too large a file", append(good, file("Good/big", strings.Repeat("x", 120))), small, "larger than"},
@@ -286,6 +298,89 @@ func TestInspectRefuses(t *testing.T) {
 	os.WriteFile(seven, []byte("7z\xbc\xaf\x27\x1c rest"), 0o644)
 	if _, err := Inspect(seven, DefaultLimits); !IsRefused(err) || !strings.Contains(err.Error(), "7-Zip") {
 		t.Errorf("7z: %v", err)
+	}
+}
+
+// TestLeftOut checks that files that could be run are left out of an otherwise good archive, Kora's case: a
+// helper script at the top of the theme. Inspect accepts it, finds the same themes Extract writes, and nothing
+// that could run is written, not through a link either.
+func TestLeftOut(t *testing.T) {
+	top := "kora/"
+	members := []member{
+		file(top+"index.theme", iconIndex("Kora")),
+		file(top+"48x48/apps/firefox.svg", "<svg/>"),
+		file(top+"create-new-icon-theme.cache.sh", "#!/bin/bash\ngtk-update-icon-cache -f .\n"),
+		file(top+"update", "#!/usr/bin/env python3\n"),                            // a script by its first bytes
+		file(top+"Makefile", "all:\n"),                                            // a build script by name
+		file(top+"kora.desktop", "[Desktop Entry]\n"),                             // a launcher
+		file(top+"48x48/apps/main.qml", "Item {}"),                                // QML, deep in the theme
+		file(top+"src.tar.gz", "x"),                                               // an archive inside
+		file(top+"setup.exe", "MZ"),                                               // Windows can't run here, and it isn't ELF
+		symlink(top+"48x48/apps/run.svg", "../../create-new-icon-theme.cache.sh"), // a link to a script
+		symlink(top+"48x48/apps/hidden.svg", "../../update"),                      // and to one by content
+		member{name: top + "48x48/apps/hard.svg", hardlink: top + "Makefile"},
+		symlink(top+"apps", "48x48/apps"),                   // a folder link: what it leads to is written, scripts not
+		symlink(top+"48x48/apps/install.sh", "firefox.svg"), // a link named like a script
+		file("kora-light/index.theme", iconIndex("Kora Light", "kora")),
+		file("kora-light/48x48/apps/firefox.svg", "<svg light/>"),
+		symlink("kora-light/48x48/apps/tool", "../../../kora/update"),
+	}
+	zipped := slices.DeleteFunc(slices.Clone(members), func(m member) bool { return m.hardlink != "" })
+	for _, p := range []string{writeTar(t, members, false), writeZip(t, zipped)} {
+		c, err := Inspect(p, DefaultLimits)
+		if err != nil {
+			t.Fatal(p, err)
+		}
+		var left []string
+		for name := range c.LeftOut {
+			left = append(left, name)
+		}
+		slices.Sort(left)
+		want := []string{"kora/48x48/apps/install.sh", "kora/48x48/apps/main.qml", "kora/Makefile",
+			"kora/create-new-icon-theme.cache.sh", "kora/kora.desktop", "kora/setup.exe", "kora/src.tar.gz",
+			"kora/update"}
+		if !slices.Equal(left, want) {
+			t.Errorf("%s: LeftOut = %v, want %v", p, left, want)
+		}
+		var pinned []string
+		for _, th := range c.Of(catalog.KindIconTheme) {
+			pinned = append(pinned, th.Name)
+		}
+		if !slices.Equal(pinned, []string{"kora", "kora-light"}) {
+			t.Fatalf("%s: themes = %v", p, pinned)
+		}
+
+		dst := t.TempDir()
+		got, err := Extract(p, catalog.KindIconTheme, dst, DefaultLimits)
+		if err != nil {
+			t.Fatal(p, err)
+		}
+		var names []string
+		for _, th := range got.Themes {
+			names = append(names, th.Name)
+		}
+		if !slices.Equal(names, pinned) || !slices.Equal(got.LeftOut, want) {
+			t.Errorf("%s: Extract = %v, left out %v; Inspect found %v", p, names, got.LeftOut, pinned)
+		}
+		var written []string
+		filepath.WalkDir(dst, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			rel, _ := filepath.Rel(dst, path)
+			written = append(written, rel)
+			b, _ := os.ReadFile(path)
+			if strings.HasPrefix(string(b), "#!") || strings.HasPrefix(string(b), "MZ") || string(b) == "all:\n" {
+				t.Errorf("%s: %s holds something runnable: %q", p, rel, b)
+			}
+			return nil
+		})
+		slices.Sort(written)
+		wantWritten := []string{"kora-light/48x48/apps/firefox.svg", "kora-light/index.theme",
+			"kora/48x48/apps/firefox.svg", "kora/apps/firefox.svg", "kora/index.theme"}
+		if !slices.Equal(written, wantWritten) {
+			t.Errorf("%s: wrote %v, want %v", p, written, wantWritten)
+		}
 	}
 }
 
