@@ -141,3 +141,19 @@ type PermissionEditor interface {
 
 // ErrWrongSource is returned when a backend is given a listing or app from another source.
 var ErrWrongSource = errors.New("listing is from a different source")
+
+// Live says whether an install can take effect in the running system at once, where it would otherwise wait
+// for a restart.
+type Live struct {
+	OK bool
+	// Why says why not, when OK is false, such as "it includes kernel-core, which works only after a restart".
+	Why string
+}
+
+// LiveInstaller is implemented by backends whose installs usually wait for a restart but can sometimes apply
+// to the running system at once (rpm-ostree's apply-live). CheckLive never changes the system; when it can't
+// tell, it says no, and the install waits for a restart as usual.
+type LiveInstaller interface {
+	CheckLive(ctx context.Context, l catalog.Listing) Live
+	InstallLive(ctx context.Context, l catalog.Listing, progress func(Progress)) error
+}

@@ -1,0 +1,8 @@
+Checking out tree 4272c61...done
+Importing rpm-md...done
+Resolving dependencies...done
+Installing 1 packages:
+  foo-tool-2.1-1.fc45.x86_64 (updates)
+Removing 1 packages:
+  foo-legacy-1.0-3.fc45.x86_64
+Exiting because of '--dry-run' option

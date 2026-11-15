@@ -223,7 +223,8 @@ var sourceTips = map[catalog.SourceID]string{
 	catalog.SourceFlathub: "On Flathub, the Flatpak app store. Flatpak apps run in a sandbox and install " +
 		"without a restart",
 	catalog.SourceFedora: "Packaged and signed by Fedora. On image-based Fedora (Bazzite, Silverblue) installing " +
-		"adds it to the system image (layering), which takes effect after a restart",
+		"adds it to the system image (layering), which works right away if it only adds packages, or else after a " +
+		"restart",
 	catalog.SourceHomebrew: "A Homebrew formula, mostly command-line tools. Installs for your user without " +
 		"a restart",
 	catalog.SourceGitHub: "Released on GitHub by its developer, as an AppImage or Flatpak bundle. No distribution reviews it; " +

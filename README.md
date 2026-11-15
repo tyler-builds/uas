@@ -126,6 +126,9 @@ The desktop app needs a **Wayland** session. The CLI runs anywhere.
 **Notes for other systems**
 
 - On Fedora Atomic, Fedora and COPR packages are layered into the image and take effect after a restart.
+  A Fedora package that only adds packages (no kernel, driver or boot package, and nothing in the image
+  replaced) can be installed now instead, with no restart; uas checks with a dry run and offers it.
+  `uas install -no-live` waits for the restart anyway.
 - On package-based systems, the distribution's own packages install with its package manager, after the
   password prompt. Arch packages update with the whole system (`sudo pacman -Syu`), not one at a time. COPR
   packages install with dnf on package-based Fedora. COPR builds only for Fedora (and RHEL-family systems,
@@ -176,7 +179,7 @@ uas install https://github.com/owner/app   # an app that isn't in the catalog
 | --- | --- |
 | `search <words>` | Find apps |
 | `info <app-id\|url>` | Show an app and its sources |
-| `install <app-id\|url>` | Install from the recommended source, or from a link to the app's GitHub repo |
+| `install <app-id\|url>` | Install from the recommended source, or from a link to the app's GitHub repo (`-no-live` layers for the next restart even when a package could work at once) |
 | `add <file.AppImage>` | Add an AppImage and keep it updated |
 | `remove <app-id>` | Remove an app |
 | `update <app-id>` | Update an app |

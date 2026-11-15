@@ -690,17 +690,56 @@ func (a *App) install(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
 		func(c context.Context, p func(backend.Progress)) error { return a.s.Install(c, l, p) })
 }
 
+// installLive installs into the running system too, so the app works without a restart.
+func (a *App) installLive(ctx *ui.Context, app *catalog.App, l catalog.Listing) {
+	a.startJob(ctx, app.ID, "Installing "+app.Name, false, app.Name+" is installed and ready to use",
+		func(c context.Context, p func(backend.Progress)) error { return a.s.InstallLive(c, l, p) })
+}
+
 // confirmDialog asks before installing from a source that is unreviewed or changes the system image.
 func (a *App) confirmDialog(ctx *ui.Context) ui.Element {
 	p := a.confirm.Get()
 	if p == nil {
 		return ui.Div().Display(false)
 	}
+	// A component of its own, so the live check and the choice start over for each install. The install
+	// runs on the app's context, which outlives the dialog.
+	appCtx := ctx
+	return ui.Component(func(ctx *ui.Context) ui.Element { return a.confirmBox(ctx, appCtx, p) }).
+		Key("confirm:" + listingKey(p.listing))
+}
+
+func (a *App) confirmBox(ctx, appCtx *ui.Context, p *pending) ui.Element {
+	t := ctx.Theme()
 	l := p.listing
 	title := fmt.Sprintf("Install %s from %s?", p.app.Name, listingLabel(l))
 	body := ui.Div().Column().Gap(8)
 	for _, n := range a.s.InstallNotes(l) {
 		body = body.Child(ui.Text(n).FontSize(13))
+	}
+	// A layered package that only adds packages can go into the running system too: check, and offer it.
+	checking, live := false, false
+	nowOrLater := ui.Local(ctx, "live", true)
+	if a.s.CanInstallLive(l) {
+		res := ui.Query(ctx, "live:"+listingKey(l), func(c context.Context) (backend.Live, error) {
+			return a.s.CheckLive(c, l), nil
+		}, ui.QueryCacheTime(0))
+		checking = res.Loading || res.Fetching
+		live = !checking && res.Data.OK
+		switch {
+		case checking:
+			body = body.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
+				Child(ui.ProgressRing().Size(ui.RingSmall).Label("Checking")).
+				Child(ui.Text("Checking whether it can work without a restart…").FontSize(13).
+					TextColor(t.TextMuted)))
+		case live:
+			body = body.Child(ui.RadioGroup(nowOrLater,
+				ui.Option[bool]{Value: true, Label: "Install now (no restart needed)"},
+				ui.Option[bool]{Value: false, Label: "Install at the next restart"}).
+				Label("When it takes effect"))
+		default:
+			body = body.Child(ui.Text("It takes effect after a restart: " + res.Data.Why + ".").FontSize(13))
+		}
 	}
 	if l.Trust != nil {
 		body = body.Child(trustPanel(ctx, l))
@@ -721,8 +760,13 @@ func (a *App) confirmDialog(ctx *ui.Context) ui.Element {
 	return ui.AlertDialog(title, message).Intent(intent).Body(body).
 		Confirm("Install", func() {
 			a.confirm.Set(nil)
-			a.install(ctx, p.app, l)
+			if live && nowOrLater.Peek() {
+				a.installLive(appCtx, p.app, l)
+			} else {
+				a.install(appCtx, p.app, l)
+			}
 		}).
+		ConfirmLoading(checking).
 		Cancel("", func() { a.confirm.Set(nil) })
 }
 

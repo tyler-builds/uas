@@ -380,7 +380,14 @@ type Backend interface {
   backend reads that deployment's release (from the kernel version in its image metadata) and only offers
   listings for it. It refuses packages already in the image (`rpm -q`), lists layered packages with a
   "takes effect after restart" flag, and `update` explains that layered packages update with the system.
-  Bazzite's polkit rules let `wheel` users layer without a password.
+  Bazzite's polkit rules let `wheel` users layer without a password. Install without restarting: before a
+  Fedora install, `CheckLive` runs `rpm-ostree install --dry-run` and offers `--apply-live` when the
+  transaction only adds packages, none is a kernel, kmod, driver, firmware, boot or SELinux policy package,
+  none replaces a version the running system has (`rpm -q`), and no new image is staged. Anything it can't
+  read means a normal layered install. It never passes `--allow-replacement`. After a live apply it adds
+  and removes a hidden launcher in `~/.local/share/applications`, since GNOME Shell doesn't notice the new
+  launcher in the live-updated `/usr` otherwise. A package applied live isn't flagged "after restart": the
+  booted deployment's `live-replaced` commit (or `rpm -q`) shows it's in the running system.
 - **copr:** If the project's repo isn't enabled, writes the same `.repo` file `dnf copr enable` would (same
   name, `gpgcheck=1` with the project's key) to a temp file and copies it into `/etc/yum.repos.d` with
   `pkexec install`, then layers the package through the rpmostree backend, or on package-based Fedora

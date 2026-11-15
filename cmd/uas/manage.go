@@ -25,6 +25,7 @@ func runInstall(ctx context.Context, args []string) error {
 	source := fs.String("source", "", "install from this source instead of the recommended one")
 	scope := fs.String("scope", "", "Flatpak scope: user or system (default from settings)")
 	yes := fs.Bool("y", false, "do not ask for confirmation")
+	noLive := fs.Bool("no-live", false, "layer a package for the next restart, even when it could work at once")
 	ids, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -98,6 +99,19 @@ func runInstall(ctx context.Context, args []string) error {
 	for _, n := range e.InstallNotes(l) {
 		fmt.Println(n)
 	}
+	// A layered package that only adds packages goes into the running system too, unless -no-live.
+	live := false
+	if !*noLive && e.CanInstallLive(l) {
+		p := newProgressPrinter()
+		p.report(backend.Progress{Message: "Checking whether it can work without a restart..."})
+		check := e.CheckLive(ctx, l)
+		p.done()
+		if live = check.OK; live {
+			fmt.Println("It can work right away, without a restart (-no-live waits for one).")
+		} else {
+			fmt.Printf("It takes effect after a restart: %s.\n", check.Why)
+		}
+	}
 	if !*yes {
 		ok, err := confirm("Install?")
 		if err != nil || !ok {
@@ -106,13 +120,20 @@ func runInstall(ctx context.Context, args []string) error {
 	}
 
 	p := newProgressPrinter()
-	err = e.Install(ctx, l, p.report)
+	if live {
+		err = e.InstallLive(ctx, l, p.report)
+	} else {
+		err = e.Install(ctx, l, p.report)
+	}
 	p.done()
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Installed %s.\n", app.Name)
-	if e.NeedsRestart(l.Source) {
+	switch {
+	case live:
+		fmt.Println("It's ready to use, no restart needed.")
+	case e.NeedsRestart(l.Source):
 		fmt.Println("Restart your computer to finish.")
 	}
 	return nil
