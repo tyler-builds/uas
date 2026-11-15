@@ -28,6 +28,8 @@ type DB struct {
 	// extensions is whether the catalog has the shell extensions' search index; catalogs built before
 	// extensions were added don't.
 	extensions bool
+	// appearance is whether the catalog has the fonts' and themes' search index.
+	appearance bool
 }
 
 // Open opens the catalog at path read-only and checks its schema version.
@@ -70,11 +72,12 @@ func (d *DB) loadMeta() error {
 	if err := d.db.QueryRow(`SELECT value FROM meta WHERE key = 'build'`).Scan(&build); err != nil {
 		return fmt.Errorf("read build info: %w", err)
 	}
-	var n int
-	if err := d.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'extensions_fts'`).Scan(&n); err != nil {
+	var ext, look int
+	if err := d.db.QueryRow(`SELECT count(*) FILTER (WHERE name = 'extensions_fts'),
+		count(*) FILTER (WHERE name = 'appearance_fts') FROM sqlite_master`).Scan(&ext, &look); err != nil {
 		return fmt.Errorf("read tables: %w", err)
 	}
-	d.extensions = n > 0
+	d.extensions, d.appearance = ext > 0, look > 0
 	return json.Unmarshal([]byte(build), &d.info)
 }
 
@@ -125,15 +128,28 @@ type SearchOptions struct {
 	// Shell, with Extensions, keeps only the extensions that have a version for this GNOME Shell release, by
 	// major version ("51").
 	Shell string
+	// Kind, an appearance kind (KindFont, KindIconTheme or KindCursorTheme), searches the fonts or themes of
+	// that kind instead of apps.
+	Kind Kind
 }
 
 // table is the search index the options search.
 func (o SearchOptions) table() string {
-	if o.Extensions {
+	switch {
+	case o.Extensions:
 		return "extensions_fts"
+	case o.Kind.Appearance():
+		return "appearance_fts"
 	}
 	return "apps_fts"
 }
+
+// kindFilter is a WHERE term that keeps the apps a of the kind bound to param ("?7"), or every kind when it
+// is empty.
+func kindFilter(param string) string { return `(` + param + ` = '' OR a.kind = ` + param + `)` }
+
+// appKinds is a WHERE term that keeps the apps a that are apps: not shell extensions, fonts or themes.
+const appKinds = `a.kind NOT IN ('shell-extension', 'font', 'icon-theme', 'cursor-theme')`
 
 // shellFilter is a WHERE term that keeps the apps a with a listing for the GNOME Shell release bound to
 // param ("?6"), or everything when that is empty.
@@ -147,7 +163,7 @@ func shellFilter(param string) string {
 // see search.
 func (d *DB) Search(ctx context.Context, query string, opt SearchOptions) ([]SearchResult, error) {
 	words := queryWords(query)
-	if len(words) == 0 || (opt.Extensions && !d.extensions) {
+	if len(words) == 0 || (opt.Extensions && !d.extensions) || (opt.Kind.Appearance() && !d.appearance) {
 		return nil, nil
 	}
 	if len(words) == 1 && len([]rune(words[0])) <= 2 && synonyms[words[0]] == nil && orderBy(opt.Order) == "" {
@@ -208,8 +224,9 @@ func (d *DB) searchShort(ctx context.Context, word string, opt SearchOptions) ([
 		WHERE `+fts+` MATCH ?1
 		  AND (?4 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?4))
 		  AND `+shellFilter("?5")+`
+		  AND `+kindFilter("?6")+`
 		ORDER BY lower(a.name) = ?2 DESC, a.popularity DESC, a.stars DESC, lower(a.name)
-		LIMIT ?3`, `name : "`+word+`"*`, word, limitOr(opt.Limit), string(opt.Source), opt.Shell)
+		LIMIT ?3`, `name : "`+word+`"*`, word, limitOr(opt.Limit), string(opt.Source), opt.Shell, string(opt.Kind))
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -239,8 +256,10 @@ func (d *DB) search(ctx context.Context, match string, r ranking, opt SearchOpti
 		WHERE `+fts+` MATCH ?1
 		  AND (?4 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?4))
 		  AND `+shellFilter("?6")+`
+		  AND `+kindFilter("?7")+`
 		ORDER BY `+sort+`
-		LIMIT ?3`, match, r.exactName, limitOr(opt.Limit), string(opt.Source), r.wholeWords, opt.Shell)
+		LIMIT ?3`, match, r.exactName, limitOr(opt.Limit), string(opt.Source), r.wholeWords, opt.Shell,
+		string(opt.Kind))
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -263,6 +282,8 @@ type BrowseQuery struct {
 	// Shell, with Extensions, keeps only the extensions that have a version for this GNOME Shell release, by
 	// major version ("51").
 	Shell string
+	// Kind, an appearance kind, lists the fonts or themes of that kind instead of apps.
+	Kind Kind
 }
 
 // Browse lists apps without a search.
@@ -278,11 +299,11 @@ func (d *DB) Browse(ctx context.Context, q BrowseQuery) ([]SearchResult, error) 
 		  AND (?2 = '' OR a.id IN (SELECT app_id FROM listings WHERE source = ?2))
 		  AND a.popularity >= ?3
 		  AND (?4 = 0 OR (a.kind = 'desktop-application' AND a.icon_url != ''))
-		  AND (a.kind = 'shell-extension') = ?6
+		  AND CASE WHEN ?6 THEN a.kind = 'shell-extension' WHEN ?8 != '' THEN a.kind = ?8 ELSE `+appKinds+` END
 		  AND `+shellFilter("?7")+`
 		ORDER BY `+sort+`
 		LIMIT ?5`, q.Category, string(q.Source), q.MinPopularity, q.AppsOnly, limitOr(q.Limit), q.Extensions,
-		q.Shell)
+		q.Shell, string(q.Kind))
 	if err != nil {
 		return nil, fmt.Errorf("browse: %w", err)
 	}
@@ -417,10 +438,10 @@ func (d *DB) Resolve(ctx context.Context, name string) (*App, error) {
 	return nil, &AmbiguousError{Name: name, IDs: ids}
 }
 
-// Named returns the IDs of the apps (not shell extensions) with a name, whatever its case.
+// Named returns the IDs of the apps (not shell extensions, fonts or themes) with a name, whatever its case.
 func (d *DB) Named(ctx context.Context, name string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT id FROM apps
-		WHERE lower(name) = lower(?1) AND kind != 'shell-extension' ORDER BY popularity DESC, id LIMIT 20`,
+	rows, err := d.db.QueryContext(ctx, `SELECT id FROM apps a
+		WHERE lower(name) = lower(?1) AND `+appKinds+` ORDER BY popularity DESC, id LIMIT 20`,
 		strings.TrimSpace(name))
 	if err != nil {
 		return nil, err
@@ -528,8 +549,8 @@ func (d *DB) Packages(ctx context.Context, src SourceID, distro string) (map[str
 
 // ByRepo returns the app whose code is in a release source's repo ("owner/name" on src.Host()), whatever
 // the case of the name: the app with that repo's release listing, else an app whose source code link is the
-// repo, the most popular if several are. Shell extensions are left out. It returns ErrNotFound when no app
-// is.
+// repo, the most popular if several are. Shell extensions, fonts and themes are left out. It returns
+// ErrNotFound when no app is.
 func (d *DB) ByRepo(ctx context.Context, src SourceID, repo string) (*App, error) {
 	ref := repo
 	if src != SourceGitHub {
@@ -539,7 +560,7 @@ func (d *DB) ByRepo(ctx context.Context, src SourceID, repo string) (*App, error
 	var id string
 	err := d.db.QueryRowContext(ctx, `
 		SELECT l.app_id FROM listings l JOIN apps a ON a.id = l.app_id
-		WHERE a.kind != 'shell-extension' AND (
+		WHERE `+appKinds+` AND (
 			(l.source = ?1 AND lower(l.ref) = lower(?2)) OR
 			lower(rtrim(json_extract(l.data, '$.vcs_url'), '/')) IN (lower(?3), lower(?3) || '.git'))
 		ORDER BY l.source != ?1, a.popularity DESC, l.app_id LIMIT 1`, string(src), ref, web).Scan(&id)

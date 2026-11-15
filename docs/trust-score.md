@@ -1,6 +1,6 @@
 # Trust score
 
-GitHub and Codeberg releases and COPR projects are not reviewed by any distribution, so uas scores each listing from
+GitHub and Codeberg releases, COPR projects and Pling themes are not reviewed by any distribution, so uas scores each listing from
 public signals and shows the breakdown next to the install button, not only the number. Code:
 `internal/indexer/trust`.
 
@@ -44,6 +44,31 @@ uses the project's last 30 builds.
 COPR listings below 30 are left out. COPR warnings: "No successful build in the past year", "Most recent
 builds failed".
 
+## Pling signals (0 to 100)
+
+Icon and cursor themes from Pling (gnome-look.org) are scored from what Pling publishes about the item.
+Pling verifies no publisher and signs nothing, and anyone can upload, so the score is built to stay below
+what a well-kept GitHub project gets: 15 points are never given, and the checksum earns half.
+
+| Signal | Max | Points |
+| --- | --- | --- |
+| Age | 15 | on Pling under 3 months 0, under a year 5, 1 to 2 years 10, longer 15 |
+| Downloads | 25 | log scale: 1,000 ≈ 12, 10,000 ≈ 17, 100,000 ≈ 21, 1,000,000+ 25 (Pling's counts are rough) |
+| Rating | 20 | 80+ 20, 70+ 14, 60+ 8, lower 0. Pling gives an item nobody rated exactly 50, which counts as not rated: 0 |
+| Last change | 15 | within a year 15, 2 years 10, 3 years 5, older 0 |
+| Checksum | 10 | always 5: uas records the file's SHA-256 when it builds the catalog (Pling publishes only an MD5) |
+| Verified publisher | 15 | always 0: Pling doesn't verify who uploads |
+
+Pling warnings: "No ratings yet", "Not changed in over 3 years: it may not cover newer apps".
+
+What gets into the catalog from Pling: items with at least 10,000 downloads (icon themes) or 3,000 (cursor
+themes), not excluded by Pling's moderators, with at least one file uas would install. A file is refused if it
+holds a program, script, library, launcher, plugin, QML or JavaScript anywhere, isn't an archive uas opens,
+or holds no icon or cursor theme it can tell apart (see docs/architecture.md). There is no minimum score.
+
+Fonts come from Google Fonts' repository, whose families Google's fonts team chooses and checks, and from
+the Nerd Fonts project's releases, checked against GitHub's checksum. They have no trust score.
+
 ## GitHub warnings
 
 Shown whatever the score:
@@ -74,6 +99,11 @@ it isn't in the catalog. What the client enforces below applies to it all the sa
   doesn't match it. Codeberg files are checked against the SHA-256 the indexer recorded.
 - The launcher's `Exec` line is rebuilt to run only the AppImage. Other commands in the app's own desktop
   entry (such as extra actions) are not copied.
+- A Pling theme is installed only if its download matches the size and SHA-256 the indexer recorded, from a
+  fresh link on Pling's own hosts. Only images and theme files are written: nothing in the archive is run,
+  and no link from it is written as a link.
+- A Google font file must match its pinned SHA-256 and come from the google/fonts repository, at the commit
+  the catalog names; a Nerd Font archive must match GitHub's SHA-256 and may hold only TTF and OTF files.
 
 ## Known gaps
 

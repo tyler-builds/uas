@@ -53,7 +53,9 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 		}
 	}
 	// Extension updates wait for the next login, so they are listed apart and Update all leaves them be.
+	// Fonts and themes are listed apart too, with their own Update.
 	waiting := a.extensionUpdates(ctx)
+	looks := a.lookUpdates(ctx)
 	actions := ui.Div().Row().Align(ui.Center).Gap(space2).
 		Child(checkedLabel(a.lastChecked(), ups.Fetching)).
 		Child(ui.If(len(with) > 0, ui.Button(updatesLabel(len(with))).Icon(icons.Download).Primary().Small().
@@ -66,14 +68,15 @@ func (a *App) updatesPage(ctx *ui.Context) ui.Element {
 	switch {
 	case res.Loading || ups.Loading:
 		return scroll(page.Child(ui.Skeleton().Height(ui.Px(80))))
-	case len(with) == 0 && len(waiting) == 0:
+	case len(with) == 0 && len(waiting) == 0 && len(looks.Data) == 0:
 		return scroll(page.Child(ui.Empty("Everything is up to date").Icon(icons.CircleCheck).
 			Description("uas checks for updates every ten minutes while it runs.")).
-			Child(a.extUpdatesSection(ctx)))
+			Child(a.extUpdatesSection(ctx)).Child(a.lookUpdatesSection(ctx)))
 	case len(with) == 0:
-		return scroll(page.Child(a.extUpdatesSection(ctx)))
+		return scroll(page.Child(a.extUpdatesSection(ctx)).Child(a.lookUpdatesSection(ctx)))
 	}
-	return fixed(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")).Child(a.extUpdatesSection(ctx)))
+	return fixed(page.Child(a.filteredList(ctx, with, ups.Data, "with updates")).Child(a.extUpdatesSection(ctx)).
+		Child(a.lookUpdatesSection(ctx)))
 }
 
 // filteredList shows apps narrowed by the top bar's filter and the source chips, with a count. The chips

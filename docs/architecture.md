@@ -158,6 +158,45 @@ All endpoints below need confirming during the first spike.
   listed, so all are kept. Listings are `Kind` `shell-extension` with the UUID as their ref; icons and the
   one screenshot link to the site.
 
+- **Icon and cursor themes** (`fetch/pling`): the Pling store family (gnome-look.org, store.kde.org) through
+  OpenDesktop's OCS API at `api.opendesktop.org/ocs/v1` (the same paths under gnome-look.org answer 410
+  Gone), no key: categories 132 (icon themes) and 107 (cursor themes), most downloaded first, 100 a page,
+  down to a floor of 10,000 downloads for icon themes and 3,000 for cursor themes (about 300 of each in
+  November 2026; `-pling-min-downloads`, `-pling-min-cursor-downloads`). Items Pling's moderators exclude
+  (`ghns_excluded`) are left out. Listings are `Kind` `icon-theme` or `cursor-theme`, ref the item ID, with
+  downloads (`Installs`; Pling's counts are rough, its list and item views disagree), its rating (`Score`,
+  where Pling gives an unrated item 50, which uas never shows as a rating), the licence from its tags, its
+  preview pictures (linked, like screenshots) and a trust score (`trust.Pling`). Each of an item's files
+  (up to 30) is an `AssetTheme`: the indexer downloads it once through the list's own download link,
+  checks Pling's MD5, records its SHA-256 and size, and reads it with `internal/appearance` (below), which
+  gives the theme folders inside (`Asset.Themes`, the variants the user picks from) or refuses it. A refused
+  file is left out, and an item with none left is too. In the November 2026 sample, a `.desktop` file inside
+  Candy icons and a theme nested inside another (Layan) were refused. What was found is kept per item, file
+  name and MD5 (`pling/pins` in the indexer cache), so a file is read again only when its author replaces it,
+  or when the rules change (`appearance.RulesVersion`). The links themselves expire after two days, redirect
+  to storage valid for an hour, and are refused after a few reuses (429 with `retry-after: 900`), so the
+  catalog holds none: the client asks for a fresh one at install time. New files are downloaded within a
+  per-run budget (`-pling-pin-files`, `-pling-pin-mb`), and an item waits for a later run until all its
+  files are read, so the first runs fill the catalog in over a day. Pling publishes no rate limit; pages and
+  downloads are spaced a second apart, with a generic User-Agent.
+- **Fonts from Google Fonts** (`fetch/googlefonts`): the github.com/google/fonts repo at the commit `main`
+  points at, not the Google Fonts Developer API (it needs a key, and its terms forbid embedding one in an
+  open-source project). One GitHub API call reads the recursive tree; each family's `METADATA.pb` (a text
+  protocol buffer, read by a small parser) and description come from raw.githubusercontent.com, kept by git
+  blob hash. Listings are `Kind` `font`, ref the family's folder (`roboto`), with the designer, the licence
+  (OFL, Apache, UFL), the category and one `AssetFont` per file, the regular upright one first (previews draw
+  it), with links that name the commit so a file never changes under its checksum. Every file is downloaded
+  once and checked as a font to record its SHA-256 (kept by blob hash): about 2.5 GB in all, so a run
+  downloads at most `-google-fonts-pin-mb` (800 MB) of new files, the most popular families first, and a
+  family is listed once all its files are. fonts.google.com/metadata/fonts (no key) gives each family's
+  popularity rank (`Listing.Rank`) and last change; it is optional.
+- **Nerd Fonts** (`fetch/nerdfonts`): the latest release of ryanoasis/nerd-fonts, one listing per `.tar.xz`
+  (72 in November 2026), with its download count and the SHA-256 GitHub publishes for the file
+  (`AssetFontArchive`), so nothing is downloaded.
+
+  These three are cached for 5 hours (`-appearance-cache-for`), less than the other slow sources, so each
+  run reads the next files of the budget.
+
 Each fetcher returns `[]catalog.Listing` (one app from one source) and stores raw responses as fixtures for tests.
 
 Fetchers run in parallel, so the slow passes (GitHub, COPR) overlap. Slow sources are wrapped in
@@ -213,6 +252,7 @@ only the number. Details go in `docs/trust-score.md` (to write).
 | Homebrew | Medium-high | Reviewed formula, install analytics |
 | COPR | Low-medium | Project age, build success rate, last build date, number of maintainers |
 | GitHub | Low | Repo age, stars, contributors, release cadence, last commit, license, asset digests, signatures or attestations |
+| Pling | Lower | Item age, downloads, rating, last change, checksum recorded by uas; no publisher verification |
 
 Hard flags (shown as warnings regardless of score): archived repo, repo under 30 days old, no release in 18 months,
 no published checksum, owner changed recently.
@@ -255,6 +295,15 @@ extensions, never both. They are also kept out of the build info's `sources` and
 own `extensions` entry). Together that hides them from versions of uas from before extensions, which would
 otherwise show them in app searches with no way to install them, so adding them needed no schema version
 change.
+
+**Fonts and themes in the catalog.** Fonts, icon themes and cursor themes (`Kind` `font`, `icon-theme`,
+`cursor-theme`) are in every edition the same way: rows of the `apps` and `listings` tables with their own
+search index (`appearance_fts`), searched and listed only when asked for by kind (`SearchOptions.Kind`,
+`BrowseQuery.Kind`), never merged with apps or each other (`merge`), and with their fetch status in the build
+info's `appearance` list, not `sources`, and out of the app count. Released clients therefore never see
+them: their app searches use `apps_fts`, their browsing lists desktop apps or one source of
+`SourcePrecedence`, which the new sources aren't in. No schema version change was needed. A Google font's
+popularity is its rank, which `Listing.Popularity` turns into a number that sorts with Nerd Fonts' downloads.
 
 **Free-tier fit:** R2's free tier (10 GB, no egress fees) holds this easily: the Flathub-only catalog is
 5.4 MB compressed (27 MB uncompressed). The Worker's free tier allows 100,000 requests a day, and each client
@@ -565,6 +614,65 @@ anything off, and it says why for the rest ("no version for GNOME 51", "came wit
 own settings (dconf) aren't exported. Older versions of uas ignore the field, so the export format is still
 version 1.
 
+### Fonts, icon themes and cursor themes
+
+**Reading archives** (`internal/appearance`, shared by the indexer and the client). A theme archive
+(`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar.zst` or `.zip`; 7-Zip and RAR are refused) is read entry by entry
+before anything is written. It is refused for an entry with an absolute path or one that leaves the archive,
+a device or pipe, more than 200,000 entries, more than 2 GB unpacked or a file over 64 MB, and for any
+program or script anywhere in it: ELF files, files starting with `#!`, and files named like scripts,
+libraries, launchers, plugins, QML, JavaScript, build files (`Makefile`, `meson.build`) or other archives.
+Themes are found by folder: an `index.theme` whose `[Icon Theme]` section lists icon folders is an icon
+theme, a `cursors` folder a cursor theme. The archive is refused when none is found, or they can't be told
+apart cleanly: a theme with no folder of its own, one inside another, two of one name, or a name that would
+take over the desktop's own (`default`, `hicolor`). Themes rely on links (a cursor theme names one cursor
+many ways, Papirus-Dark links most of its folders to Papirus's), so links are allowed but never written: a
+link to a file or folder inside the archive becomes hard links between files the package wrote (or copies),
+and a link that leads anywhere else (out of the archive, to an absolute path, to nothing) is left out, with
+nothing written for it. Everything is written through an `os.Root` on a new, empty folder, without execute
+permission, and a theme's own `icon-theme.cache` is left out. Papirus, whose variants and `@2x` folders are
+links, unpacks to about 890,000 entries this way, in about 25 seconds. Font archives may hold only TTF and
+OTF files (and their licence and readme, which are skipped), each checked with a font parser.
+
+**Installing** (`internal/client/appearance`, `session.InstallLook`). Everything is per user, with no root.
+A theme's file is chosen by the variant picked; the client asks Pling's API for the item's files
+(`/content/data/<id>`), finds the file by name and MD5 (an author can reorder files; a changed MD5 means the
+file changed since the catalog was built, and it stops there), takes its fresh link (only on Pling's own
+hosts, over HTTPS), downloads it into a new folder under `~/.local/share/uas/staging`, and refuses it unless
+its size and SHA-256 are the catalog's. Every theme in the file is installed, as `~/.local/share/icons/<name>`
+(not `~/.icons`, which Flatpak apps can't see), since variants inherit from each other. A name that would
+replace a theme uas didn't install, hide one in `~/.icons`, or hide one of the system's is refused before
+the download. Google fonts are downloaded file by file from the pinned commit (`raw.githubusercontent.com`
+only), checked against their SHA-256 and as fonts; Nerd Fonts' archive from its GitHub release. Fonts go to
+`~/.local/share/fonts/uas/<source>-<family>/`, then `fc-cache` runs. uas creates `~/.local/share/fonts` when
+it starts, since Flatpak shows apps the user's fonts only if the folder exists when the app starts. Each
+install is recorded in the state file (`appearance`: catalog ID, version, file, SHA-256, themes or font
+families, paths written), which removal and updates use; removal deletes only those paths, and only under
+the two folders uas installs to.
+
+**Using.** On GNOME, `gsettings` sets `org.gnome.desktop.interface`'s `icon-theme`, `cursor-theme`, and
+`font-name`, `document-font-name` or `monospace-font-name` (keeping the size). On KDE Plasma,
+`plasma-changeicons` and `plasma-apply-cursortheme` change icons and cursors (fonts are installed only).
+Other desktops install only. Before the first change of a setting the state file saves its value
+(`saved_settings`); Revert puts it back, and removing a font or theme that is in use reverts first (or resets
+the setting when uas didn't change it).
+
+**The Appearance page** (`gui/appearance.go`) has tabs Fonts, Icons and Cursors, each a grid of cards, most
+popular first (or recently updated, or by name), searched from the top bar, and Installed: what uas
+installed with what it's in use for, the settings it changed with Revert, and every icon and cursor theme
+on the system, the one in use marked and the others with Use. A theme's page shows its preview pictures
+(linked from Pling, as screenshots are), downloads, rating (or "Not rated"), last change, version, trust
+score, the variant picker, and Install, Install and use, Use, Remove and Revert. **Font previews**: Jamb
+draws text only in fonts registered when the app starts and the desktop's own families, so a font that
+isn't installed can't be set on a text. uas draws the sample itself instead (`gui/fontpreview.go`): go-text
+(already in the build through Jamb) shapes it, at regular weight for a variable font, and
+`golang.org/x/image/vector` fills the outlines into an image. The file is the family's first (regular),
+downloaded into `~/.cache/uas/fonts` and checked against the catalog, which the install then reuses. Cards
+download it only when it is under 1 MB; Nerd Fonts come as one archive per family, so they are previewed
+once installed. A font lacking letters of the sample (a CJK font) says it is for another script. **Updates**
+for fonts and themes uas installed are listed in their own section of the Updates page, when the catalog's
+file has another SHA-256 than the installed one. CLI: `uas appearance`.
+
 ### Back up and restore
 
 `session/export.go`. An export is JSON: each installed app's source, ref, app ID, package and name, the
@@ -677,6 +785,7 @@ uas/
 ├── internal/
 │   ├── catalog/             # shared types, SQLite schema, FTS queries (rebuilt each run, no migrations)
 │   ├── manifest/            # signed manifest envelope (shared by indexer and client)
+│   ├── appearance/          # safe reading of theme and font archives (shared by indexer and client)
 │   ├── indexer/
 │   │   ├── appstream/       # AppStream XML parser (Flathub, Fedora)
 │   │   ├── fetch/           # Fetcher interface, HTTP cache with ETags
@@ -685,7 +794,10 @@ uas/
 │   │   │   ├── copr/
 │   │   │   ├── homebrew/
 │   │   │   ├── github/
-│   │   │   └── gnome/       # extensions.gnome.org
+│   │   │   ├── gnome/       # extensions.gnome.org
+│   │   │   ├── pling/       # icon and cursor themes from Pling
+│   │   │   ├── googlefonts/ # github.com/google/fonts
+│   │   │   └── nerdfonts/   # Nerd Fonts releases
 │   │   ├── merge/           # dedupe and linking
 │   │   ├── trust/           # scoring
 │   │   └── publish/         # build db, compress, sign, upload
@@ -702,6 +814,7 @@ uas/
 │   │   ├── session/         # engine shared by CLI and GUI
 │   │   ├── settings/
 │   │   ├── shellext/        # GNOME Shell extensions, over the Shell's D-Bus service
+│   │   ├── appearance/      # installs, uses and removes fonts and themes for the user
 │   │   ├── telemetry/      # Event, Sink interface, no-op sink
 │   │   └── backend/
 │   │       ├── backend.go   # interface

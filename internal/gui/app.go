@@ -20,6 +20,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/refresh"
 	"github.com/tyler-builds/uas/internal/client/session"
 	"github.com/tyler-builds/uas/internal/client/shellext"
+	"github.com/tyler-builds/uas/internal/client/state"
 )
 
 // Pages. A view is a page and its argument: the category key, the source, or the app ID.
@@ -37,6 +38,9 @@ const (
 	// pageExtensions lists GNOME Shell extensions; pageExtension is one extension, by its catalog ID.
 	pageExtensions = "extensions"
 	pageExtension  = "extension"
+	// pageAppearance lists fonts and icon and cursor themes; pageLook is one of them, by its catalog ID.
+	pageAppearance = "appearance"
+	pageLook       = "look"
 )
 
 // view is one place in the app.
@@ -47,11 +51,15 @@ type view struct {
 
 // isList reports whether the view is one whose own lists the top bar filters, such as Installed and Updates.
 func (v view) isList() bool {
-	return v.page == pageInstalled || v.page == pageUpdates || v.page == pageTools || v.page == pageExtensions
+	return v.page == pageInstalled || v.page == pageUpdates || v.page == pageTools || v.page == pageExtensions ||
+		v.page == pageAppearance
 }
 
-// isDetail reports whether the view is one app's or extension's page, which the sidebar has no item for.
-func (v view) isDetail() bool { return v.page == pageApp || v.page == pageExtension }
+// isDetail reports whether the view is one app's, extension's, font's or theme's page, which the sidebar has
+// no item for.
+func (v view) isDetail() bool {
+	return v.page == pageApp || v.page == pageExtension || v.page == pageLook
+}
 
 // navKey is the sidebar key of a view, such as "category:Game".
 func (v view) navKey() string {
@@ -112,6 +120,12 @@ type App struct {
 	extSearchOrder *ui.Signal[catalog.Order]
 	extRemoving    *ui.Signal[*shellext.Extension] // an extension's removal waiting for the user's OK
 
+	lookTab   *ui.Signal[string]        // the Appearance page's tab: lookFonts, lookIcons, lookCursors or lookInstalled
+	lookOrder *ui.Signal[catalog.Order] // how its grids are sorted
+	// lookSearchOrder is how its grids are sorted while the top bar has a search.
+	lookSearchOrder *ui.Signal[catalog.Order]
+	lookRemoving    *ui.Signal[*state.AppearanceInstall] // a font's or theme's removal waiting for the user's OK
+
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
 	mu         sync.Mutex
@@ -153,13 +167,17 @@ func New(s *session.Session) *App {
 			_, err := s.Migrate(ctx, m, p)
 			return err
 		},
-		clearLeftovers: func(l []gearlever.Entry) error { return s.ClearLeftovers(context.Background(), l) },
-		extTab:         ui.NewSignal(extInstalled),
-		extOrder:       ui.NewSignal(catalog.OrderPopular),
-		extSearchOrder: ui.NewSignal(catalog.OrderRelevance),
-		extRemoving:    ui.NewSignal[*shellext.Extension](nil),
-		catalogGen:     ui.NewSignal(0),
-		icons:          newIconLoader(),
+		clearLeftovers:  func(l []gearlever.Entry) error { return s.ClearLeftovers(context.Background(), l) },
+		extTab:          ui.NewSignal(extInstalled),
+		extOrder:        ui.NewSignal(catalog.OrderPopular),
+		extSearchOrder:  ui.NewSignal(catalog.OrderRelevance),
+		extRemoving:     ui.NewSignal[*shellext.Extension](nil),
+		lookTab:         ui.NewSignal(lookFonts),
+		lookOrder:       ui.NewSignal(catalog.OrderPopular),
+		lookSearchOrder: ui.NewSignal(catalog.OrderRelevance),
+		lookRemoving:    ui.NewSignal[*state.AppearanceInstall](nil),
+		catalogGen:      ui.NewSignal(0),
+		icons:           newIconLoader(),
 	}
 }
 
@@ -302,6 +320,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.whatsNewDialog(ctx)).
 		Child(a.installLinkDialog(ctx)).
 		Child(a.extRemoveDialog(ctx)).
+		Child(a.lookRemoveDialog(ctx)).
 		Child(a.migrateDialog(ctx)).
 		Child(a.uninstallDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
@@ -333,6 +352,10 @@ func (a *App) page(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		return a.extensionsPage(ctx, info)
 	case pageExtension:
 		return a.extensionPage(ctx, v.arg)
+	case pageAppearance:
+		return a.appearancePage(ctx, info)
+	case pageLook:
+		return a.lookPage(ctx, v.arg)
 	}
 	return a.homePage(ctx, info)
 }
@@ -392,6 +415,9 @@ func (a *App) sidebar(ctx *ui.Context, info catalog.BuildInfo, ready bool) ui.El
 	if a.s.Extensions != nil {
 		items = append(items, ui.SidebarItem{Key: pageExtensions, Label: "Extensions", Icon: icons.Puzzle})
 	}
+	if a.s.Looks != nil {
+		items = append(items, ui.SidebarItem{Key: pageAppearance, Label: "Appearance", Icon: icons.SwatchBook})
+	}
 	if a.s.Tools != nil {
 		items = append(items, ui.SidebarItem{Key: pageTools, Label: a.toolsTitle(), Icon: icons.SquareTerminal})
 	}
@@ -447,10 +473,16 @@ func (a *App) titleBar(ctx *ui.Context) ui.Element {
 			placeholder = "Filter commands…"
 		case pageExtensions:
 			placeholder = "Search extensions…"
+		case pageAppearance:
+			placeholder = "Search " + map[string]string{lookFonts: "fonts", lookIcons: "icon themes",
+				lookCursors: "cursor themes", lookInstalled: "what's installed"}[a.lookTab.Get()] + "…"
 		}
 		label := "Filter apps"
-		if v.page == pageExtensions {
+		switch v.page {
+		case pageExtensions:
 			label = "Search extensions"
+		case pageAppearance:
+			label = "Search fonts and themes"
 		}
 		search = ui.TextInput(a.listFilter).Label(label).Placeholder(placeholder).Icon(icons.ListFilter).
 			Small().Clearable().Width(ui.Full).Key("list-filter")
@@ -505,6 +537,8 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 			return a.toolsTitle()
 		case pageExtensions:
 			return "Extensions"
+		case pageAppearance:
+			return "Appearance"
 		}
 		return ""
 	}
@@ -556,6 +590,8 @@ func crumbIcon(v view) *icons.Icon {
 		return icons.SquareTerminal
 	case pageExtensions:
 		return icons.Puzzle
+	case pageAppearance:
+		return icons.SwatchBook
 	}
 	return icons.LayoutGrid
 }
@@ -623,14 +659,18 @@ func errText(err error) string {
 	return msg
 }
 
-// StartOn opens the app on a page by name: "updates", "installed", "settings" or "extensions". Others are
-// ignored.
+// StartOn opens the app on a page by name: "updates", "installed", "settings", "extensions" or
+// "appearance". Others are ignored.
 func (a *App) StartOn(page string) {
 	switch page {
 	case pageUpdates, pageInstalled, pageSettings:
 		a.goTo(view{page: page})
 	case pageExtensions:
 		if a.s.Extensions != nil {
+			a.goTo(view{page: page})
+		}
+	case pageAppearance:
+		if a.s.Looks != nil {
 			a.goTo(view{page: page})
 		}
 	}

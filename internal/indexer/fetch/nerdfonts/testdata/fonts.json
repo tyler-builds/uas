@@ -1,0 +1,49 @@
+{
+ "fonts": [
+  {
+   "unpatchedName": "0xProto",
+   "licenseId": "OFL-1.1-no-RFN",
+   "RFN": false,
+   "version": "2.502",
+   "patchedName": "0xProto",
+   "folderName": "0xProto",
+   "imagePreviewFont": "0xProto Nerd Font",
+   "imagePreviewFontSource": "0xProto/0xProto-Regular.ttf",
+   "linkPreviewFont": "oxproto",
+   "caskName": "0xproto",
+   "repoRelease": false,
+   "isMonospaced": true,
+   "description": "A programming font focused on source code legibility"
+  },
+  {
+   "unpatchedName": "JetBrains Mono",
+   "licenseId": "OFL-1.1-no-RFN",
+   "RFN": false,
+   "version": "2.304",
+   "patchedName": "JetBrainsMono",
+   "folderName": "JetBrainsMono",
+   "imagePreviewFont": "JetBrainsMono Nerd Font",
+   "imagePreviewFontSource": "JetBrainsMono/Ligatures/JetBrainsMono-Regular.ttf",
+   "linkPreviewFont": "jetbrainsmono",
+   "caskName": "jetbrains-mono",
+   "repoRelease": true,
+   "isMonospaced": true,
+   "description": "JetBrains officially created font for developers"
+  },
+  {
+   "unpatchedName": "Source Code Pro",
+   "licenseId": "OFL-1.1-RFN",
+   "RFN": true,
+   "version": "2.042",
+   "patchedName": "SauceCodePro",
+   "folderName": "SourceCodePro",
+   "imagePreviewFont": "SauceCodePro Nerd Font",
+   "imagePreviewFontSource": "SourceCodePro/SourceCodePro-Regular.ttf",
+   "linkPreviewFont": "source-code-pro",
+   "caskName": "sauce-code-pro",
+   "repoRelease": true,
+   "isMonospaced": true,
+   "description": "Monospaced font family for user interface and coding environments"
+  }
+ ]
+}

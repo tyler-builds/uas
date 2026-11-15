@@ -1,0 +1,80 @@
+{
+ "familyMetadataList": [
+  {
+   "family": "Lato",
+   "displayName": null,
+   "category": "Sans Serif",
+   "stroke": "Sans Serif",
+   "size": 51318,
+   "subsets": [
+    "menu",
+    "latin",
+    "latin-ext"
+   ],
+   "axes": [],
+   "designers": [
+    "\u0141ukasz Dziedzic"
+   ],
+   "lastModified": "2025-09-16",
+   "dateAdded": "2010-12-15",
+   "popularity": 9,
+   "trending": 877,
+   "defaultSort": 10,
+   "androidFragment": null,
+   "isNoto": false,
+   "primaryScript": "",
+   "primaryLanguage": "",
+   "isOpenSource": true,
+   "isBrandFont": false
+  },
+  {
+   "family": "Roboto",
+   "displayName": null,
+   "category": "Sans Serif",
+   "stroke": "Sans Serif",
+   "size": 509764,
+   "subsets": [
+    "menu",
+    "cyrillic",
+    "cyrillic-ext",
+    "greek",
+    "greek-ext",
+    "latin",
+    "latin-ext",
+    "math",
+    "symbols",
+    "vietnamese"
+   ],
+   "axes": [
+    {
+     "tag": "wdth",
+     "min": 75.0,
+     "max": 100.0,
+     "defaultValue": 100.0
+    },
+    {
+     "tag": "wght",
+     "min": 100.0,
+     "max": 900.0,
+     "defaultValue": 400.0
+    }
+   ],
+   "designers": [
+    "Christian Robertson",
+    "ParaType",
+    "Font Bureau"
+   ],
+   "lastModified": "2026-02-19",
+   "dateAdded": "2013-01-08",
+   "popularity": 2,
+   "trending": 1426,
+   "defaultSort": 1,
+   "androidFragment": null,
+   "isNoto": false,
+   "primaryScript": "",
+   "primaryLanguage": "",
+   "isOpenSource": true,
+   "isBrandFont": false
+  }
+ ]
+}

@@ -35,9 +35,9 @@ func Merge(listings []catalog.Listing) ([]catalog.App, []Hidden) {
 			continue
 		}
 		refs[ref] = true
-		if l.Kind == catalog.KindShellExtension {
+		if l.Kind == catalog.KindShellExtension || l.Kind.Appearance() {
 			// An extension is never an app's other source, even when it shares the app's name and repo
-			// (GSConnect, say), so each stays on its own.
+			// (GSConnect, say), so each stays on its own. So is a font or a theme.
 			extensions = append(extensions, l)
 			continue
 		}
@@ -241,7 +241,7 @@ func build(ls []catalog.Listing) catalog.App {
 		if len(a.Screenshots) == 0 {
 			a.Screenshots = l.Screenshots
 		}
-		a.Popularity = max(a.Popularity, l.Installs)
+		a.Popularity = max(a.Popularity, l.Popularity())
 		a.Stars = max(a.Stars, l.Stars)
 		if l.Released.After(a.Updated) {
 			a.Updated = l.Released

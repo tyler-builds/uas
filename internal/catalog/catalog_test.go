@@ -497,3 +497,83 @@ func TestExtensionsApart(t *testing.T) {
 	old.extensions = false
 	want("extension search of an older catalog", ids(old.Search(ctx, "editor", SearchOptions{Extensions: true})))
 }
+
+// TestAppearanceApart checks that fonts and themes are listed and searched only when asked for by kind, and
+// never as apps or extensions.
+func TestAppearanceApart(t *testing.T) {
+	look := func(src SourceID, ref string, kind Kind, name string, downloads, rank int) App {
+		l := Listing{Source: src, Ref: ref, Kind: kind, Name: name, Summary: name + " for the desktop",
+			Installs: downloads, Rank: rank}
+		return App{ID: AppearanceAppID(src, ref), Kind: kind, Name: name, Summary: l.Summary,
+			Popularity: l.Popularity(), Listings: []Listing{l}}
+	}
+	apps := append(testApps(),
+		look(SourcePling, "1166289", KindIconTheme, "Papirus", 2786767, 0),
+		look(SourcePling, "1305251", KindIconTheme, "Candy icons", 3118105, 0),
+		look(SourcePling, "1411743", KindCursorTheme, "WhiteSur cursors", 1225883, 0),
+		look(SourceGoogleFonts, "roboto", KindFont, "Roboto", 0, 1),
+		look(SourceGoogleFonts, "editor-sans", KindFont, "Editor Sans", 0, 900),
+		look(SourceNerdFonts, "JetBrainsMono", KindFont, "JetBrainsMono Nerd Font", 300000, 0))
+	path := filepath.Join(t.TempDir(), "catalog.db")
+	info := BuildInfo{BuiltAt: time.Unix(1770000000, 0).UTC(), Apps: 3,
+		Appearance: []SourceStatus{{Source: SourcePling, Listings: 3}, {Source: SourceGoogleFonts, Listings: 2}}}
+	if err := Write(context.Background(), path, apps, info); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	ids := func(rs []SearchResult, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rs {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+	want := func(what string, got []string, ids ...string) {
+		t.Helper()
+		if !slices.Equal(got, ids) {
+			t.Errorf("%s = %q, want %q", what, got, ids)
+		}
+	}
+	if st, ok := db.Info().AppearanceStatus(SourcePling); !ok || st.Listings != 3 {
+		t.Errorf("AppearanceStatus = %+v, %v", st, ok)
+	}
+	// Apps never include fonts or themes.
+	want("app search", ids(db.Search(ctx, "editor", SearchOptions{})), "org.example.Editor", "org.example.EditorPlus")
+	want("app browse", ids(db.Browse(ctx, BrowseQuery{Order: OrderName})),
+		"org.example.Editor", "org.example.EditorPlus", "org.example.Browser")
+	want("extension browse", ids(db.Browse(ctx, BrowseQuery{Extensions: true})))
+	if got, err := db.Named(ctx, "Papirus"); err != nil || len(got) != 0 {
+		t.Errorf("Named(Papirus) = %v, %v", got, err)
+	}
+	// Each kind on its own; fonts from both sources sort together by popularity.
+	want("font browse", ids(db.Browse(ctx, BrowseQuery{Kind: KindFont})),
+		"google-fonts:roboto", "nerd-fonts:JetBrainsMono", "google-fonts:editor-sans")
+	want("icon browse", ids(db.Browse(ctx, BrowseQuery{Kind: KindIconTheme})), "pling:1305251", "pling:1166289")
+	want("cursor browse", ids(db.Browse(ctx, BrowseQuery{Kind: KindCursorTheme})), "pling:1411743")
+	want("font search", ids(db.Search(ctx, "editor", SearchOptions{Kind: KindFont})), "google-fonts:editor-sans")
+	want("short icon search", ids(db.Search(ctx, "pa", SearchOptions{Kind: KindIconTheme})), "pling:1166289")
+	want("icon search for a cursor", ids(db.Search(ctx, "whitesur", SearchOptions{Kind: KindIconTheme})))
+	want("cursor search", ids(db.Search(ctx, "whitesur", SearchOptions{Kind: KindCursorTheme})), "pling:1411743")
+	// A catalog from before appearance items has none to find.
+	old := writeTestCatalog(t)
+	old.appearance = false
+	want("font search of an older catalog", ids(old.Search(ctx, "editor", SearchOptions{Kind: KindFont})))
+}
+
+func TestListingRated(t *testing.T) {
+	for score, want := range map[int]bool{0: false, 50: false, 49: true, 93: true} {
+		l := Listing{Score: score}
+		if l.Rated() != want {
+			t.Errorf("Rated(%d) = %v", score, !want)
+		}
+	}
+}

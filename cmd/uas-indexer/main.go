@@ -27,7 +27,10 @@ import (
 	"github.com/tyler-builds/uas/internal/indexer/fetch/forge"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/github"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/gnome"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/googlefonts"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/homebrew"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/nerdfonts"
+	"github.com/tyler-builds/uas/internal/indexer/fetch/pling"
 	"github.com/tyler-builds/uas/internal/indexer/fetch/snap"
 	"github.com/tyler-builds/uas/internal/indexer/publish"
 	"github.com/tyler-builds/uas/internal/manifest"
@@ -46,12 +49,27 @@ func main() {
 		"reuse results of slow sources (GitHub, COPR) younger than this")
 	fedoraReleases := flag.String("fedora-releases", "", "comma-separated Fedora releases to index (default: the two newest)")
 	sources := flag.String("sources",
-		"flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap,gnome-extensions",
+		"flathub,fedora,homebrew,github,copr,codeberg,debian,ubuntu,arch,snap,gnome-extensions,pling,google-fonts,nerd-fonts",
 		"comma-separated sources to index (github needs $GITHUB_TOKEN)")
 	codebergMinStars := flag.Int("codeberg-min-stars", forge.DefaultCodebergMinStars,
 		"check Codeberg repos with at least this many stars")
 	editionsDir := flag.String("editions-dir", "", "also write one catalog per edition (kind of system) here;\n"+
 		"publishing writes them next to -out when this is empty")
+	plingMin := flag.Int("pling-min-downloads", pling.DefaultMinDownloads,
+		"list Pling icon themes downloaded at least this many times")
+	plingMinCursors := flag.Int("pling-min-cursor-downloads", pling.DefaultMinCursorDownloads,
+		"list Pling cursor themes downloaded at least this many times")
+	plingItems := flag.Int("pling-max-items", 0, "read at most this many Pling items per category (0: no cap)")
+	plingFiles := flag.Int("pling-max-files", pling.DefaultMaxFiles, "read at most this many files per Pling item")
+	plingPins := flag.Int("pling-pin-files", 400, "download at most this many new Pling files a run (0: no cap)")
+	plingPinMB := flag.Int64("pling-pin-mb", 4000, "download at most this many MB of new Pling files a run (0: no cap)")
+	fontPinMB := flag.Int64("google-fonts-pin-mb", 800,
+		"download at most this many MB of new Google font files a run (0: no cap)")
+	fontFamilies := flag.Int("google-fonts-max-families", 0,
+		"read at most this many Google font families, the most popular first (0: no cap)")
+	lookCacheFor := flag.Duration("appearance-cache-for", 5*time.Hour,
+		"reuse results of the font and theme sources younger than this; shorter than -slow-cache-for, since each\n"+
+			"run pins more files within its budget and re-reading them costs a few requests")
 	keygen := flag.String("keygen", "", "write a new signing key to this file, print its public key, and exit")
 	flag.Parse()
 	if *keygen != "" {
@@ -147,6 +165,25 @@ func main() {
 	available["gnome-extensions"] = &fetch.Cached{Fetcher: &gnome.Fetcher{Client: client, Log: log},
 		Dir: filepath.Join(*cache, "results"), For: *slowCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
 		Key: fmt.Sprintf("schema=%d first=%d v=1", catalog.SchemaVersion, gnome.FirstShell)}
+	// Fonts and themes. Pling and google/fonts download each new file once to pin its SHA-256 (kept in the
+	// cache), within a per-run budget, so the first runs fill in over a day; they are cached like the slow
+	// sources, for less long (-appearance-cache-for), so each scheduled run pins more. Nerd Fonts' checksums come
+	// from GitHub, so it only reads one release.
+	available["pling"] = &fetch.Cached{Fetcher: &pling.Fetcher{Client: client, CacheDir: filepath.Join(*cache, "pling"),
+		MinDownloads: *plingMin, MinCursorDownloads: *plingMinCursors, MaxItems: *plingItems, MaxFiles: *plingFiles, PinCount: *plingPins,
+		PinBytes: *plingPinMB << 20, Log: log},
+		Dir: filepath.Join(*cache, "results"), For: *lookCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: fmt.Sprintf("schema=%d v=1 pin=%d min=%d/%d items=%d files=%d", catalog.SchemaVersion,
+			pling.PinVersion, *plingMin, *plingMinCursors, *plingItems, *plingFiles)}
+	available["google-fonts"] = &fetch.Cached{Fetcher: &googlefonts.Fetcher{Client: client,
+		Token: os.Getenv("GITHUB_TOKEN"), CacheDir: filepath.Join(*cache, "google-fonts"), PinBytes: *fontPinMB << 20,
+		MaxFamilies: *fontFamilies, Log: log},
+		Dir: filepath.Join(*cache, "results"), For: *lookCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: fmt.Sprintf("schema=%d v=1 pin=%d families=%d", catalog.SchemaVersion, googlefonts.PinVersion,
+			*fontFamilies)}
+	available["nerd-fonts"] = &fetch.Cached{Fetcher: &nerdfonts.Fetcher{Client: client, Token: os.Getenv("GITHUB_TOKEN")},
+		Dir: filepath.Join(*cache, "results"), For: *lookCacheFor, Stale: 7 * 24 * time.Hour, Log: log,
+		Key: fmt.Sprintf("schema=%d v=1", catalog.SchemaVersion)}
 	var fetchers []fetch.Fetcher
 	for _, name := range strings.Split(*sources, ",") {
 		f, ok := available[strings.TrimSpace(name)]

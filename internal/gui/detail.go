@@ -865,8 +865,12 @@ func trustPanel(ctx *ui.Context, l catalog.Listing) ui.Element {
 		color, verdict = t.Warning, "Some evidence"
 	}
 	what := "How well kept this GitHub project is. It doesn't review the code."
-	if l.Source == catalog.SourceCOPR {
+	switch l.Source {
+	case catalog.SourceCOPR:
 		what = "How well kept this COPR project is, from its build history. Fedora doesn't review it."
+	case catalog.SourcePling:
+		what = "How much evidence there is that this Pling item is used and kept up. Nobody reviews what is " +
+			"uploaded to Pling, so it scores lower than a GitHub project could."
 	}
 	score := ui.Div().Column().Align(ui.Center).Justify(ui.Center).Size(ui.Px(84), ui.Px(84)).Radius(42).
 		Border(3, color).Background(color.Alpha(0.10)).Shrink(0).

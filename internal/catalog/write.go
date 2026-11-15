@@ -84,6 +84,18 @@ CREATE VIRTUAL TABLE extensions_fts USING fts5(
 	description,
 	tokenize = 'porter unicode61 remove_diacritics 2'
 );
+
+-- Fonts, icon themes and cursor themes (apps.kind 'font', 'icon-theme', 'cursor-theme') are indexed here,
+-- apart from apps and extensions, for the same reasons; no schema version change either.
+CREATE VIRTUAL TABLE appearance_fts USING fts5(
+	app_id UNINDEXED,
+	name,
+	keywords,
+	summary,
+	developer,
+	description,
+	tokenize = 'porter unicode61 remove_diacritics 2'
+);
 `
 
 // Write builds a catalog database at path from apps. It writes to a temporary file first and renames it into
@@ -161,6 +173,11 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 	if err != nil {
 		return err
 	}
+	insLookFTS, err := tx.PrepareContext(ctx, `INSERT INTO appearance_fts
+		(app_id, name, keywords, summary, developer, description) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
 
 	for i := range apps {
 		a := &apps[i]
@@ -194,8 +211,11 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 		keywords := strings.Join(append(append(append([]string{}, a.Keywords...), a.ID),
 			categoryWords(a.Categories)...), " ")
 		fts := insFTS
-		if a.Kind == KindShellExtension {
+		switch {
+		case a.Kind == KindShellExtension:
 			fts = insExtFTS
+		case a.Kind.Appearance():
+			fts = insLookFTS
 		}
 		if _, err := fts.ExecContext(ctx, a.ID, a.Name, keywords, a.Summary, a.Developer,
 			a.Description); err != nil {
@@ -207,7 +227,8 @@ func writeDB(ctx context.Context, path string, apps []App, info BuildInfo) error
 	}
 
 	for _, stmt := range []string{`INSERT INTO apps_fts (apps_fts) VALUES ('optimize')`,
-		`INSERT INTO extensions_fts (extensions_fts) VALUES ('optimize')`, "VACUUM"} {
+		`INSERT INTO extensions_fts (extensions_fts) VALUES ('optimize')`,
+		`INSERT INTO appearance_fts (appearance_fts) VALUES ('optimize')`, "VACUUM"} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return err
 		}

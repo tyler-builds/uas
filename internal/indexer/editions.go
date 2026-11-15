@@ -22,10 +22,10 @@ type Edition struct {
 func (e Edition) Keep(l catalog.Listing) bool { return e.keep(l) }
 
 // everywhere reports whether a source works on any system. GNOME Shell extensions do wherever GNOME runs,
-// which any of these systems may.
+// which any of these systems may, and fonts and themes install for the user on any of them.
 func everywhere(s catalog.SourceID) bool {
 	return s == catalog.SourceFlathub || s == catalog.SourceHomebrew || s.Releases() ||
-		s == catalog.SourceGNOMEExtensions
+		s == catalog.SourceGNOMEExtensions || s.AppearanceSource()
 }
 
 // Editions returns the editions for a run's listings: fedora-atomic (layering and COPR, no snapd), fedora (dnf
