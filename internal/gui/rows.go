@@ -301,6 +301,14 @@ func scrollList(list *ui.DivElement) *ui.DivElement {
 	return list.ScrollY().MinHeight(ui.Px(0))
 }
 
+// scrollArea makes content without a box of its own, such as a grid of cards, scroll by itself like a
+// scrollList. jamb draws a scrollbar over the right edge of what scrolls, taking no room of its own, so the area
+// reaches out over the page's side padding and pads its content back in: the content lines up with the rest of
+// the page, and the scrollbar sits in the page's margin beside it. Its page goes in fixed.
+func scrollArea(content ui.Element) *ui.DivElement {
+	return ui.Div().Column().ScrollY().MinHeight(ui.Px(0)).MarginX(-pagePad).PaddingX(pagePad).Child(content)
+}
+
 // gridColumns fits items of about minWidth into the content area, up to most.
 func gridColumns(ctx *ui.Context, maxWidth, minWidth float32, most int) int {
 	w, _ := ctx.WindowSize()
