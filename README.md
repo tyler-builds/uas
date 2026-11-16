@@ -201,7 +201,7 @@ uas install https://github.com/owner/app   # an app that isn't in the catalog
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
 | `migrate [-n] [-y] [-all]` | Hand AppImages that other tools or you set up over to uas |
 | `extensions [list \| search <words> \| install\|remove\|enable\|disable\|settings <uuid>]` | List and manage GNOME Shell extensions |
-| `appearance [list \| search -kind fonts\|icons\|cursors <words> \| info\|install\|remove <id> \| use\|revert <setting> \| themes \| updates]` | Install, use and remove fonts and icon and cursor themes |
+| `appearance [list \| search -kind fonts\|icons\|cursors <words> \| info\|install\|remove <id> \| use <setting> <value> \| revert <setting>\|all \| themes \| updates]` | Install, use and remove fonts and icon and cursor themes; set the light or dark style and accent color |
 | `gui [--page <page>]` | Open the desktop app |
 | `self-update` | Update uas to the latest signed release |
 | `self-install` / `self-uninstall` | Install uas for you, or remove it |

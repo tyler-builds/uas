@@ -456,8 +456,14 @@ func (a *App) lookInstalledSections(ctx *ui.Context, lk ui.QueryResult[looks], q
 		for _, s := range d.saved {
 			rows = append(rows, a.savedRow(ctx, s, d.current[s.Key]))
 		}
+		var all []ui.Element
+		if len(d.saved) > 1 {
+			_, busy := a.running("revert:all")
+			all = append(all, ui.Button("Revert all").Icon(icons.Undo2).Ghost().Small().Loading(busy).
+				Tooltip("Put every setting back to what it was before uas").OnClick(func() { a.revertAllLooks(ctx) }))
+		}
 		out = append(out, section(sectionHeader(ctx, "Changed by uas",
-			"Revert puts a setting back to what it was before uas changed it."), settingsList(ctx, rows...)))
+			"Revert puts a setting back to what it was before uas changed it.", all...), settingsList(ctx, rows...)))
 	}
 	var mine []ui.Element
 	for _, r := range d.recs {
@@ -501,10 +507,8 @@ func (a *App) lookInstalledSections(ctx *ui.Context, lk ui.QueryResult[looks], q
 func (a *App) savedRow(ctx *ui.Context, s state.SavedSetting, now string) ui.Element {
 	t := ctx.Theme()
 	_, busy := a.running("revert:" + s.Key)
-	was := s.Previous
-	if was == "" {
-		was = "the default"
-	}
+	was := orDefault(appearance.ValueLabel(s.Key, s.Previous))
+	now = appearance.ValueLabel(s.Key, now)
 	return ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(56)).PaddingX(space4).PaddingY(space2).
 		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(appearance.KeyLabel(s.Key) + ": " + now).FontSize(14).Medium().Truncate()).
@@ -590,6 +594,12 @@ func (a *App) revertLook(ctx *ui.Context, key string) {
 	a.startJob(ctx, "revert:"+key, "Reverting "+strings.ToLower(appearance.KeyLabel(key)), false,
 		appearance.KeyLabel(key)+" is back to what it was",
 		func(c context.Context, _ func(backend.Progress)) error { return a.s.Looks.Revert(c, key) })
+}
+
+// revertAllLooks puts every setting uas changed back to what it was before uas.
+func (a *App) revertAllLooks(ctx *ui.Context) {
+	a.startJob(ctx, "revert:all", "Reverting your settings", false, "Your settings are back to what they were",
+		func(c context.Context, _ func(backend.Progress)) error { return a.s.Looks.RevertAll(c) })
 }
 
 // installLook installs a font or theme, and uses it when use names a setting.

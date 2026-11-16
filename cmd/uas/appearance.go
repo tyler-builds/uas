@@ -29,16 +29,24 @@ commands:
   install [-variant V] [-use S] <id>
                                 install one; -use also uses it for S (see use)
   remove <id>                   remove one uas installed
-  use <S> <name>                use a theme or font family for S: icons, cursor, interface, document or monospace
-  revert <S>                    put S back to what it was before uas changed it
+  use <S> <value>               set S: icons or cursor (a theme), interface, document or monospace (a font
+                                family, or a family and size such as "Inter 11"), scheme (default, light
+                                or dark) or accent (blue, teal, green, yellow, orange, red, pink, purple,
+                                slate)
+  revert <S>|all                put S, or every setting uas changed, back to what it was before uas
   themes                        the icon and cursor themes on this system
   updates                       fonts and themes uas installed that have a newer version
   update <id>                   install one's newer version
 `
 
-// settingKeys are the names "use" and "revert" take for each setting.
+// settingKeys are the names "use" and "revert" take for each setting, which are also the names of a
+// preset's parts.
 var settingKeys = map[string]string{"icons": appearance.KeyIconTheme, "cursor": appearance.KeyCursorTheme,
-	"interface": appearance.KeyFont, "document": appearance.KeyDocumentFont, "monospace": appearance.KeyMonospaceFont}
+	"interface": appearance.KeyFont, "document": appearance.KeyDocumentFont, "monospace": appearance.KeyMonospaceFont,
+	"scheme": appearance.KeyColorScheme, "style": appearance.KeyColorScheme, "accent": appearance.KeyAccentColor}
+
+// settingNames lists the names of settingKeys for messages.
+const settingNames = "icons, cursor, interface, document, monospace, scheme or accent"
 
 // lookKinds are the names -kind takes.
 var lookKinds = map[string]catalog.Kind{"fonts": catalog.KindFont, "font": catalog.KindFont,
@@ -55,7 +63,7 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 	fs.Usage = func() { fmt.Fprint(fs.Output(), appearanceUsage) }
 	kind := fs.String("kind", "", "fonts, icons or cursors")
 	variant := fs.String("variant", "", "the theme variant to install (see info)")
-	use := fs.String("use", "", "also use it: icons, cursor, interface, document or monospace")
+	use := fs.String("use", "", "also use it: icons, cursor (themes), interface, document or monospace (fonts)")
 	limit := fs.Int("limit", 20, "maximum number of results")
 	rest, err := parseArgs(fs, args)
 	if err != nil {
@@ -78,7 +86,7 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 	setting := func(name string) (string, error) {
 		key, ok := settingKeys[name]
 		if !ok {
-			return "", fmt.Errorf("appearance %s: %q isn't icons, cursor, interface, document or monospace", cmd, name)
+			return "", fmt.Errorf("appearance %s: %q isn't %s", cmd, name, settingNames)
 		}
 		return key, nil
 	}
@@ -167,19 +175,35 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		fmt.Fprintf(w, "%s is removed.\n", id)
 	case "use":
 		if len(rest) != 2 {
-			return errors.New("appearance use: give a setting (icons, cursor, interface, document or monospace) and a name")
+			return fmt.Errorf("appearance use: give a setting (%s) and a value", settingNames)
 		}
 		key, err := setting(rest[0])
 		if err != nil {
 			return err
 		}
-		if err := e.Looks.Use(ctx, key, rest[1]); err != nil {
+		if err := e.Looks.Use(ctx, key, appearance.ParseValue(key, rest[1])); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), e.Looks.Current(ctx)[key])
+		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), appearance.ValueLabel(key, e.Looks.Current(ctx)[key]))
 	case "revert":
-		name, err := one("setting")
+		name, err := one("setting, or all")
 		if err != nil {
+			return err
+		}
+		if name == "all" {
+			saved, err := e.Looks.Saved()
+			if err != nil {
+				return err
+			}
+			if len(saved) == 0 {
+				fmt.Fprintln(w, "uas hasn't changed any settings.")
+				return nil
+			}
+			err = e.Looks.RevertAll(ctx)
+			cur := e.Looks.Current(ctx)
+			for _, s := range saved {
+				fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(s.Key), appearance.ValueLabel(s.Key, cur[s.Key]))
+			}
 			return err
 		}
 		key, err := setting(name)
@@ -189,7 +213,7 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if err := e.Looks.Revert(ctx, key); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), e.Looks.Current(ctx)[key])
+		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), appearance.ValueLabel(key, e.Looks.Current(ctx)[key]))
 	case "themes":
 		return listThemes(ctx, w, e)
 	case "updates":
@@ -336,16 +360,15 @@ func listLooks(ctx context.Context, w io.Writer, e *session.Session) error {
 	if len(cur) > 0 {
 		saved, _ := e.Looks.Saved()
 		fmt.Fprintln(w)
-		for _, key := range []string{appearance.KeyIconTheme, appearance.KeyCursorTheme, appearance.KeyFont,
-			appearance.KeyDocumentFont, appearance.KeyMonospaceFont} {
+		for _, key := range appearance.SettingKeys {
 			v, ok := cur[key]
 			if !ok {
 				continue
 			}
-			line := fmt.Sprintf("%-15s %s", appearance.KeyLabel(key)+":", v)
+			line := fmt.Sprintf("%-15s %s", appearance.KeyLabel(key)+":", appearance.ValueLabel(key, v))
 			for _, s := range saved {
 				if s.Key == key {
-					line += " (set by uas; revert goes back to " + s.Previous + ")"
+					line += " (set by uas; revert goes back to " + orDefault(appearance.ValueLabel(key, s.Previous)) + ")"
 				}
 			}
 			fmt.Fprintln(w, line)
@@ -387,4 +410,11 @@ func listThemes(ctx context.Context, w io.Writer, e *session.Session) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Name, strings.Join(kinds, ", "), where, strings.Join(inUse, ", "))
 	}
 	return tw.Flush()
+}
+
+func orDefault(s string) string {
+	if s == "" {
+		return "the default"
+	}
+	return s
 }

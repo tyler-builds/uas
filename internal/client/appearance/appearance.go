@@ -744,12 +744,17 @@ func inUse(rec state.AppearanceInstall, key, value string) bool {
 	return slices.Contains(rec.Themes, value)
 }
 
-// Use sets a desktop setting: a theme's name for KeyIconTheme or KeyCursorTheme, a font family for a font
-// key (its size is kept). The value it replaces is saved for Revert, unless uas changed the setting before,
-// in which case the value from before that stays saved.
+// Use sets a desktop setting: a theme's name for KeyIconTheme or KeyCursorTheme, a font for a font key, or
+// one of Choices for a setting that has them. A font given as a family alone ("Inter") keeps the size the
+// setting has; one with a size ("Inter 12") is set as it is. The value it replaces is saved for Revert,
+// unless uas changed the setting before, in which case the value from before that stays saved; setting it
+// back to that value forgets it.
 func (in *Installer) Use(ctx context.Context, key, value string) error {
 	if in.Desktop == nil || !in.Desktop.Supports(key) {
 		return ErrUnsupported
+	}
+	if err := CheckValue(key, value); err != nil {
+		return err
 	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -761,18 +766,28 @@ func (in *Installer) Use(ctx context.Context, key, value string) error {
 	if err != nil {
 		return err
 	}
-	if slices.Contains(FontKeys, key) {
+	if slices.Contains(FontKeys, key) && FontSize(value) == "" {
 		value = FontValue(cur, value)
 	}
 	saved, ok := st.FindSaved(in.Desktop.Name(), key)
 	if !ok {
 		saved = state.SavedSetting{Desktop: in.Desktop.Name(), Key: key, Previous: cur}
 	}
+	if value == cur && !ok {
+		return nil // nothing changes, and nothing is saved
+	}
 	saved.Value, saved.At = value, in.now().UTC()
-	st.PutSaved(saved)
+	if value == saved.Previous && saved.Previous != "" {
+		st.DeleteSaved(in.Desktop.Name(), key) // back to where it was before uas
+	} else {
+		st.PutSaved(saved)
+	}
 	// Saved first: if the change works and the save didn't, Revert would have nothing to go back to.
 	if err := in.State.Save(st); err != nil {
 		return err
+	}
+	if value == cur {
+		return nil
 	}
 	return in.Desktop.Set(ctx, key, value)
 }
@@ -809,13 +824,40 @@ func (in *Installer) revertLocked(ctx context.Context, st *state.State, key stri
 	return nil
 }
 
+// RevertAll puts every setting uas changed back to what it was before uas first changed it. It goes on past
+// a setting that can't be put back, and returns what went wrong.
+func (in *Installer) RevertAll(ctx context.Context) error {
+	if in.Desktop == nil {
+		return ErrUnsupported
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	st, err := in.State.Load()
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, s := range slices.Clone(st.Saved) {
+		if s.Desktop != in.Desktop.Name() {
+			continue
+		}
+		if err := in.revertLocked(ctx, &st, s.Key); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(s.Key)), err))
+		}
+	}
+	if err := in.State.Save(st); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 // Current returns the desktop's appearance settings it supports, by key.
 func (in *Installer) Current(ctx context.Context) map[string]string {
 	out := map[string]string{}
 	if in.Desktop == nil {
 		return out
 	}
-	for _, key := range append([]string{KeyIconTheme, KeyCursorTheme}, FontKeys...) {
+	for _, key := range SettingKeys {
 		if !in.Desktop.Supports(key) {
 			continue
 		}

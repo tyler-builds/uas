@@ -665,11 +665,16 @@ install is recorded in the state file (`appearance`: catalog ID, version, file, 
 families, paths written), which removal and updates use; removal deletes only those paths, and only under
 the two folders uas installs to.
 
-**Using.** On GNOME, `gsettings` sets `org.gnome.desktop.interface`'s `icon-theme`, `cursor-theme`, and
-`font-name`, `document-font-name` or `monospace-font-name` (keeping the size). On KDE Plasma,
-`plasma-changeicons` and `plasma-apply-cursortheme` change icons and cursors (fonts are installed only).
-Other desktops install only. Before the first change of a setting the state file saves its value
-(`saved_settings`); Revert puts it back, and removing a font or theme that is in use reverts first (or resets
+**Using.** Settings have desktop-neutral keys (`appearance.SettingKeys`), and each `Desktop` maps them to its
+own and says which it `Supports`. On GNOME, `gsettings` sets `org.gnome.desktop.interface`'s `icon-theme`,
+`cursor-theme`, `font-name`, `document-font-name` and `monospace-font-name` (a family alone keeps the
+setting's size; a font with a size is set as it is), `color-scheme` (default, light or dark) and
+`accent-color`; the last two are offered only when `gsettings list-keys` has them (GNOME 42 and 47). Font
+settings are Pango descriptions, read from the end as Pango does (`fontname.go`), so `Fira Code weight=450
+10` is the family Fira Code. On KDE Plasma, `plasma-changeicons` and `plasma-apply-cursortheme` change icons
+and cursors (fonts are installed only). Other desktops install only. Before the first change of a setting
+the state file saves its value (`saved_settings`); Revert puts it back (Revert all puts back every one), a
+change back to that value forgets it, and removing a font or theme that is in use reverts first (or resets
 the setting when uas didn't change it).
 
 **The Appearance page** (`gui/appearance.go`) has tabs Fonts, Icons and Cursors, each a grid of cards, most
