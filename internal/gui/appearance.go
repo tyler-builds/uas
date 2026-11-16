@@ -559,7 +559,7 @@ func (a *App) lookRecRow(ctx *ui.Context, r state.AppearanceInstall, d looks) ui
 			Child(ui.Text(r.Name).FontSize(14).Medium().Truncate()).
 			Child(metaLine(ctx, parts...)))
 	for _, key := range d.using(r) {
-		row = row.Child(statusChip(ctx, "In use: "+strings.ToLower(appearance.KeyLabel(key)), t.Success))
+		row = row.Child(statusChip(ctx, "In use: "+appearance.KeyWord(key), t.Success))
 	}
 	return row.Child(ui.IconButton(icons.Trash).Ghost().Small().Label("Remove " + r.Name).Tooltip("Remove").
 		Disabled(busy).OnClick(func() { rr := r; a.lookRemoving.Set(&rr) }))
@@ -608,7 +608,7 @@ func (a *App) useLook(ctx *ui.Context, key, value string) {
 
 // revertLook puts a setting back to what it was before uas changed it.
 func (a *App) revertLook(ctx *ui.Context, key string) {
-	a.startJob(ctx, "revert:"+key, "Reverting "+strings.ToLower(appearance.KeyLabel(key)), false,
+	a.startJob(ctx, "revert:"+key, "Reverting "+appearance.KeyWord(key), false,
 		appearance.KeyLabel(key)+" is back to what it was",
 		func(c context.Context, _ func(backend.Progress)) error { return a.s.Looks.Revert(c, key) })
 }

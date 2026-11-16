@@ -18,21 +18,24 @@ import (
 
 const appearanceUsage = `usage: uas appearance [command]
 
-Fonts, icon themes and cursor themes, installed for your account: fonts from Google Fonts and Nerd Fonts,
-themes from Pling (gnome-look.org). Also the light or dark style, the accent color and the wallpaper.
+Fonts, icon themes, cursor themes and GTK themes, installed for your account: fonts from Google Fonts and
+Nerd Fonts, themes from Pling (gnome-look.org). Also the light or dark style, the accent color and the
+wallpaper.
 
 commands:
   list                          what uas installed, and what the desktop uses (the default)
-  search -kind K <words>        find fonts, icons or cursors (K)
-  browse -kind K                the most popular fonts, icons or cursors
+  search -kind K <words>        find fonts, icons, cursors or gtk themes (K)
+  browse -kind K                the most popular fonts, icons, cursors or gtk themes
   info <id>                     show one, with its variants
   install [-variant V] [-use S] <id>
                                 install one; -use also uses it for S (see use)
   remove <id>                   remove one uas installed
-  use <S> <value>               set S: icons or cursor (a theme), interface, document or monospace (a font
-                                family, or a family and size such as "Inter 11"), scheme (default, light
-                                or dark) or accent (blue, teal, green, yellow, orange, red, pink, purple,
-                                slate)
+  use <S> <value>               set S: gtk, icons or cursor (a theme), interface, document or monospace (a
+                                font family, or a family and size such as "Inter 11"), scheme (default,
+                                light or dark) or accent (blue, teal, green, yellow, orange, red, pink,
+                                purple, slate). A GTK theme's files for GTK 4 apps, when it has them, are
+                                copied into ~/.config/gtk-4.0 too; yours there are kept aside and put
+                                back by revert
   use wallpaper <file> [-dark <file>] [-fit F]
                                 set the wallpaper (GNOME): a picture (jpg, png, webp, jxl or svg; your own
                                 are copied into uas's wallpaper folder) or one of the system's, a second
@@ -40,7 +43,7 @@ commands:
                                 spanned, wallpaper (tiled) or none. "use wallpaper -fit F" changes the fit
   revert <S>|wallpaper|all      put S, the wallpaper, or every setting uas changed, back to what it was
                                 before uas
-  themes                        the icon and cursor themes on this system
+  themes                        the icon, cursor and GTK themes on this system
   updates                       fonts and themes uas installed that have a newer version
   update <id>                   install one's newer version
   presets                       your presets: looks saved under a name (see "uas appearance preset")
@@ -49,18 +52,19 @@ commands:
 
 // settingKeys are the names "use" and "revert" take for each setting, which are also the names of a
 // preset's parts.
-var settingKeys = map[string]string{"icons": appearance.KeyIconTheme, "cursor": appearance.KeyCursorTheme,
+var settingKeys = map[string]string{"gtk": appearance.KeyGTKTheme, "icons": appearance.KeyIconTheme,
+	"cursor":    appearance.KeyCursorTheme,
 	"interface": appearance.KeyFont, "document": appearance.KeyDocumentFont, "monospace": appearance.KeyMonospaceFont,
 	"scheme": appearance.KeyColorScheme, "style": appearance.KeyColorScheme, "accent": appearance.KeyAccentColor,
 	"wallpaper": appearance.KeyWallpaper}
 
 // settingNames lists the names of settingKeys for messages.
-const settingNames = "icons, cursor, interface, document, monospace, scheme, accent or wallpaper"
+const settingNames = "gtk, icons, cursor, interface, document, monospace, scheme, accent or wallpaper"
 
 // lookKinds are the names -kind takes.
 var lookKinds = map[string]catalog.Kind{"fonts": catalog.KindFont, "font": catalog.KindFont,
 	"icons": catalog.KindIconTheme, "icon": catalog.KindIconTheme, "cursors": catalog.KindCursorTheme,
-	"cursor": catalog.KindCursorTheme}
+	"cursor": catalog.KindCursorTheme, "gtk": catalog.KindGTKTheme}
 
 // runAppearance lists, installs and uses fonts and themes.
 func runAppearance(ctx context.Context, w io.Writer, args []string) error {
@@ -73,9 +77,9 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 	}
 	fs := flag.NewFlagSet("appearance "+cmd, flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(fs.Output(), appearanceUsage) }
-	kind := fs.String("kind", "", "fonts, icons or cursors")
+	kind := fs.String("kind", "", "fonts, icons, cursors or gtk")
 	variant := fs.String("variant", "", "the theme variant to install (see info)")
-	use := fs.String("use", "", "also use it: icons, cursor (themes), interface, document or monospace (fonts)")
+	use := fs.String("use", "", "also use it: gtk, icons, cursor (themes), interface, document or monospace (fonts)")
 	limit := fs.Int("limit", 20, "maximum number of results")
 	dark := fs.String("dark", "", "use wallpaper: the picture for the dark style")
 	fit := fs.String("fit", "", "use wallpaper: how it fits the screen: "+strings.Join(appearance.WallpaperFits, ", "))
@@ -116,7 +120,7 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 	case "search", "browse":
 		k, ok := lookKinds[*kind]
 		if !ok {
-			return fmt.Errorf("appearance %s: give -kind fonts, icons or cursors", cmd)
+			return fmt.Errorf("appearance %s: give -kind fonts, icons, cursors or gtk", cmd)
 		}
 		if cmd == "search" && len(rest) == 0 {
 			return errors.New("appearance search: give one or more words to search for")
@@ -158,6 +162,9 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if rec.LeftOut > 0 {
 			fmt.Fprintf(w, "Left out %d file(s) of it that could be run, such as scripts; uas never installs those.\n",
 				rec.LeftOut)
+		}
+		if key == appearance.KeyGTKTheme {
+			printGTK4(w, e)
 		}
 	case "update":
 		id, err := one("ID (see updates)")
@@ -205,6 +212,9 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 			return err
 		}
 		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), appearance.ValueLabel(key, e.Looks.Current(ctx)[key]))
+		if key == appearance.KeyGTKTheme {
+			printGTK4(w, e)
+		}
 	case "revert":
 		name, err := one("setting, or all")
 		if err != nil {
@@ -416,6 +426,9 @@ func listLooks(ctx context.Context, w io.Writer, e *session.Session) error {
 				}
 			}
 			fmt.Fprintln(w, line)
+			if g, _ := e.Looks.GTK4(); key == appearance.KeyGTKTheme && g != nil && len(g.Written) > 0 {
+				fmt.Fprintf(w, "%-15s %s's, in %s (revert puts back yours)\n", "GTK 4 files:", g.Theme, g.Dir)
+			}
 		}
 	}
 	return nil
@@ -479,17 +492,14 @@ func listThemes(ctx context.Context, w io.Writer, e *session.Session) error {
 	if err != nil {
 		return err
 	}
+	gtk, err := e.Looks.GTKThemes()
+	if err != nil {
+		return err
+	}
 	cur := e.Looks.Current(ctx)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tKIND\tWHERE\tIN USE")
-	for _, t := range themes {
-		var kinds []string
-		if t.Icons {
-			kinds = append(kinds, "icons")
-		}
-		if t.Cursors {
-			kinds = append(kinds, "cursors")
-		}
+	row := func(t appearance.Theme, kinds, inUse []string) {
 		where := "system"
 		switch {
 		case t.By != "":
@@ -497,16 +507,56 @@ func listThemes(ctx context.Context, w io.Writer, e *session.Session) error {
 		case t.User:
 			where = "you"
 		}
-		var inUse []string
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Name, strings.Join(kinds, ", "), where, strings.Join(inUse, ", "))
+	}
+	for _, t := range themes {
+		var kinds, inUse []string
+		if t.Icons {
+			kinds = append(kinds, "icons")
+		}
+		if t.Cursors {
+			kinds = append(kinds, "cursors")
+		}
 		if cur[appearance.KeyIconTheme] == t.Name {
 			inUse = append(inUse, "icons")
 		}
 		if cur[appearance.KeyCursorTheme] == t.Name {
 			inUse = append(inUse, "cursor")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Name, strings.Join(kinds, ", "), where, strings.Join(inUse, ", "))
+		row(t, kinds, inUse)
+	}
+	for _, t := range gtk {
+		kind := "gtk"
+		if !t.GTK4 {
+			kind = "gtk (no GTK 4 files)"
+		}
+		var inUse []string
+		if cur[appearance.KeyGTKTheme] == t.Name {
+			inUse = append(inUse, "gtk")
+		}
+		row(t, []string{kind}, inUse)
 	}
 	return tw.Flush()
+}
+
+// printGTK4 says what is in ~/.config/gtk-4.0 after a GTK theme was used.
+func printGTK4(w io.Writer, e *session.Session) {
+	g, err := e.Looks.GTK4()
+	if err != nil {
+		return
+	}
+	if g != nil && len(g.Written) > 0 {
+		fmt.Fprintf(w, "Copied its GTK 4 files into %s: %s.\n", g.Dir, strings.Join(g.Written, ", "))
+		if len(g.BackedUp) > 0 {
+			verb, them := "are", "them"
+			if len(g.BackedUp) == 1 {
+				verb, them = "is", "it"
+			}
+			fmt.Fprintf(w, "Your %s %s kept in %s; revert puts %s back.\n", strings.Join(g.BackedUp, ", "), verb,
+				g.Backup, them)
+		}
+	}
+	fmt.Fprintln(w, appearance.GTKNote)
 }
 
 func orDefault(s string) string {

@@ -31,7 +31,7 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 		}
 		v, err := in.Desktop.Get(ctx, key)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(key)), err))
+			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(key), err))
 			continue
 		}
 		if v == "" {
@@ -443,7 +443,7 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		}
 		cur, err := in.Desktop.Get(ctx, o.Key)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", strings.ToLower(KeyLabel(o.Key)), err)
+			return nil, fmt.Errorf("reading %s: %w", KeyWord(o.Key), err)
 		}
 		if cur == "" {
 			continue
@@ -467,7 +467,7 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			out[i].Done = o.Step == StepSame
 			continue
 		}
-		progress(backend.Progress{Message: "Setting " + strings.ToLower(KeyLabel(o.Key)) + "…"})
+		progress(backend.Progress{Message: "Setting " + KeyWord(o.Key) + "…"})
 		if o.Part == PartWallpaper {
 			if err := in.setWallpaper(ctx, o.Wallpaper); err != nil {
 				out[i].Err = err
@@ -491,7 +491,7 @@ func Failed(outcomes []Outcome) error {
 	var errs []error
 	for _, o := range outcomes {
 		if o.Err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(PartLabel(o.Part)), o.Err))
+			errs = append(errs, fmt.Errorf("%s: %w", PartWord(o.Part), o.Err))
 		}
 	}
 	return errors.Join(errs...)

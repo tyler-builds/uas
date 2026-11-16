@@ -251,8 +251,16 @@ func (in *Installer) Install(ctx context.Context, l catalog.Listing, variant str
 		}
 	}
 	st.PutAppearance(rec)
+	// An update of the GTK theme whose GTK 4 files uas copied: the copies are made again from it.
+	var syncErr error
+	if st.GTK4 != nil && l.Kind == catalog.KindGTKTheme && slices.Contains(rec.Themes, st.GTK4.Theme) {
+		syncErr = in.syncGTK4Locked(&st, st.GTK4.Theme, true)
+	}
 	if err := in.State.Save(st); err != nil {
 		return state.AppearanceInstall{}, err
+	}
+	if syncErr != nil {
+		return rec, fmt.Errorf("installed, but its GTK 4 files couldn't be copied again: %w", syncErr)
 	}
 	if l.Kind == catalog.KindFont {
 		in.fcCache(ctx, progress)
@@ -728,7 +736,7 @@ func (in *Installer) Remove(ctx context.Context, id string, progress func(backen
 			if err != nil || !inUse(rec, key, cur) {
 				continue
 			}
-			progress(backend.Progress{Message: "Switching " + strings.ToLower(KeyLabel(key)) + " back…"})
+			progress(backend.Progress{Message: "Switching " + KeyWord(key) + " back…"})
 			if err := in.revertLocked(ctx, &st, key); err != nil {
 				return err
 			}
@@ -760,6 +768,9 @@ func (in *Installer) Remove(ctx context.Context, id string, progress func(backen
 	}
 	return nil
 }
+
+// KeysOf are the settings an install can be in use for: its kind's.
+func KeysOf(rec state.AppearanceInstall) []string { return keysOf(rec) }
 
 // keysOf are the settings an install can be in use for.
 func keysOf(rec state.AppearanceInstall) []string {
@@ -908,7 +919,7 @@ func (in *Installer) revertWallpaperLocked(ctx context.Context, st *state.State)
 	var errs []error
 	for _, k := range keys {
 		if err := in.revertLocked(ctx, st, k); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(k)), err))
+			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(k), err))
 		}
 	}
 	return errors.Join(errs...)
@@ -954,7 +965,7 @@ func (in *Installer) RevertAll(ctx context.Context) error {
 			continue
 		}
 		if err := in.revertLocked(ctx, &st, s.Key); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(s.Key)), err))
+			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(s.Key), err))
 		}
 	}
 	if st.GTK4 != nil {

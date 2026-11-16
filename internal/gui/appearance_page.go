@@ -255,7 +255,7 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 		var opts []ui.Option[string]
 		for _, k := range appearance.FontKeys {
 			if desk.Supports(k) {
-				opts = append(opts, ui.Option[string]{Value: k, Label: "Use for " + strings.ToLower(appearance.KeyLabel(k))})
+				opts = append(opts, ui.Option[string]{Value: k, Label: "Use for " + appearance.KeyWord(k)})
 			}
 		}
 		if len(opts) > 0 {

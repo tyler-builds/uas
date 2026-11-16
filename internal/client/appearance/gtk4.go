@@ -27,6 +27,10 @@ import (
 // when uas's go: on Revert, when a theme without GTK 4 files is used, and when the theme is removed.
 // Everything else in ~/.config/gtk-4.0 (settings.ini, the user's other files) is never touched.
 
+// GTKNote is the one line said where a GTK theme is chosen.
+const GTKNote = "Newer (GTK 4) apps change only with themes that have GTK 4 files, and open apps show a new " +
+	"theme after a restart."
+
 // GTK4Dir is where GTK 4 apps load the user's own style from: $XDG_CONFIG_HOME/gtk-4.0.
 func (in *Installer) GTK4Dir() string { return filepath.Join(in.Config, "gtk-4.0") }
 

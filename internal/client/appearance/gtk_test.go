@@ -670,3 +670,23 @@ func TestGTKPresetFiles(t *testing.T) {
 		t.Error("an old preset sets the GTK theme")
 	}
 }
+
+func TestGTKUpdateRecopies(t *testing.T) {
+	// An update of the theme whose GTK 4 files are in use copies them again; the user's file stays aside.
+	w, l := gtkWorld(t)
+	ctx := context.Background()
+	w.in.Install(ctx, l, "", nil)
+	w.in.Use(ctx, KeyGTKTheme, "Orchis")
+	files := gtkPack()
+	files["Orchis/gtk-4.0/gtk.css"] = "/* orchis 4, new */"
+	a := w.offer("orchis.tar.gz", tarGz(t, files, nil), "Orchis", "Orchis-Dark", "Orchis-Three")
+	l.Assets = []catalog.Asset{a}
+	if _, err := w.in.Install(ctx, l, "Orchis", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(w.in.GTK4Dir(), "gtk.css")); got != "/* orchis 4, new */" {
+		t.Errorf("gtk.css = %q", got)
+	}
+	w.in.Revert(ctx, KeyGTKTheme)
+	userRestored(t, w.in)
+}

@@ -101,14 +101,14 @@ func Choices(key string) []string {
 // CheckValue refuses a value a setting can't take.
 func CheckValue(key, value string) error {
 	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("%s: give a value", strings.ToLower(KeyLabel(key)))
+		return fmt.Errorf("%s: give a value", KeyWord(key))
 	}
 	if c := Choices(key); c != nil && !slices.Contains(c, value) {
 		names := make([]string, len(c))
 		for i, v := range c {
 			names[i] = ValueName(key, v)
 		}
-		return fmt.Errorf("%s: %q isn't %s", strings.ToLower(KeyLabel(key)), value, strings.Join(names, ", "))
+		return fmt.Errorf("%s: %q isn't %s", KeyWord(key), value, strings.Join(names, ", "))
 	}
 	return nil
 }
@@ -140,6 +140,20 @@ func KeyLabel(key string) string {
 		return "Wallpaper fit"
 	}
 	return key
+}
+
+// KeyWord is KeyLabel in a sentence: lower case, but for a name such as GTK.
+func KeyWord(key string) string { return lowerWords(KeyLabel(key)) }
+
+// lowerWords puts a label in lower case, but its words that are names in capitals ("GTK theme").
+func lowerWords(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if w != strings.ToUpper(w) || len(w) == 1 {
+			words[i] = strings.ToLower(w)
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // ValueLabel names a setting's value for people: "Dark" for prefer-dark, "Teal" for teal. Names of themes

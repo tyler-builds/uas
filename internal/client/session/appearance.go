@@ -15,8 +15,8 @@ import (
 var errNoLooks = errors.New("fonts and themes can't be installed: uas couldn't find your home folder")
 
 // InstallLook installs a font or theme listing for the user, from the file that holds variant for a theme
-// (the first file when it is empty), and then, when use is set, uses it: a theme as the desktop's icon or
-// cursor theme (the variant, or its first theme), a font for that font setting.
+// (the first file when it is empty), and then, when use is set, uses it: a theme as the desktop's icon,
+// cursor or GTK theme (the variant, or its first theme), a font for that font setting.
 func (s *Session) InstallLook(ctx context.Context, l catalog.Listing, variant, use string,
 	progress func(backend.Progress)) (state.AppearanceInstall, error) {
 	if s.Looks == nil {
@@ -98,7 +98,11 @@ func (s *Session) UpdateLook(ctx context.Context, u appearance.Update, progress 
 func (s *Session) LookNotes(l catalog.Listing) []string {
 	switch l.Source {
 	case catalog.SourcePling:
-		notes := []string{"Downloads from Pling (gnome-look.org) and installs into ~/.local/share/icons for your " +
+		dir := "~/.local/share/icons"
+		if l.Kind == catalog.KindGTKTheme {
+			dir = "~/.local/share/themes"
+		}
+		notes := []string{"Downloads from Pling (gnome-look.org) and installs into " + dir + " for your " +
 			"account. Anyone can upload to Pling and nobody reviews it; uas checks the file against the checksum " +
 			"recorded when the catalog was built, and installs only images and theme files from it."}
 		most := 0

@@ -21,8 +21,8 @@ import (
 
 const presetUsage = `usage: uas appearance preset <command>
 
-A preset is a look saved under a name: icons, cursor, fonts, the light or dark style, the accent color and
-the wallpaper, each optional. Applying one sets every part it has, installing fonts and themes it needs from
+A preset is a look saved under a name: the GTK theme, icons, cursor, fonts, the light or dark style, the
+accent color and the wallpaper, each optional. Applying one sets every part it has, installing fonts and themes it needs from
 the catalog first, and leaves the rest alone.
 
 commands:
@@ -30,7 +30,7 @@ commands:
   show <name>                   its parts, and what applying it would do here
   save [-replace] [-skip P,...] <name>
                                 save the current look as a preset; -skip leaves parts out
-  new [-replace] [-icons T] [-cursor T] [-interface F] [-document F] [-monospace F]
+  new [-replace] [-gtk T] [-icons T] [-cursor T] [-interface F] [-document F] [-monospace F]
       [-scheme default|light|dark] [-accent C] [-wallpaper P [-wallpaper-dark P] [-fit F]] <name>
                                 make a preset from parts: a theme's name, or a catalog ID such as
                                 pling:1166289@Papirus-Dark; a font family, with a size or not
@@ -49,7 +49,10 @@ commands:
   copy <name> [<new name>]      copy it, as "<name> copy" unless you name the copy
   delete <name>
 
-parts: icons, cursor, interface, document, monospace, scheme, accent, wallpaper
+parts: gtk, icons, cursor, interface, document, monospace, scheme, accent, wallpaper
+
+A GTK theme with files for GTK 4 apps has them copied into ~/.config/gtk-4.0 when the preset is applied,
+as "uas appearance use gtk" does; undo puts back what was there.
 
 A picture of your own is copied into ~/.local/share/uas/wallpapers, so the preset keeps working when the
 original is moved or deleted; the system's wallpapers (/usr/share/backgrounds) are used where they are.
@@ -57,6 +60,7 @@ original is moved or deleted; the system's wallpapers (/usr/share/backgrounds) a
 
 // presetParts are the parts the command line makes, with their flags' descriptions.
 var presetParts = []struct{ part, help string }{
+	{appearance.PartGTK, "the GTK theme: a theme's name, or a catalog ID such as pling:1357889@Orchis-Dark"},
 	{appearance.PartIcons, "the icon theme: a theme's name, or a catalog ID such as pling:1166289@Papirus-Dark"},
 	{appearance.PartCursor, "the cursor theme: a theme's name, or a catalog ID"},
 	{appearance.PartInterface, `the interface font: a family, with a size or not ("Inter 11"), or a catalog ID`},
@@ -67,7 +71,7 @@ var presetParts = []struct{ part, help string }{
 }
 
 // partNameList are the names of the parts, for messages.
-var partNameList = []string{appearance.PartIcons, appearance.PartCursor, appearance.PartInterface,
+var partNameList = []string{appearance.PartGTK, appearance.PartIcons, appearance.PartCursor, appearance.PartInterface,
 	appearance.PartDocument, appearance.PartMonospace, appearance.PartScheme, appearance.PartAccent,
 	appearance.PartWallpaper}
 
@@ -417,6 +421,8 @@ func resolvePart(ctx context.Context, e *session.Session, part, raw string) (app
 			want = catalog.KindIconTheme
 		case appearance.KeyCursorTheme:
 			want = catalog.KindCursorTheme
+		case appearance.KeyGTKTheme:
+			want = catalog.KindGTKTheme
 		}
 		if l.Kind != want {
 			return appearance.Part{}, fmt.Errorf("%s: %s is a %s, not a %s", part, id, l.Kind, want)
@@ -442,7 +448,7 @@ func resolvePart(ctx context.Context, e *session.Session, part, raw string) (app
 	}
 	p := appearance.Part{Value: raw}
 	for _, r := range recs {
-		match := slices.Contains(r.Themes, raw) && r.Kind != string(catalog.KindFont)
+		match := slices.Contains(r.Themes, raw) && slices.Contains(appearance.KeysOf(r), key)
 		if font {
 			match = r.Kind == string(catalog.KindFont) && slices.ContainsFunc(r.Families, func(f string) bool {
 				return strings.EqualFold(f, appearance.FontFamily(raw))

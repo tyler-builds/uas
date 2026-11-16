@@ -84,6 +84,9 @@ func PartLabel(part string) string {
 	return part
 }
 
+// PartWord is PartLabel in a sentence: lower case, but for a name such as GTK.
+func PartWord(part string) string { return lowerWords(PartLabel(part)) }
+
 // PresetFormat is the version of the preset file format this uas writes.
 const PresetFormat = 1
 

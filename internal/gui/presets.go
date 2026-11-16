@@ -901,7 +901,7 @@ func (a *App) presetApplyDialog(ctx *ui.Context) ui.Element {
 			var parts []string
 			for _, it := range ap.plan {
 				if it.Step == appearance.StepInstall && it.Listing.Ref == d.Listing.Ref && it.Listing.Source == d.Listing.Source {
-					parts = append(parts, strings.ToLower(appearance.PartLabel(it.Part)))
+					parts = append(parts, appearance.PartWord(it.Part))
 				}
 			}
 			title := d.Listing.Name
