@@ -423,7 +423,7 @@ func (a *App) pickWallpaperFile(ctx *ui.Context, preset string, dark bool) {
 						ctx.Toast(ui.ToastError, errText(err)).Title("Could not use " + filepath.Base(path))
 						return
 					}
-					a.putWallpaper(ctx, preset, dark, ref, "", "")
+					a.putWallpaper(ctx, preset, dark, ref, false, "", "")
 				})
 			}()
 		})
@@ -438,9 +438,10 @@ func (a *App) wallpaperRef(path string) (string, error) {
 	return a.s.Looks.WallpaperRef(path)
 }
 
-// putWallpaper puts a picture in a slot of a preset. A light picture with its own dark one (a system
-// wallpaper's pair) sets both; fit is the fit to use when the preset had no wallpaper.
-func (a *App) putWallpaper(ctx *ui.Context, preset string, dark bool, ref, pairDark, fit string) {
+// putWallpaper puts a picture in a slot of a preset. A system wallpaper chosen for the light slot (pair)
+// brings its own dark picture, or none, in place of the dark one; fit is the fit to use when the preset had
+// no wallpaper.
+func (a *App) putWallpaper(ctx *ui.Context, preset string, dark bool, ref string, pair bool, pairDark, fit string) {
 	a.changeWallpaper(ctx, preset, func(w *appearance.Part) {
 		if dark {
 			w.Dark = ref
@@ -453,7 +454,7 @@ func (a *App) putWallpaper(ctx *ui.Context, preset string, dark bool, ref, pairD
 			w.Fit = fit
 		}
 		w.Light = ref
-		if pairDark != "" || w.Dark == ref {
+		if pair || w.Dark == ref {
 			w.Dark = pairDark
 		}
 	})
@@ -546,9 +547,9 @@ func (a *App) wallChooserDialog(ctx *ui.Context) ui.Element {
 					OnClick(func() {
 						close()
 						if s.dark {
-							a.putWallpaper(ctx, s.preset, true, pic, "", "")
+							a.putWallpaper(ctx, s.preset, true, pic, false, "", "")
 						} else {
-							a.putWallpaper(ctx, s.preset, false, w.Light, w.Dark, w.Fit)
+							a.putWallpaper(ctx, s.preset, false, w.Light, true, w.Dark, w.Fit)
 						}
 					}).
 					Child(ui.Div().Radius(radiusM).Border(1, t.Border).ClipContent().

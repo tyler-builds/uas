@@ -141,8 +141,8 @@ func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element
 			filterChip(ctx, installed, tab == lookInstalled, func() { a.lookTab.Set(lookInstalled) }))
 		controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).Shrink(0).Child(chips)
 		if tab == lookPresets {
-			sub = "Your looks, saved under a name: icons, cursor, fonts, light or dark style and accent " +
-				"color, applied in one step."
+			sub = "Your looks, saved under a name: icons, cursor, fonts, light or dark style, accent color " +
+				"and wallpaper, applied in one step."
 			page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, a.presetHeaderButtons(ctx)))
 			return scroll(page.Child(controls).Children(a.presetsTab(ctx, q)...))
 		}

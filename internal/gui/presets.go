@@ -372,6 +372,9 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 				look = append(look, a.presetPartRow(ctx, p, part, lk.Data))
 			}
 		}
+		if shown(appearance.PartWallpaper) {
+			look = append(look, a.presetWallpaperRow(ctx, p))
+		}
 		for _, part := range []string{appearance.PartInterface, appearance.PartDocument, appearance.PartMonospace} {
 			if shown(part) {
 				fonts = append(fonts, a.presetPartRow(ctx, p, part, lk.Data))
@@ -379,10 +382,6 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 		}
 		if len(look) > 0 {
 			page = page.Child(section(sectionHeader(ctx, "Look", ""), settingsList(ctx, look...)))
-		}
-		if shown(appearance.PartWallpaper) {
-			page = page.Child(section(sectionHeader(ctx, "Wallpaper", ""),
-				settingsList(ctx, a.presetWallpaperRow(ctx, p))))
 		}
 		if len(fonts) > 0 {
 			page = page.Child(section(sectionHeader(ctx, "Fonts",

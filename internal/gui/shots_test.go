@@ -171,6 +171,24 @@ func TestShots(t *testing.T) {
 			a.goTo(view{page: pageAppearance})
 			a.openPreset("Papirus night")
 		}, 1000, "", 0},
+		// Wallpapers: the system's, to choose from for a preset; and the wallpaper uas set, as one row of
+		// "Changed by uas".
+		{"preset-wallpapers", func(a *App) {
+			shotPresets(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.openPreset("Papirus night")
+			a.wallChooser.Set(&wallSlot{preset: "Papirus night"})
+		}, 900, "", 0},
+		{"appearance-installed-wallpaper", func(a *App) {
+			shotPresets(t, a)
+			if err := a.s.Looks.UseWallpaper(context.Background(), appearance.Wallpaper{
+				Light: "/usr/share/backgrounds/gnome/fold-l.jxl", Dark: "/usr/share/backgrounds/gnome/fold-d.jxl",
+				Fit: appearance.FitZoom}); err != nil {
+				t.Error(err)
+			}
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookInstalled)
+		}, 700, "", 0},
 		{"preset-apply", func(a *App) {
 			p := shotPresets(t, a)["Papirus night"]
 			a.goTo(view{page: pageAppearance})
@@ -382,7 +400,8 @@ func shotLooks(t *testing.T) *appearance.Installer {
 
 // shotPresets saves four presets, with the system's icon themes (and the user's own, read only) to draw
 // them with, and makes the fake desktop's look Evening's. One needs downloads: an icon theme, a cursor theme
-// and a Nerd Font from the catalog.
+// and a Nerd Font from the catalog. Their wallpapers are the system's (Fedora's, Bazzite's and GNOME's, as
+// this system has them) and a picture of the user's, which is copied into the temporary store.
 func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
 	sys := []string{"/usr/share"}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -397,22 +416,36 @@ func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
 		}
 		return p
 	}
+	wall := func(light, dark string) appearance.Part {
+		return appearance.Part{Light: light, Dark: dark, Fit: appearance.FitZoom}
+	}
+	mine, err := a.s.Looks.AddWallpaper(shotPicture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	presets := []appearance.Preset{
 		{Name: "Day", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeLight),
 			appearance.PartAccent: part("blue"), appearance.PartIcons: part("Adwaita"),
-			appearance.PartInterface: part("Adwaita Sans 11"), appearance.PartMonospace: part("Adwaita Mono 11")}},
+			appearance.PartInterface: part("Adwaita Sans 11"), appearance.PartMonospace: part("Adwaita Mono 11"),
+			appearance.PartWallpaper: wall("/usr/share/backgrounds/gnome/adwaita-l.jxl",
+				"/usr/share/backgrounds/gnome/adwaita-d.jxl")}},
 		{Name: "Evening", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeDark),
 			appearance.PartAccent: part("teal"), appearance.PartIcons: part("kora"),
 			appearance.PartCursor: part("Adwaita"), appearance.PartInterface: part("Inter 11"),
-			appearance.PartMonospace: part("Fira Code 10")}},
+			appearance.PartMonospace: part("Fira Code 10"),
+			appearance.PartWallpaper: wall("/usr/share/backgrounds/fedora-workstation/montclair_light.webp",
+				"/usr/share/backgrounds/fedora-workstation/montclair_dark.webp")}},
 		{Name: "Breeze", Parts: map[string]appearance.Part{appearance.PartAccent: part("orange"),
-			appearance.PartIcons: part("breeze-dark"), appearance.PartInterface: part("Noto Sans 10")}},
+			appearance.PartIcons: part("breeze-dark"), appearance.PartInterface: part("Noto Sans 10"),
+			appearance.PartWallpaper: wall(mine, "")}},
 		{Name: "Papirus night", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeDark),
 			appearance.PartAccent:    part("purple"),
 			appearance.PartIcons:     from("Papirus-Dark", "pling:1166289", true),
 			appearance.PartCursor:    from("Bibata-Modern-Ice", "pling:1197198", true),
 			appearance.PartMonospace: from("JetBrainsMono Nerd Font 11", "nerd-fonts:JetBrainsMono", false),
-			appearance.PartDocument:  part("Bookerly 12")}},
+			appearance.PartDocument:  part("Bookerly 12"),
+			appearance.PartWallpaper: wall("/usr/share/backgrounds/gnome/blobs-l.svg",
+				"/usr/share/backgrounds/gnome/blobs-d.svg")}},
 	}
 	out := map[string]appearance.Preset{}
 	for _, p := range presets {
@@ -428,6 +461,35 @@ func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
 		key, _ := appearance.PartKey(name)
 		gs.values[key] = part.Value
 	}
+	ev := out["Evening"].Parts[appearance.PartWallpaper]
+	gs.values["bg picture-uri"] = appearance.PathURI(ev.Light)
+	gs.values["bg picture-uri-dark"] = appearance.PathURI(ev.Dark)
+	gs.values["bg picture-options"] = ev.Fit
 	gs.mu.Unlock()
 	return out
+}
+
+// shotPicture is a picture of the user's: a soft gradient, as a photo would be in a preset's preview.
+func shotPicture(t *testing.T) string {
+	const w, h = 1920, 1080
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			fx, fy := float64(x)/w, float64(y)/h
+			img.Pix[y*img.Stride+x*4] = uint8(40 + 180*fx*(1-fy))
+			img.Pix[y*img.Stride+x*4+1] = uint8(70 + 90*fy)
+			img.Pix[y*img.Stride+x*4+2] = uint8(140 + 100*(1-fx))
+			img.Pix[y*img.Stride+x*4+3] = 255
+		}
+	}
+	path := filepath.Join(t.TempDir(), "Lake at dusk.png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

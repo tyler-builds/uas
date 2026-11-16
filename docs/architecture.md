@@ -712,9 +712,18 @@ settings, the wallpaper's pictures and fit too. CLI: `uas appearance preset`, an
 <file> [-dark <file>] [-fit <mode>]`.
 
 **The Appearance page** (`gui/appearance.go`) opens on Presets once there are any: cards with a preview in
-the preset's style (its icon theme's icons, its accent), Apply and a menu (Change, Rename, Duplicate,
-Delete), Save current look and New preset; a preset's page (`gui/presets.go`) changes each part or leaves it
-as it is. Its other tabs are Fonts, Icons and Cursors, each a grid of cards, most
+the preset's style (its icon theme's icons, its accent, in front of its wallpaper when it has one), Apply and
+a menu (Change, Rename, Duplicate, Delete), Save current look and New preset; a preset's page
+(`gui/presets.go`) changes each part or leaves it as it is. Its Wallpaper row (`gui/wallpapers.go`) has a
+light and a dark slot, each with Choose… (a file, through the portal's file chooser filtered to the kinds the
+store takes, or the system's wallpapers, a grid of thumbnails with names, where choosing a light picture takes
+its dark pair too), "Same for dark", the fit and Leave as is. **Wallpaper thumbnails** are made off the UI
+thread and never at full size: the desktop's own thumbnail (`~/.cache/thumbnails/<size>/<md5 of the
+URI>.png`, when its `Thumb::MTime` is the picture's), else the file decoded (two at a time) and averaged
+down to 520 pixels wide; an SVG is drawn as vectors, a slideshow by its first picture. JPEG, PNG, WebP and
+GIF decode with Go's decoders; JPEG XL with the pure-Go decoder already in the build, which can't read many
+of GNOME's own (they use features it lacks), so those show a quiet tile with the file's name unless GNOME
+has thumbnailed them. Its other tabs are Fonts, Icons and Cursors, each a grid of cards, most
 popular first (or recently updated, or by name), searched from the top bar, and Installed: what uas
 installed with what it's in use for, the settings it changed with Revert, and every icon and cursor theme
 on the system, the one in use marked and the others with Use. A theme's page shows its preview pictures

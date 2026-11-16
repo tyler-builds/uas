@@ -224,7 +224,7 @@ func TestPresetWallpaper(t *testing.T) {
 		t.Error("a text file was taken as a wallpaper")
 	}
 	// As pickWallpaperFile ends, once the file picker answered.
-	a.putWallpaper(uctx, "Mine", true, ref, "", "")
+	a.putWallpaper(uctx, "Mine", true, ref, false, "", "")
 	waitText(t, u, "wallpaper-row:Mine", "Your picture")
 	if p, _ := store.Get("Mine"); p.Parts[appearance.PartWallpaper].Dark != ref {
 		t.Errorf("dark = %+v", p.Parts[appearance.PartWallpaper])
