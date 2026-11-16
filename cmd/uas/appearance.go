@@ -19,7 +19,7 @@ import (
 const appearanceUsage = `usage: uas appearance [command]
 
 Fonts, icon themes and cursor themes, installed for your account: fonts from Google Fonts and Nerd Fonts,
-themes from Pling (gnome-look.org).
+themes from Pling (gnome-look.org). Also the light or dark style, the accent color and the wallpaper.
 
 commands:
   list                          what uas installed, and what the desktop uses (the default)
@@ -33,7 +33,13 @@ commands:
                                 family, or a family and size such as "Inter 11"), scheme (default, light
                                 or dark) or accent (blue, teal, green, yellow, orange, red, pink, purple,
                                 slate)
-  revert <S>|all                put S, or every setting uas changed, back to what it was before uas
+  use wallpaper <file> [-dark <file>] [-fit F]
+                                set the wallpaper (GNOME): a picture (jpg, png, webp, jxl or svg; your own
+                                are copied into uas's wallpaper folder) or one of the system's, a second
+                                for the dark style, and how it fits: zoom, centered, scaled, stretched,
+                                spanned, wallpaper (tiled) or none. "use wallpaper -fit F" changes the fit
+  revert <S>|wallpaper|all      put S, the wallpaper, or every setting uas changed, back to what it was
+                                before uas
   themes                        the icon and cursor themes on this system
   updates                       fonts and themes uas installed that have a newer version
   update <id>                   install one's newer version
@@ -45,10 +51,11 @@ commands:
 // preset's parts.
 var settingKeys = map[string]string{"icons": appearance.KeyIconTheme, "cursor": appearance.KeyCursorTheme,
 	"interface": appearance.KeyFont, "document": appearance.KeyDocumentFont, "monospace": appearance.KeyMonospaceFont,
-	"scheme": appearance.KeyColorScheme, "style": appearance.KeyColorScheme, "accent": appearance.KeyAccentColor}
+	"scheme": appearance.KeyColorScheme, "style": appearance.KeyColorScheme, "accent": appearance.KeyAccentColor,
+	"wallpaper": appearance.KeyWallpaper}
 
 // settingNames lists the names of settingKeys for messages.
-const settingNames = "icons, cursor, interface, document, monospace, scheme or accent"
+const settingNames = "icons, cursor, interface, document, monospace, scheme, accent or wallpaper"
 
 // lookKinds are the names -kind takes.
 var lookKinds = map[string]catalog.Kind{"fonts": catalog.KindFont, "font": catalog.KindFont,
@@ -70,6 +77,8 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 	variant := fs.String("variant", "", "the theme variant to install (see info)")
 	use := fs.String("use", "", "also use it: icons, cursor (themes), interface, document or monospace (fonts)")
 	limit := fs.Int("limit", 20, "maximum number of results")
+	dark := fs.String("dark", "", "use wallpaper: the picture for the dark style")
+	fit := fs.String("fit", "", "use wallpaper: how it fits the screen: "+strings.Join(appearance.WallpaperFits, ", "))
 	rest, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -179,6 +188,12 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		}
 		fmt.Fprintf(w, "%s is removed.\n", id)
 	case "use":
+		if len(rest) > 0 && settingKeys[rest[0]] == appearance.KeyWallpaper {
+			return useWallpaper(ctx, w, e, rest[1:], *dark, *fit)
+		}
+		if *dark != "" || *fit != "" {
+			return errors.New("appearance use: -dark and -fit are for the wallpaper")
+		}
 		if len(rest) != 2 {
 			return fmt.Errorf("appearance use: give a setting (%s) and a value", settingNames)
 		}
@@ -206,8 +221,14 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 			}
 			err = e.Looks.RevertAll(ctx)
 			cur := e.Looks.Current(ctx)
+			shown := map[string]bool{}
 			for _, s := range saved {
-				fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(s.Key), appearance.ValueLabel(s.Key, cur[s.Key]))
+				key := appearance.GroupKey(s.Key)
+				if shown[key] {
+					continue
+				}
+				shown[key] = true
+				fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), settingValue(e, cur, key))
 			}
 			return err
 		}
@@ -218,7 +239,7 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if err := e.Looks.Revert(ctx, key); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), appearance.ValueLabel(key, e.Looks.Current(ctx)[key]))
+		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), settingValue(e, e.Looks.Current(ctx), key))
 	case "themes":
 		return listThemes(ctx, w, e)
 	case "updates":
@@ -366,11 +387,29 @@ func listLooks(ctx context.Context, w io.Writer, e *session.Session) error {
 		saved, _ := e.Looks.Saved()
 		fmt.Fprintln(w)
 		for _, key := range appearance.SettingKeys {
-			v, ok := cur[key]
-			if !ok {
+			if _, ok := cur[key]; !ok || appearance.GroupKey(key) != key {
 				continue
 			}
-			line := fmt.Sprintf("%-15s %s", appearance.KeyLabel(key)+":", appearance.ValueLabel(key, v))
+			line := fmt.Sprintf("%-15s %s", appearance.KeyLabel(key)+":", settingValue(e, cur, key))
+			if key == appearance.KeyWallpaper {
+				// The wallpaper's settings are one: what revert goes back to is the light picture before uas,
+				// or when uas changed only the dark picture or the fit, that.
+				prev := map[string]string{}
+				changed := false
+				for _, k := range appearance.WallpaperKeys {
+					prev[k] = cur[k]
+					for _, s := range saved {
+						if s.Key == k {
+							prev[k], changed = s.Previous, true
+						}
+					}
+				}
+				if changed {
+					line += " (set by uas; revert goes back to " + orDefault(settingValue(e, prev, key)) + ")"
+				}
+				fmt.Fprintln(w, line)
+				continue
+			}
 			for _, s := range saved {
 				if s.Key == key {
 					line += " (set by uas; revert goes back to " + orDefault(appearance.ValueLabel(key, s.Previous)) + ")"
@@ -379,6 +418,59 @@ func listLooks(ctx context.Context, w io.Writer, e *session.Session) error {
 			fmt.Fprintln(w, line)
 		}
 	}
+	return nil
+}
+
+// settingValue names a setting's value for people. The wallpaper is its pictures and fit together: "Default
+// Background, dark: Default Background (dark), Zoom".
+func settingValue(e *session.Session, cur map[string]string, key string) string {
+	if key != appearance.KeyWallpaper {
+		return appearance.ValueLabel(key, cur[key])
+	}
+	return wallpaperLabel(e.Looks.SystemWallpapers(), appearance.Wallpaper{Light: cur[appearance.KeyWallpaper],
+		Dark: cur[appearance.KeyWallpaperDark], Fit: cur[appearance.KeyWallpaperFit]})
+}
+
+// wallpaperLabel names a wallpaper's pictures (paths or a preset's references) and fit; "" when it has no
+// picture.
+func wallpaperLabel(system []appearance.SystemWallpaper, wp appearance.Wallpaper) string {
+	if wp.Light == "" {
+		return ""
+	}
+	out := appearance.WallpaperName(system, wp.Light)
+	if wp.Dark != "" && wp.Dark != wp.Light {
+		out += ", dark: " + appearance.WallpaperName(system, wp.Dark)
+	}
+	if wp.Fit != "" {
+		out += ", " + appearance.ValueLabel(appearance.KeyWallpaperFit, wp.Fit)
+	}
+	return out
+}
+
+// useWallpaper sets the wallpaper: a picture, with another for the dark style or not, and its fit; or the fit
+// alone.
+func useWallpaper(ctx context.Context, w io.Writer, e *session.Session, rest []string, dark, fit string) error {
+	if fit != "" {
+		fit = appearance.ParseValue(appearance.KeyWallpaperFit, fit)
+		if err := appearance.CheckValue(appearance.KeyWallpaperFit, fit); err != nil {
+			return err
+		}
+	}
+	switch {
+	case len(rest) > 1:
+		return errors.New("appearance use wallpaper: give one picture, and the dark one with -dark")
+	case len(rest) == 0 && (fit == "" || dark != ""):
+		return errors.New("appearance use wallpaper: give a picture, or -fit to change only how it fits")
+	case len(rest) == 0:
+		if err := e.Looks.Use(ctx, appearance.KeyWallpaperFit, fit); err != nil {
+			return err
+		}
+	default:
+		if err := e.Looks.UseWallpaper(ctx, appearance.Wallpaper{Light: rest[0], Dark: dark, Fit: fit}); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(w, "Wallpaper: %s\n", settingValue(e, e.Looks.Current(ctx), appearance.KeyWallpaper))
 	return nil
 }
 

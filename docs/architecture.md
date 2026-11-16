@@ -669,27 +669,47 @@ the two folders uas installs to.
 own and says which it `Supports`. On GNOME, `gsettings` sets `org.gnome.desktop.interface`'s `icon-theme`,
 `cursor-theme`, `font-name`, `document-font-name` and `monospace-font-name` (a family alone keeps the
 setting's size; a font with a size is set as it is), `color-scheme` (default, light or dark) and
-`accent-color`; the last two are offered only when `gsettings list-keys` has them (GNOME 42 and 47). Font
+`accent-color`; the last two are offered only when `gsettings list-keys` has them (GNOME 42 and 47). The
+wallpaper is three settings, `wallpaper`, `wallpaper-dark` and `wallpaper-fit`: `org.gnome.desktop.background`'s
+`picture-uri`, `picture-uri-dark` and `picture-options` (zoom, centered, scaled, stretched, spanned, wallpaper,
+none). uas takes and gives paths; the GNOME layer writes them as `file://` URIs with everything outside a URI
+path's characters escaped (spaces, `#`, `%`, `?`, non-ASCII bytes) and reads them back, and a value that isn't
+a file URI is kept as it is. Setting the wallpaper sets `org.gnome.desktop.screensaver picture-uri` too, as
+GNOME's settings do, and one picture with no dark variant is used for both styles. Font
 settings are Pango descriptions, read from the end as Pango does (`fontname.go`), so `Fira Code weight=450
 10` is the family Fira Code. On KDE Plasma, `plasma-changeicons` and `plasma-apply-cursortheme` change icons
-and cursors (fonts are installed only). Other desktops install only. Before the first change of a setting
+and cursors (fonts are installed only; the wallpaper isn't set). Other desktops install only. Before the first change of a setting
 the state file saves its value (`saved_settings`); Revert puts it back (Revert all puts back every one), a
 change back to that value forgets it, and removing a font or theme that is in use reverts first (or resets
-the setting when uas didn't change it).
+the setting when uas didn't change it). The wallpaper's three settings are listed and reverted as one,
+"Wallpaper": `revert wallpaper` puts back each of them uas changed (or resets all three when it changed none).
 
 **Presets** (`client/appearance/preset.go`, `presetapply.go`, `session/presets.go`, `gui/presets.go`) are looks
-saved under a name, one JSON file each in `~/.config/uas/presets/<slug>.json` (`uas_preset` format version, name,
-times, and `parts`). A part is optional and is left alone when missing; it holds the setting's `value` and,
-for a font or theme uas installed, `from` (its catalog ID and variant), so it can be installed elsewhere. The
-parts are `scheme`, `accent`, `icons`, `cursor`, `interface`, `document` and `monospace`; the format keeps
-room for `gtk`, `shell` and `wallpaper`, and parts and fields this version doesn't know survive a rewrite.
-Names are unique whatever their case; a clash needs Replace (`-replace`). Capture reads every setting the
-desktop supports. **Applying** plans each part (set, already so, install from the catalog first, or skipped:
-missing, unsupported here, or a newer uas's), installs what is missing before anything changes, saves the
-values it is about to change to `~/.local/share/uas/previous-look.json` for Undo, then sets the parts in
-order (style, accent, icons, cursor, fonts) through `Use`, so Revert still goes back to the values from
-before uas. A part that fails is reported and the rest are still set. "In use" is worked out by comparing a
-preset's parts with the settings. CLI: `uas appearance preset`.
+saved under a name, one JSON file each in `~/.config/uas/presets/<slug>.json` (`uas_preset` format version,
+name, times, and `parts`). A part is optional and is left alone when missing; it holds the setting's `value`
+and, for a font or theme uas installed, `from` (its catalog ID and variant), so it can be installed elsewhere.
+The parts are `scheme`, `accent`, `icons`, `cursor`, `interface`, `document`, `monospace` and `wallpaper`; the
+format keeps room for `gtk` and `shell`, and parts and fields this version doesn't know survive a rewrite. The
+**wallpaper** part has `light`, an optional `dark` (none is the light picture) and `fit` (zoom when missing) in
+place of `value`. A picture of the user's (jpg, jpeg, png, webp, jxl or svg) is copied into the wallpaper
+store, `$XDG_DATA_HOME/uas/wallpapers/<sha256>.<ext>`, and named `sha256:<hex>`, so moving or deleting the
+original doesn't break the preset, and the same picture is stored once; the system's (under a `backgrounds`
+folder of `$XDG_DATA_DIRS`, GNOME's `.xml` slideshows too) are named by path and never copied. The system's
+wallpapers are listed from `gnome-background-properties/*.xml` in each data folder, which pair a light
+`filename` with a `filename-dark` and give a name and `options`; files that are missing or malformed are
+skipped. A stored picture is removed once no preset, no Previous look, no value saved for Revert and not the
+desktop's current wallpaper uses it (`PruneWallpapers`, run after a preset changes and after the wallpaper is
+set or reverted); one added in the last ten minutes is kept, as a preset may be about to use it, and nothing is
+removed when any of those can't be read. Names are unique whatever their case; a clash needs Replace
+(`-replace`). Capture reads every setting the desktop supports, the wallpaper's picture copied into the store
+when it is the user's. **Applying** plans each part (set, already so, install from the catalog first, or
+skipped: missing (a wallpaper whose picture can't be found), unsupported here, or a newer uas's), installs what
+is missing before anything changes, saves the values it is about to change to
+`~/.local/share/uas/previous-look.json` for Undo, then sets the parts in order (style, accent, icons, cursor,
+fonts, the wallpaper last) through `Use`, so Revert still goes back to the values from before uas. A part that
+fails is reported and the rest are still set. "In use" is worked out by comparing a preset's parts with the
+settings, the wallpaper's pictures and fit too. CLI: `uas appearance preset`, and `uas appearance use wallpaper
+<file> [-dark <file>] [-fit <mode>]`.
 
 **The Appearance page** (`gui/appearance.go`) opens on Presets once there are any: cards with a preview in
 the preset's style (its icon theme's icons, its accent), Apply and a menu (Change, Rename, Duplicate,
