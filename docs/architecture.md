@@ -677,7 +677,24 @@ the state file saves its value (`saved_settings`); Revert puts it back (Revert a
 change back to that value forgets it, and removing a font or theme that is in use reverts first (or resets
 the setting when uas didn't change it).
 
-**The Appearance page** (`gui/appearance.go`) has tabs Fonts, Icons and Cursors, each a grid of cards, most
+**Presets** (`client/appearance/preset.go`, `presetapply.go`, `session/presets.go`, `gui/presets.go`) are looks
+saved under a name, one JSON file each in `~/.config/uas/presets/<slug>.json` (`uas_preset` format version, name,
+times, and `parts`). A part is optional and is left alone when missing; it holds the setting's `value` and,
+for a font or theme uas installed, `from` (its catalog ID and variant), so it can be installed elsewhere. The
+parts are `scheme`, `accent`, `icons`, `cursor`, `interface`, `document` and `monospace`; the format keeps
+room for `gtk`, `shell` and `wallpaper`, and parts and fields this version doesn't know survive a rewrite.
+Names are unique whatever their case; a clash needs Replace (`-replace`). Capture reads every setting the
+desktop supports. **Applying** plans each part (set, already so, install from the catalog first, or skipped:
+missing, unsupported here, or a newer uas's), installs what is missing before anything changes, saves the
+values it is about to change to `~/.local/share/uas/previous-look.json` for Undo, then sets the parts in
+order (style, accent, icons, cursor, fonts) through `Use`, so Revert still goes back to the values from
+before uas. A part that fails is reported and the rest are still set. "In use" is worked out by comparing a
+preset's parts with the settings. CLI: `uas appearance preset`.
+
+**The Appearance page** (`gui/appearance.go`) opens on Presets once there are any: cards with a preview in
+the preset's style (its icon theme's icons, its accent), Apply and a menu (Change, Rename, Duplicate,
+Delete), Save current look and New preset; a preset's page (`gui/presets.go`) changes each part or leaves it
+as it is. Its other tabs are Fonts, Icons and Cursors, each a grid of cards, most
 popular first (or recently updated, or by name), searched from the top bar, and Installed: what uas
 installed with what it's in use for, the settings it changed with Revert, and every icon and cursor theme
 on the system, the one in use marked and the others with Use. A theme's page shows its preview pictures

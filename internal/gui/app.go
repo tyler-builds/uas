@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-builds/jamb/ui"
 
 	"github.com/tyler-builds/uas/internal/catalog"
+	"github.com/tyler-builds/uas/internal/client/appearance"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/gearlever"
 	"github.com/tyler-builds/uas/internal/client/refresh"
@@ -41,6 +42,8 @@ const (
 	// pageAppearance lists fonts and icon and cursor themes; pageLook is one of them, by its catalog ID.
 	pageAppearance = "appearance"
 	pageLook       = "look"
+	// pageLookPreset is a preset's page, by the preset's name.
+	pageLookPreset = "look-preset"
 )
 
 // view is one place in the app.
@@ -58,7 +61,7 @@ func (v view) isList() bool {
 // isDetail reports whether the view is one app's, extension's, font's or theme's page, which the sidebar has
 // no item for.
 func (v view) isDetail() bool {
-	return v.page == pageApp || v.page == pageExtension || v.page == pageLook
+	return v.page == pageApp || v.page == pageExtension || v.page == pageLook || v.page == pageLookPreset
 }
 
 // navKey is the sidebar key of a view, such as "category:Game".
@@ -120,11 +123,24 @@ type App struct {
 	extSearchOrder *ui.Signal[catalog.Order]
 	extRemoving    *ui.Signal[*shellext.Extension] // an extension's removal waiting for the user's OK
 
-	lookTab   *ui.Signal[string]        // the Appearance page's tab: lookFonts, lookIcons, lookCursors or lookInstalled
+	// lookTab is the Appearance page's tab: lookPresets, lookFonts, lookIcons, lookCursors or lookInstalled, or
+	// "" until one is picked (see lookTabNow).
+	lookTab   *ui.Signal[string]
 	lookOrder *ui.Signal[catalog.Order] // how its grids are sorted
 	// lookSearchOrder is how its grids are sorted while the top bar has a search.
 	lookSearchOrder *ui.Signal[catalog.Order]
 	lookRemoving    *ui.Signal[*state.AppearanceInstall] // a font's or theme's removal waiting for the user's OK
+
+	// presetSaving counts the openings of the Save current look dialog: positive while it is open, the
+	// opening's number negated once it is closed.
+	presetSaving   *ui.Signal[int]
+	presetNaming   *ui.Signal[*presetNaming]      // the New preset or Rename dialog
+	presetName     *ui.Signal[string]             // the name in those dialogs
+	presetErr      *ui.Signal[string]             // why the name can't be used
+	presetReplace  *ui.Signal[bool]               // Save current look replaces the preset of its name
+	presetApplying *ui.Signal[*presetApply]       // an apply waiting for the user's OK
+	presetDeleting *ui.Signal[*appearance.Preset] // a preset's deletion waiting for the user's OK
+	presetApplied  *ui.Signal[*presetApplied]     // what the last apply did, for its note with Undo
 
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
@@ -172,10 +188,18 @@ func New(s *session.Session) *App {
 		extOrder:        ui.NewSignal(catalog.OrderPopular),
 		extSearchOrder:  ui.NewSignal(catalog.OrderRelevance),
 		extRemoving:     ui.NewSignal[*shellext.Extension](nil),
-		lookTab:         ui.NewSignal(lookFonts),
+		lookTab:         ui.NewSignal(""),
 		lookOrder:       ui.NewSignal(catalog.OrderPopular),
 		lookSearchOrder: ui.NewSignal(catalog.OrderRelevance),
 		lookRemoving:    ui.NewSignal[*state.AppearanceInstall](nil),
+		presetSaving:    ui.NewSignal(0),
+		presetNaming:    ui.NewSignal[*presetNaming](nil),
+		presetName:      ui.NewSignal(""),
+		presetErr:       ui.NewSignal(""),
+		presetReplace:   ui.NewSignal(false),
+		presetApplying:  ui.NewSignal[*presetApply](nil),
+		presetDeleting:  ui.NewSignal[*appearance.Preset](nil),
+		presetApplied:   ui.NewSignal[*presetApplied](nil),
 		catalogGen:      ui.NewSignal(0),
 		icons:           newIconLoader(),
 	}
@@ -321,6 +345,10 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.installLinkDialog(ctx)).
 		Child(a.extRemoveDialog(ctx)).
 		Child(a.lookRemoveDialog(ctx)).
+		Child(a.presetSaveDialog(ctx)).
+		Child(a.presetNamingDialog(ctx)).
+		Child(a.presetApplyDialog(ctx)).
+		Child(a.presetDeleteDialog(ctx)).
 		Child(a.migrateDialog(ctx)).
 		Child(a.uninstallDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))
@@ -356,6 +384,8 @@ func (a *App) page(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 		return a.appearancePage(ctx, info)
 	case pageLook:
 		return a.lookPage(ctx, v.arg)
+	case pageLookPreset:
+		return a.presetPage(ctx, v.arg)
 	}
 	return a.homePage(ctx, info)
 }
@@ -474,8 +504,9 @@ func (a *App) titleBar(ctx *ui.Context) ui.Element {
 		case pageExtensions:
 			placeholder = "Search extensions…"
 		case pageAppearance:
-			placeholder = "Search " + map[string]string{lookFonts: "fonts", lookIcons: "icon themes",
-				lookCursors: "cursor themes", lookInstalled: "what's installed"}[a.lookTab.Get()] + "…"
+			placeholder = map[string]string{lookPresets: "Filter presets…", lookFonts: "Search fonts…",
+				lookIcons: "Search icon themes…", lookCursors: "Search cursor themes…",
+				lookInstalled: "Search what's installed…"}[a.lookTabNow(ctx)]
 		}
 		label := "Filter apps"
 		switch v.page {
@@ -545,10 +576,13 @@ func (a *App) crumbs(ctx *ui.Context) ui.Element {
 	row := ui.Div().Row().Align(ui.Center).Gap(6).Shrink(1).MinWidth(ui.Px(0))
 	if v.isDetail() {
 		// The app's name comes from the query its page runs, so it is usually there already.
-		res := a.appQuery(ctx, v.arg)
-		app := ""
-		if res.Data != nil {
-			app = res.Data.Name
+		app := v.arg // a preset's
+		if v.page != pageLookPreset {
+			res := a.appQuery(ctx, v.arg)
+			app = ""
+			if res.Data != nil {
+				app = res.Data.Name
+			}
 		}
 		for i := len(h) - 2; i >= 0; i-- {
 			if n := name(h[i]); n != "" {

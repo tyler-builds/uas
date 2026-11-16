@@ -22,6 +22,7 @@ import (
 
 // The Appearance page's tabs.
 const (
+	lookPresets   = "presets"
 	lookFonts     = "fonts"
 	lookIcons     = "icons"
 	lookCursors   = "cursors"
@@ -120,7 +121,7 @@ func (a *App) openLook(id string) { a.open(view{page: pageLook, arg: id}) }
 // top bar's field searches the tab's kind.
 func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
-		tab := a.lookTab.Get()
+		tab := a.lookTabNow(ctx)
 		q := strings.TrimSpace(a.listFilter.Get())
 		lk := a.looks(ctx)
 		sub := "Fonts from Google Fonts and Nerd Fonts, and icon and cursor themes from Pling (gnome-look.org), " +
@@ -133,11 +134,18 @@ func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element
 			installed = fmt.Sprintf("Installed %d", len(lk.Data.recs))
 		}
 		chips := segmented(ctx,
+			filterChip(ctx, "Presets", tab == lookPresets, func() { a.lookTab.Set(lookPresets) }),
 			filterChip(ctx, "Fonts", tab == lookFonts, func() { a.lookTab.Set(lookFonts) }),
 			filterChip(ctx, "Icons", tab == lookIcons, func() { a.lookTab.Set(lookIcons) }),
 			filterChip(ctx, "Cursors", tab == lookCursors, func() { a.lookTab.Set(lookCursors) }),
 			filterChip(ctx, installed, tab == lookInstalled, func() { a.lookTab.Set(lookInstalled) }))
 		controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).Shrink(0).Child(chips)
+		if tab == lookPresets {
+			sub = "Your looks, saved under a name: icons, cursor, fonts, light or dark style and accent " +
+				"color, applied in one step."
+			page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, a.presetHeaderButtons(ctx)))
+			return scroll(page.Child(controls).Children(a.presetsTab(ctx, q)...))
+		}
 		page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, nil))
 		if tab == lookInstalled {
 			return scroll(page.Child(controls).Children(a.lookInstalledSections(ctx, lk, q)...))

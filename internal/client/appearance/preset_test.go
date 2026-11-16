@@ -377,3 +377,31 @@ func TestPlanWithoutInstalls(t *testing.T) {
 		t.Errorf("on Plasma: %+v", plan)
 	}
 }
+
+func TestIconFiles(t *testing.T) {
+	root := t.TempDir()
+	write := func(p, s string) {
+		os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755)
+		os.WriteFile(filepath.Join(root, p), []byte(s), 0o644)
+	}
+	write("Base/index.theme", "[Icon Theme]\nDirectories=16x16/places,48x48/places,scalable/apps\n")
+	write("Base/16x16/places/folder.png", "png")
+	write("Base/48x48/places/folder.png", "png")
+	write("Base/scalable/apps/utilities-terminal.svg", "<svg/>")
+	write("Dark/index.theme", "[Icon Theme]\nInherits=Base,hicolor\nDirectories=places/symbolic,places/32\n")
+	write("Dark/places/symbolic/inode-directory.svg", "<svg/>")
+	write("Dark/places/32/inode-directory.svg", "<svg/>")
+	themes := []Theme{{Name: "Base", Dir: filepath.Join(root, "Base")}, {Name: "Dark", Dir: filepath.Join(root, "Dark")}}
+	got := IconFiles(themes, "Dark", SampleIcons)
+	want := []string{filepath.Join(root, "Dark/places/32/inode-directory.svg"),
+		filepath.Join(root, "Base/scalable/apps/utilities-terminal.svg")}
+	if !slices.Equal(got, want) {
+		t.Errorf("IconFiles = %v", got)
+	}
+	if got := IconFiles(themes, "Base", [][]string{{"folder"}}); len(got) != 1 || !strings.Contains(got[0], "48x48") {
+		t.Errorf("largest = %v", got)
+	}
+	if got := IconFiles(themes, "Nope", SampleIcons); got != nil {
+		t.Errorf("unknown theme = %v", got)
+	}
+}

@@ -44,7 +44,8 @@ type fakeGNOME struct {
 func newFakeGNOME() *fakeGNOME {
 	return &fakeGNOME{values: map[string]string{appearance.KeyIconTheme: "Adwaita",
 		appearance.KeyCursorTheme: "Adwaita", appearance.KeyFont: "Adwaita Sans 11",
-		appearance.KeyDocumentFont: "Adwaita Sans 12", appearance.KeyMonospaceFont: "Adwaita Mono 11"}}
+		appearance.KeyDocumentFont: "Adwaita Sans 12", appearance.KeyMonospaceFont: "Adwaita Mono 11",
+		appearance.KeyColorScheme: appearance.SchemeDefault, appearance.KeyAccentColor: "blue"}}
 }
 
 func (f *fakeGNOME) get(key string) string {
@@ -59,6 +60,8 @@ func (f *fakeGNOME) Run(_ context.Context, name string, args []string, _ func(st
 	switch {
 	case name == "fc-cache":
 		return "", nil
+	case name == "fc-list":
+		return fakeFonts, nil
 	case name != "gsettings" || len(args) < 3:
 		return "", fmt.Errorf("unexpected %s %v", name, args)
 	case args[0] == "get":
@@ -70,6 +73,10 @@ func (f *fakeGNOME) Run(_ context.Context, name string, args []string, _ func(st
 	}
 	return "", nil
 }
+
+// fakeFonts are the font families fc-list answers.
+const fakeFonts = "Adwaita Sans\nAdwaita Mono\nCantarell\nFira Code,Fira Code Light\nInter,Inter Display\n" +
+	"Noto Sans\nNoto Serif\nSource Code Pro\n"
 
 // routedTransport answers every request with a handler, whatever its host.
 type routedTransport struct{ h http.Handler }

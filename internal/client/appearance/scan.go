@@ -193,3 +193,134 @@ func InstalledAs(recs []state.AppearanceInstall, theme string) (state.Appearance
 	}
 	return state.AppearanceInstall{}, false
 }
+
+// SampleIcons are icons nearly every icon theme draws, for showing what one looks like: a folder, a
+// terminal and the settings, each with names to try in turn.
+var SampleIcons = [][]string{
+	{"folder", "inode-directory"},
+	{"utilities-terminal", "org.gnome.Terminal", "terminal"},
+	{"org.gnome.Settings", "preferences-system", "preferences-desktop"},
+}
+
+// IconFiles returns the files an icon theme draws icons with, one for each list of names that it (or a
+// theme it inherits, but not hicolor) has: a scalable SVG when there is one, else the largest picture.
+// themes are as Themes returns them.
+func IconFiles(themes []Theme, theme string, names [][]string) []string {
+	dirs := map[string]string{}
+	for _, t := range themes {
+		dirs[t.Name] = t.Dir
+	}
+	var chain []string // the theme, then the ones it inherits
+	var walk func(name string, depth int)
+	walk = func(name string, depth int) {
+		d, ok := dirs[name]
+		if !ok || depth > 3 || name == "hicolor" || slices.Contains(chain, d) {
+			return
+		}
+		chain = append(chain, d)
+		_, inherits := readIconIndex(filepath.Join(d, "index.theme"))
+		for _, i := range inherits {
+			walk(i, depth+1)
+		}
+	}
+	walk(theme, 0)
+	var out []string
+	for _, alts := range names {
+	found:
+		for _, d := range chain {
+			subdirs, _ := readIconIndex(filepath.Join(d, "index.theme"))
+			for _, n := range alts {
+				if f := bestIcon(d, subdirs, n); f != "" {
+					out = append(out, f)
+					break found
+				}
+			}
+		}
+	}
+	return out
+}
+
+// bestIcon finds an icon in a theme's folders: a scalable SVG first, else the one of the largest size, and a
+// one-color symbolic icon only when there is nothing else.
+func bestIcon(dir string, subdirs []string, name string) string {
+	best, score := "", -1<<30
+	for _, sd := range subdirs {
+		for _, ext := range []string{".svg", ".png"} {
+			p := filepath.Join(dir, sd, name+ext)
+			if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() || fi.Size() > 1<<20 {
+				continue
+			}
+			// Full-color pictures before one-color symbolic ones; then scalable SVGs; then the largest.
+			s := min(iconDirSize(sd), 512)
+			switch {
+			case strings.Contains(sd, "symbolic"):
+				s -= 10000
+			case ext == ".svg" && strings.Contains(sd, "scalable"):
+				s += 2000
+			case ext == ".svg":
+				s += 1000
+			}
+			if s > score {
+				best, score = p, s
+			}
+		}
+	}
+	return best
+}
+
+// iconDirSize reads the size from an icon folder's name ("48x48/apps", "apps/48", "48@2x"), 0 when it has
+// none.
+func iconDirSize(sd string) int {
+	most := 0
+	for _, part := range strings.FieldsFunc(sd, func(r rune) bool { return r == '/' || r == 'x' || r == '@' }) {
+		n := 0
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				n = -1
+				break
+			}
+			n = n*10 + int(r-'0')
+		}
+		most = max(most, n)
+	}
+	return most
+}
+
+// readIconIndex reads the icon folders and the inherited themes an index.theme lists.
+func readIconIndex(p string) (dirs, inherits []string) {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, nil
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(io.LimitReader(f, 256<<10))
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	in := false
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "[") {
+			in = line == "[Icon Theme]"
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !in || !ok {
+			continue
+		}
+		list := func() []string {
+			var out []string
+			for _, v := range strings.Split(value, ",") {
+				if v = strings.TrimSpace(v); v != "" && filepath.IsLocal(v) {
+					out = append(out, v)
+				}
+			}
+			return out
+		}
+		switch strings.TrimSpace(key) {
+		case "Directories", "ScaledDirectories":
+			dirs = append(dirs, list()...)
+		case "Inherits":
+			inherits = list()
+		}
+	}
+	return dirs, inherits
+}

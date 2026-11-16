@@ -150,6 +150,41 @@ func TestShots(t *testing.T) {
 			a.lookTab.Set(lookIcons)
 			a.openLook(catalog.AppearanceAppID(catalog.SourcePling, "1166289")) // Papirus
 		}, 1200, "", 0},
+		// Presets: none yet; a few, one in use (the tab opens on them once there are any); what an apply did;
+		// Save current look; a preset's page; the apply dialog when it downloads first; and Delete.
+		{"appearance-presets-empty", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookPresets) },
+			700, "", 0},
+		{"appearance-presets", func(a *App) { shotPresets(t, a); a.goTo(view{page: pageAppearance}) }, 900, "", 0},
+		{"appearance-presets-applied", func(a *App) {
+			shotPresets(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.presetApplied.Set(&presetApplied{name: "Evening", skipped: []string{"Cursor"}})
+		}, 900, "", 0},
+		{"preset-save", func(a *App) {
+			shotPresets(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.openSave()
+			a.presetName.Set("Late night")
+		}, 900, "", 0},
+		{"preset-page", func(a *App) {
+			shotPresets(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.openPreset("Papirus night")
+		}, 1000, "", 0},
+		{"preset-apply", func(a *App) {
+			p := shotPresets(t, a)["Papirus night"]
+			a.goTo(view{page: pageAppearance})
+			plan, err := a.s.PlanPreset(context.Background(), p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.presetApplying.Set(&presetApply{p: p, plan: plan})
+		}, 900, "", 0},
+		{"preset-delete", func(a *App) {
+			p := shotPresets(t, a)["Day"]
+			a.goTo(view{page: pageAppearance})
+			a.presetDeleting.Set(&p)
+		}, 900, "", 0},
 		{"look-font", func(a *App) {
 			a.goTo(view{page: pageAppearance})
 			a.openLook(catalog.AppearanceAppID(catalog.SourceGoogleFonts, "inter"))
@@ -170,7 +205,7 @@ func TestShots(t *testing.T) {
 				continue
 			}
 			s := &session.Session{Links: links, Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path,
-				Looks:    shotLooks(t),
+				Looks: shotLooks(t), Presets: appearance.NewPresets(t.TempDir(), t.TempDir()),
 				Platform: platform.Info{PrettyName: "Bazzite", Arch: "x86_64", Atomic: true, LibFUSE2: true}, Tools: ujust.Detect(),
 				SysApps: map[string]sysapps.App{"com.valvesoftware.Steam": {ID: "com.valvesoftware.Steam", Name: "Steam",
 					Version: "1.0.0.87", Desktop: "/usr/share/applications/steam.desktop"}},
@@ -343,4 +378,56 @@ func shotLooks(t *testing.T) *appearance.Installer {
 		State:  state.Store{Path: filepath.Join(dir, "state.json")},
 		Client: &http.Client{Timeout: time.Minute}, Runner: gs, Desktop: &appearance.GNOME{Runner: gs},
 		PlingAPI: appearance.PlingAPI, Limits: archives.DefaultLimits}
+}
+
+// shotPresets saves four presets, with the system's icon themes (and the user's own, read only) to draw
+// them with, and makes the fake desktop's look Evening's. One needs downloads: an icon theme, a cursor theme
+// and a Nerd Font from the catalog.
+func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
+	sys := []string{"/usr/share"}
+	if home, err := os.UserHomeDir(); err == nil {
+		sys = append(sys, filepath.Join(home, ".local", "share"))
+	}
+	a.s.Looks.SystemData = sys
+	part := func(v string) appearance.Part { return appearance.Part{Value: v} }
+	from := func(v, id string, variant bool) appearance.Part {
+		p := appearance.Part{Value: v, From: &appearance.Origin{ID: id}}
+		if variant {
+			p.From.Variant = v
+		}
+		return p
+	}
+	presets := []appearance.Preset{
+		{Name: "Day", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeLight),
+			appearance.PartAccent: part("blue"), appearance.PartIcons: part("Adwaita"),
+			appearance.PartInterface: part("Adwaita Sans 11"), appearance.PartMonospace: part("Adwaita Mono 11")}},
+		{Name: "Evening", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeDark),
+			appearance.PartAccent: part("teal"), appearance.PartIcons: part("kora"),
+			appearance.PartCursor: part("Adwaita"), appearance.PartInterface: part("Inter 11"),
+			appearance.PartMonospace: part("Fira Code 10")}},
+		{Name: "Breeze", Parts: map[string]appearance.Part{appearance.PartAccent: part("orange"),
+			appearance.PartIcons: part("breeze-dark"), appearance.PartInterface: part("Noto Sans 10")}},
+		{Name: "Papirus night", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeDark),
+			appearance.PartAccent:    part("purple"),
+			appearance.PartIcons:     from("Papirus-Dark", "pling:1166289", true),
+			appearance.PartCursor:    from("Bibata-Modern-Ice", "pling:1197198", true),
+			appearance.PartMonospace: from("JetBrainsMono Nerd Font 11", "nerd-fonts:JetBrainsMono", false),
+			appearance.PartDocument:  part("Bookerly 12")}},
+	}
+	out := map[string]appearance.Preset{}
+	for _, p := range presets {
+		saved, err := a.s.Presets.Save(p, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[p.Name] = saved
+	}
+	gs := a.s.Looks.Runner.(*fakeGNOME)
+	gs.mu.Lock()
+	for name, part := range out["Evening"].Parts {
+		key, _ := appearance.PartKey(name)
+		gs.values[key] = part.Value
+	}
+	gs.mu.Unlock()
+	return out
 }

@@ -36,7 +36,7 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 		if v == "" {
 			continue
 		}
-		parts[KeyPart(key)] = Part{Value: v, From: originOf(recs, key, v)}
+		parts[KeyPart(key)] = Part{Value: v, From: OriginOf(recs, key, v)}
 	}
 	if len(parts) == 0 {
 		return nil, errors.Join(append(errs, errors.New("couldn't read any of the desktop's settings"))...)
@@ -44,8 +44,8 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 	return parts, nil
 }
 
-// originOf is the catalog item uas installed a setting's value from, or nil.
-func originOf(recs []state.AppearanceInstall, key, value string) *Origin {
+// OriginOf is the catalog item uas installed a setting's value from, for a preset part, or nil.
+func OriginOf(recs []state.AppearanceInstall, key, value string) *Origin {
 	for _, r := range recs {
 		if !slices.Contains(keysOf(r), key) || !inUse(r, key, value) {
 			continue
@@ -372,7 +372,7 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		if cur == "" {
 			continue
 		}
-		prev.Parts[o.Part] = Part{Value: cur, From: originOf(recs, o.Key, cur)}
+		prev.Parts[o.Part] = Part{Value: cur, From: OriginOf(recs, o.Key, cur)}
 	}
 	if len(prev.Parts) > 0 && store != nil {
 		if err := store.saveUndo(Undo{Applied: p.Name, At: store.now(), Look: prev}); err != nil {
