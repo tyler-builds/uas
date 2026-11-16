@@ -110,7 +110,7 @@ func TestShellThemes(t *testing.T) {
 	// A GTK theme uas installed with a Shell theme says so on its page, and uses it for the Shell.
 	a.openLook(id)
 	u.WaitFor("the theme's page", func() bool { return u.Has("look:" + id) })
-	waitText(t, u, "look:"+id, "Has a GNOME Shell theme")
+	waitText(t, u, "look:"+id, "Orchis-Dark has a GNOME Shell theme")
 	waitText(t, u, "look:"+id, appearance.ShellNote)
 	clickButton(u, "Use for the Shell")
 	u.WaitFor("the Shell theme", func() bool { return gs.get("shell name") == "Orchis-Dark" })

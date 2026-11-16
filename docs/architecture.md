@@ -802,13 +802,36 @@ is missing before anything changes, saves the values it is about to change to
 Shell theme, icons, cursor, fonts, the wallpaper last) through `Use`, so Revert still goes back to the values from before uas. A part that
 fails is reported and the rest are still set. A GTK theme the setting already has is "already so" unless it has
 GTK 4 files uas hasn't copied, which applying copies. "In use" is worked out by comparing a preset's parts with the
-settings, the wallpaper's pictures and fit too. CLI: `uas appearance preset`, `uas appearance use wallpaper
-<file> [-dark <file>] [-fit <mode>]` and `uas appearance use shell <name>|default`.
+settings, the wallpaper's pictures and fit too.
+**The preset in use, Changed and Update** (`client/appearance/presetcurrent.go`). uas remembers the preset last
+applied, or saved from the current look, in `~/.local/share/uas/current-preset.json`, with the look that gave:
+the desktop's settings of the preset's parts right after. A preset is **Changed** when it is that preset and
+a part's setting changed since and isn't the part's value now (so a part skipped when it was applied, such as
+a theme this system lacks, makes no Changed mark by itself, and neither does a part the user changed on the
+preset's page to match the look). "In use" comes first: a preset whose parts all match is in use whatever
+was remembered. **Update** (`UpdatePreset`) saves the current look into the preset: only the parts it has
+(it never gains a part), and of those, for the remembered preset, only the Changed ones; a skipped part keeps
+its value and `from`, and a font part without a size stays without one. For a preset that isn't the
+remembered one, every part it has that differs from the look is saved. uas never updates a preset by itself;
+Use and Install and use leave every preset as it was. What is remembered follows the preset: Rename keeps it
+under the new name, Delete forgets it, changing a part on the preset's page leaves it (the preset changed,
+not the look), and Undo of an apply brings back what was remembered before that apply (the Previous look
+file keeps it, as `remembered`), or none. **Add to preset** (`Presets.AddPart`, `ItemPart`) sets one part of a
+preset to a font or theme and nothing else: nothing is applied or installed, and the part keeps its catalog
+ID and variant in `from`, so applying the preset installs it. A font is added for a role (interface,
+document or monospace) without a size, keeping the size the preset's part had. CLI: `uas appearance preset` (`list` marks the changed preset, `update <name>` is Update), `uas appearance
+use wallpaper <file> [-dark <file>] [-fit <mode>]` and `uas appearance use shell <name>|default`; `use`
+says when the look no longer matches the preset applied last, and how to update it.
 
 **The Appearance page** (`gui/appearance.go`) opens on Presets once there are any: cards with a preview in
 the preset's style (its icon theme's icons, its accent, in front of its wallpaper when it has one), Apply and
 a menu (Change, Rename, Duplicate, Delete), Save current look and New preset; a preset's page
-(`gui/presets.go`) changes each part or leaves it as it is. Its Wallpaper row (`gui/wallpapers.go`) has a
+(`gui/presets.go`) changes each part or leaves it as it is. The preset applied last shows "Changed" in place of
+"In use" once the look no longer matches it, with Update and Apply again, on its card and its page; after Use
+or Install and use, the confirmation offers "Update <preset>" when that happened. A font's, icon, cursor, GTK
+or Shell theme's page, and the rows of the system's themes, have an "Add to preset" menu
+(`gui/addpreset.go`): the presets, a check on those that have the item for that part, and New preset…; a
+font's role is the page's "Use for" choice. Afterwards "Added to <preset>" says so, with Open. Its Wallpaper row (`gui/wallpapers.go`) has a
 light and a dark slot, each with Choose… (a file, through the portal's file chooser filtered to the kinds the
 store takes, or the system's wallpapers, a grid of thumbnails with names, where choosing a light picture takes
 its dark pair too), "Same for dark", the fit and Leave as is. **Wallpaper thumbnails** are made off the UI

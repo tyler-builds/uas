@@ -637,6 +637,7 @@ func (a *App) themeRow(ctx *ui.Context, th appearance.Theme, kind catalog.Kind, 
 		where += " · Has a Shell theme"
 	}
 	row := ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(52)).PaddingX(space4).PaddingY(space2).
+		Key("theme-row:" + string(kind) + ":" + th.Name).
 		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(title).FontSize(14).Medium().Truncate()).
 			Child(ui.Text(where).FontSize(12).TextColor(t.TextSubtle).Truncate()))
@@ -649,7 +650,14 @@ func (a *App) themeRow(ctx *ui.Context, th appearance.Theme, kind catalog.Kind, 
 		row = row.Child(ui.Button("Use").Secondary().Small().Loading(busy).
 			OnClick(func() { a.useLook(ctx, key, th.Name) }))
 	}
-	return row
+	return row.Child(a.addToPresetMenu(ctx, systemItem(appearance.KeyPart(key), th.Name, d), true))
+}
+
+// systemItem is a theme on the system as a preset's part, with where uas installed it from, if it did.
+func systemItem(part, name string, d looks) presetItem {
+	key, _ := appearance.PartKey(part)
+	return presetItem{part: part, value: appearance.Part{Value: name, From: appearance.OriginOf(d.recs, key, name)},
+		name: name}
 }
 
 // lookKey is the setting a theme of a kind is used for; "" for a font, which has several.
@@ -666,11 +674,18 @@ func lookKey(kind catalog.Kind) string {
 }
 
 // useLook sets a desktop setting to a theme or font family, saving the old value for Revert.
+// When the look no longer matches the preset applied last, the confirmation offers to update it.
 func (a *App) useLook(ctx *ui.Context, key, value string) {
 	label := appearance.ValueLabel(key, value)
-	a.startJob(ctx, "use:"+key, "Using "+label, false,
+	a.startJobWith(ctx, "use:"+key, "Using "+label, false,
 		appearance.KeyLabel(key)+" set to "+label+". Revert is on the Installed tab.",
-		func(c context.Context, _ func(backend.Progress)) error { return a.s.Looks.Use(c, key, value) })
+		func(c context.Context, _ func(backend.Progress), res *jobResult) error {
+			if err := a.s.Looks.Use(c, key, value); err != nil {
+				return err
+			}
+			a.offerUpdate(ctx, c, res)
+			return nil
+		})
 }
 
 // revertLook puts a setting back to what it was before uas changed it.
@@ -693,10 +708,15 @@ func (a *App) installLook(ctx *ui.Context, l catalog.Listing, variant, use strin
 	if use != "" {
 		done += " and in use"
 	}
-	a.startJob(ctx, id, "Installing "+l.Name, false, done,
-		func(c context.Context, p func(backend.Progress)) error {
-			_, err := a.s.InstallLook(c, l, variant, use, p)
-			return err
+	a.startJobWith(ctx, id, "Installing "+l.Name, false, done,
+		func(c context.Context, p func(backend.Progress), res *jobResult) error {
+			if _, err := a.s.InstallLook(c, l, variant, use, p); err != nil {
+				return err
+			}
+			if use != "" {
+				a.offerUpdate(ctx, c, res)
+			}
+			return nil
 		})
 }
 

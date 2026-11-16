@@ -91,16 +91,20 @@ func (a *App) shellRow(ctx *ui.Context, th appearance.Theme, d looks) ui.Element
 		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(title).FontSize(14).Medium().Truncate()).
 			Child(ui.Text(where).FontSize(12).TextColor(t.TextSubtle).Truncate()))
-	if d.shellInUse() == th.Name {
-		return row.Child(statusChip(ctx, "In use", t.Success))
+	item := systemItem(appearance.PartShell, th.Name, d)
+	if th.Name == "" {
+		item.name = "GNOME's own look"
 	}
-	if a.canShell() {
+	switch {
+	case d.shellInUse() == th.Name:
+		row = row.Child(statusChip(ctx, "In use", t.Success))
+	case a.canShell():
 		_, busy := a.running("use:" + appearance.KeyShellTheme)
 		name := th.Name
 		row = row.Child(ui.Button("Use").Secondary().Small().Loading(busy).
 			OnClick(func() { a.useShell(ctx, name, d.userThemes) }))
 	}
-	return row
+	return row.Child(a.addToPresetMenu(ctx, item, true))
 }
 
 // useShell uses a Shell theme, or the Shell's own look, after asking to turn User Themes on when it isn't
@@ -146,8 +150,8 @@ func (a *App) enableUserThemes(ctx *ui.Context, theme string) {
 	if theme != "" {
 		done = "User Themes is on, and the Shell theme is " + theme
 	}
-	a.startJob(ctx, "user-themes", "Turning on User Themes", false, done,
-		func(c context.Context, p func(backend.Progress)) error {
+	a.startJobWith(ctx, "user-themes", "Turning on User Themes", false, done,
+		func(c context.Context, p func(backend.Progress), res *jobResult) error {
 			if err := a.s.Looks.EnableUserThemes(c); err != nil {
 				return err
 			}
@@ -155,7 +159,11 @@ func (a *App) enableUserThemes(ctx *ui.Context, theme string) {
 				return nil
 			}
 			p(backend.Progress{Message: "Using " + theme + "…"})
-			return a.s.Looks.Use(c, appearance.KeyShellTheme, theme)
+			if err := a.s.Looks.Use(c, appearance.KeyShellTheme, theme); err != nil {
+				return err
+			}
+			a.offerUpdate(ctx, c, res)
+			return nil
 		})
 }
 
@@ -206,17 +214,19 @@ func (a *App) shellLine(ctx *ui.Context, app *catalog.App, variant string, d loo
 		return nil
 	}
 	t := ctx.Theme()
-	row := ui.Div().Row().Align(ui.Center).Gap(space2).
-		Child(ui.Icon(icons.PanelTop).Size(15).Color(t.TextMuted)).
-		Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
-			Child(ui.Text("Has a GNOME Shell theme").FontSize(13).Medium().Truncate()))
+	row := ui.Div().Row().Align(ui.Center).Gap(space3).PaddingX(space4).PaddingY(space3).
+		Radius(radiusL).Border(1, t.Border).Background(t.Surface).
+		Child(ui.Div().Size(ui.Px(36), ui.Px(36)).Radius(radiusM).Background(t.SurfaceHover).Center().Shrink(0).
+			Child(ui.Icon(icons.PanelTop).Size(18).Color(t.TextMuted))).
+		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+			Child(ui.Text(variant + " has a GNOME Shell theme").FontSize(14).Medium().Truncate()).
+			Child(ui.Text(appearance.ShellNote).FontSize(12).TextColor(t.TextSubtle)))
 	if d.shellInUse() == variant {
-		row = row.Child(statusChip(ctx, "In use", t.Success))
+		row = row.Child(statusChip(ctx, "In use for the Shell", t.Success))
 	} else {
 		_, busy := a.running("use:" + appearance.KeyShellTheme)
 		row = row.Child(ui.Button("Use for the Shell").Secondary().Small().Loading(busy).
 			OnClick(func() { a.useShell(ctx, variant, d.userThemes) }))
 	}
-	return ui.Div().Column().Gap(space2).Padding(space3).Radius(radiusM).Border(1, t.Border).
-		Child(row).Child(caption(ctx, appearance.ShellNote))
+	return row.Child(a.addToPresetMenu(ctx, systemItem(appearance.PartShell, variant, d), true))
 }

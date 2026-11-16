@@ -26,7 +26,8 @@ dark style, the accent color and the wallpaper, each optional. Applying one sets
 the catalog first, and leaves the rest alone.
 
 commands:
-  list                          your presets, and which is in use (also "uas appearance presets")
+  list                          your presets, which is in use, and which changed since you applied it
+                                (also "uas appearance presets")
   show <name>                   its parts, and what applying it would do here
   save [-replace] [-skip P,...] <name>
                                 save the current look as a preset; -skip leaves parts out
@@ -38,6 +39,8 @@ commands:
                                 (jpg, png, webp, jxl or svg) for the wallpaper, and another for the
                                 dark style; how it fits: zoom (the default), centered, scaled,
                                 stretched, spanned, wallpaper (tiled) or none
+  update <name>                 save the current look into it: the parts it has that changed since it was
+                                applied or saved (every part it has, for another preset)
   set <name> <part> <value>|unset
                                 change one part, or leave it out
   set <name> wallpaper-dark <picture>|same
@@ -58,6 +61,10 @@ The shell part is a GNOME Shell theme: a theme's name, "default" for the Shell's
 catalog ID when the theme comes with it. Applying it needs GNOME's User Themes extension; when it isn't
 running, apply asks before turning it on, and skips the part when you say no. A preset never saves
 extensions or their settings.
+
+uas remembers the preset you last applied or saved. When your look changes after that (you use another
+font or theme), the list shows it as changed: "update" saves the new look into it, "apply" goes back to it.
+uas never changes a preset by itself.
 
 A picture of your own is copied into ~/.local/share/uas/wallpapers, so the preset keeps working when the
 original is moved or deleted; the system's wallpapers (/usr/share/backgrounds) are used where they are.
@@ -176,7 +183,29 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 		if err != nil {
 			return clash(err)
 		}
+		// Saved from the look it has: the one in use now.
+		_ = e.Looks.RememberPreset(ctx, store, p)
 		fmt.Fprintf(w, "Saved %s:\n", p.Name)
+		return printParts(w, e, p)
+	case "update":
+		if err := n(1, "a preset's name"); err != nil {
+			return err
+		}
+		p, changed, err := e.Looks.UpdatePreset(ctx, store, rest[0])
+		if errors.Is(err, appearance.ErrUnsupported) {
+			return errors.New("appearance preset update: this desktop's settings can't be read by uas")
+		} else if err != nil {
+			return err
+		}
+		if len(changed) == 0 {
+			fmt.Fprintf(w, "%s has the current look already.\n", p.Name)
+			return nil
+		}
+		words := make([]string, len(changed))
+		for i, c := range changed {
+			words[i] = appearance.PartWord(c)
+		}
+		fmt.Fprintf(w, "Updated %s (%s):\n", p.Name, strings.Join(words, ", "))
 		return printParts(w, e, p)
 	case "new":
 		if err := n(1, "a name for the preset"); err != nil {
@@ -497,17 +526,35 @@ func listPresets(ctx context.Context, w io.Writer, e *session.Session) error {
 		return nil
 	}
 	cur := e.Looks.Current(ctx)
+	rem := remembered(e)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tPARTS\tIN USE")
+	var changed []string
 	for _, p := range list {
 		use := ""
-		if appearance.InUse(p, cur) {
+		switch appearance.StatusOf(p, rem, cur) {
+		case appearance.StatusInUse:
 			use = "yes"
+		case appearance.StatusChanged:
+			use = "changed since applied"
+			changed = append(changed, p.Name)
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Name, truncate(strings.Join(p.PartNames(), ", "), 60), use)
 	}
 	tw.Flush()
+	for _, name := range changed {
+		fmt.Fprintf(w, "\nYour look changed since you applied %s. To save it into the preset: uas appearance preset "+
+			"update %q; to go back to it: uas appearance preset apply %q\n", name, name, name)
+	}
 	return err
+}
+
+// remembered is the preset last applied or saved, or nil.
+func remembered(e *session.Session) *appearance.Remembered {
+	if r, ok, err := e.Presets.Remembered(); err == nil && ok {
+		return &r
+	}
+	return nil
 }
 
 // printParts lists a preset's parts and values.
@@ -545,8 +592,12 @@ func showPreset(ctx context.Context, w io.Writer, e *session.Session, p appearan
 	if !p.UpdatedAt.IsZero() {
 		fmt.Fprintf(w, "Changed %s\n", p.UpdatedAt.Local().Format("2 January 2006, 15:04"))
 	}
-	if appearance.InUse(p, e.Looks.Current(ctx)) {
+	switch appearance.StatusOf(p, remembered(e), e.Looks.Current(ctx)) {
+	case appearance.StatusInUse:
 		fmt.Fprintln(w, "In use")
+	case appearance.StatusChanged:
+		fmt.Fprintf(w, "Changed since you applied it: \"uas appearance preset update %s\" saves the current look into it\n",
+			p.Name)
 	}
 	fmt.Fprintln(w)
 	plan, err := e.PlanPreset(ctx, p)

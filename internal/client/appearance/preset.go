@@ -257,6 +257,9 @@ type Presets struct {
 	Dir string
 	// UndoFile holds the look from before the last apply.
 	UndoFile string
+	// CurrentFile holds the preset last applied or saved from the current look (see Remembered); "" keeps
+	// none.
+	CurrentFile string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// Changed, when set, is called after a preset is saved, changed or deleted: the session removes the
@@ -265,10 +268,11 @@ type Presets struct {
 }
 
 // NewPresets returns the user's presets: $XDG_CONFIG_HOME/uas/presets, with the look to undo to in
-// $XDG_DATA_HOME/uas/previous-look.json.
+// $XDG_DATA_HOME/uas/previous-look.json and the preset last applied in $XDG_DATA_HOME/uas/current-preset.json.
 func NewPresets(configDir, dataDir string) *Presets {
 	return &Presets{Dir: filepath.Join(configDir, "uas", "presets"),
-		UndoFile: filepath.Join(dataDir, "uas", "previous-look.json")}
+		UndoFile:    filepath.Join(dataDir, "uas", "previous-look.json"),
+		CurrentFile: filepath.Join(dataDir, "uas", "current-preset.json")}
 }
 
 func (s *Presets) now() time.Time {
@@ -431,7 +435,7 @@ func (s *Presets) Rename(name, to string) (Preset, error) {
 			return p, err
 		}
 	}
-	return p, nil
+	return p, s.renamed(name, p.Name)
 }
 
 // Copy makes a copy of a preset under a new name, or when to is empty, under the first free name of
@@ -476,7 +480,7 @@ func (s *Presets) Delete(name string) error {
 		return err
 	}
 	s.changed()
-	return nil
+	return s.deleted(p.Name)
 }
 
 // write writes a preset to its file, or to a new file named for it.
@@ -566,6 +570,9 @@ type Undo struct {
 	At      time.Time `json:"at"`
 	// Look holds the values the apply changed, as they were before it.
 	Look Preset `json:"look"`
+	// Remembered is the preset that was remembered as in use before the apply, which Undo brings back; nil
+	// when there was none.
+	Remembered *Remembered `json:"remembered,omitempty"`
 }
 
 // Undo returns the look from before the last apply, and false when there is none.

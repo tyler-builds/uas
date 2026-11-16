@@ -168,6 +168,9 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if key == appearance.KeyGTKTheme {
 			printGTK4(w, e)
 		}
+		if key != "" {
+			presetHint(ctx, w, e)
+		}
 	case "update":
 		id, err := one("ID (see updates)")
 		if err != nil {
@@ -228,6 +231,7 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if key == appearance.KeyShellTheme && value != "" {
 			fmt.Fprintln(w, appearance.ShellNote)
 		}
+		presetHint(ctx, w, e)
 	case "revert":
 		name, err := one("setting, or all")
 		if err != nil {
@@ -497,6 +501,7 @@ func useWallpaper(ctx context.Context, w io.Writer, e *session.Session, rest []s
 		}
 	}
 	fmt.Fprintf(w, "Wallpaper: %s\n", settingValue(e, e.Looks.Current(ctx), appearance.KeyWallpaper))
+	presetHint(ctx, w, e)
 	return nil
 }
 
@@ -578,6 +583,15 @@ func listThemes(ctx context.Context, w io.Writer, e *session.Session) error {
 		fmt.Fprintf(w, "\n%s Using one offers to fix that.\n", why)
 	}
 	return nil
+}
+
+// presetHint says, after a font or theme was used, when the look no longer matches the preset applied last,
+// and how to save it into it. The preset itself is left as it is.
+func presetHint(ctx context.Context, w io.Writer, e *session.Session) {
+	if p, ok := e.Looks.ChangedPreset(ctx, e.Presets); ok {
+		fmt.Fprintf(w, "Your look no longer matches %s; to save it into the preset: uas appearance preset update %q\n",
+			p.Name, p.Name)
+	}
 }
 
 // offerUserThemes asks to get the User Themes extension running for a Shell theme, and does it when the

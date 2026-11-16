@@ -49,7 +49,9 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   Presets, the first tab once there are any, is a grid of preset cards: a preview panel in the preset's
   light or dark style with three icons of its icon theme (or "Aa") and its accent as a dot, set as a small
   window in front of its wallpaper when it has one, the name with an "In use" chip, its themes and fonts as
-  quiet words, an outlined Apply and a ⋯ menu. Save current look (teal) and New preset sit in the header; its
+  quiet words, an outlined Apply and a ⋯ menu. The preset applied last, once the look no longer matches
+  it, has an amber "Changed" chip (its tooltip says why) in place of "In use", an outlined Update and a ghost
+  Apply again; its page has the chip and Update beside Apply. Save current look (teal) and New preset sit in the header; its
   dialog lists the wallpaper with a small thumbnail. A preset's page lists its parts in two bordered lists,
   Look (style, accent, GTK theme, Shell theme, icons, cursor, wallpaper) and Fonts, each row with "Leave as is"; the GTK
   theme row, once it is set, has one quiet line under its description about GTK 4 apps (the only place it is
@@ -68,8 +70,15 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   themes is a bordered list like Installed's, not a grid: uas has no catalog of them. Default comes first;
   each row says where the theme came from ("Comes with Orchis, installed by uas"), with an "In use" chip or
   an outlined Use. When User Themes isn't running, an info alert above it says why, with the one button
-  that fixes it, and Use asks in an alert dialog first. An installed GTK theme's page has a small bordered
-  box under its actions, "Has a GNOME Shell theme", with Use for the Shell or "In use".
+  that fixes it, and Use asks in an alert dialog first. An installed GTK theme's page has a bordered row at
+  the top of its main column, "<variant> has a GNOME Shell theme" with the one line about older GNOME
+  versions, Use for the Shell (or "In use for the Shell") and its Add to preset button.
+- **Add to preset:** a ghost "Add to preset ▾" button under a font's or theme's actions (a list-plus icon
+  button on a theme's row) opens a menu: a section label "As the <part>, add to", the presets with a check
+  on those that have the item for that part, a rule, and "New preset…". A font's part follows the page's "Use
+  for" choice. Picking one only changes the preset; a success toast says "Added to <preset>" with Open. The
+  confirmation after Use offers "Update <preset>" as its action when the look no longer matches the preset
+  applied last.
 - **Installed and Updates:** the same list for installed apps, with Update where there is one (outlined, with
   a teal icon), Update all, and Remove.
 

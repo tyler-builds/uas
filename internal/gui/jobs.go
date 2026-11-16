@@ -19,10 +19,24 @@ type job struct {
 	done   bool
 }
 
+// jobResult is what a job that ended well can add to its success toast: other words, and an action.
+type jobResult struct {
+	text   string // in place of the job's success text, when set
+	action string // the action's label, such as "Update Work"
+	do     func() // the action, run on the UI thread
+}
+
 // startJob runs work off the UI thread, keyed by id (an app ID), and reports its progress in a toast.
 // success is the toast shown when it ends well. restart says the change waits for a restart.
 func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success string,
 	work func(context.Context, func(backend.Progress)) error) {
+	a.startJobWith(ctx, id, title, restart, success,
+		func(c context.Context, p func(backend.Progress), _ *jobResult) error { return work(c, p) })
+}
+
+// startJobWith is startJob for work that fills in its success toast's words or action.
+func (a *App) startJobWith(ctx *ui.Context, id, title string, restart bool, success string,
+	work func(context.Context, func(backend.Progress), *jobResult) error) {
 	if j, ok := a.jobs.Peek()[id]; ok && !j.done {
 		return // one job per app at a time
 	}
@@ -31,6 +45,7 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 	ctx.ToastWithID(toastID, ui.ToastInfo, "Starting…").Title(title).Sticky()
 
 	go func() {
+		res := &jobResult{}
 		err := work(context.Background(), func(p backend.Progress) {
 			msg := strings.TrimSpace(p.Message)
 			if msg == "" {
@@ -42,7 +57,7 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 				a.setJob(id, j)
 				ctx.ToastWithID(toastID, ui.ToastInfo, msg).Title(title).Sticky()
 			})
-		})
+		}, res)
 		ctx.Post(func() {
 			a.setJob(id, job{title: title, done: true})
 			ctx.DismissToast(toastID)
@@ -52,9 +67,16 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 			} else if err != nil {
 				ctx.Toast(ui.ToastError, errText(err)).Title(title + " failed")
 			} else {
-				t := ctx.Toast(ui.ToastSuccess, success)
+				text := success
+				if res.text != "" {
+					text = res.text
+				}
+				t := ctx.Toast(ui.ToastSuccess, text)
 				if restart {
 					t.Title("Restart to finish")
+				}
+				if res.action != "" && res.do != nil {
+					t.Action(res.action, res.do)
 				}
 			}
 			ui.InvalidateQueries(ctx, func(key string) bool {

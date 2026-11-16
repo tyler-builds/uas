@@ -543,7 +543,11 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		prev.Parts[o.Part] = pp
 	}
 	if len(prev.Parts) > 0 && store != nil {
-		if err := store.saveUndo(Undo{Applied: p.Name, At: store.now(), Look: prev}); err != nil {
+		u := Undo{Applied: p.Name, At: store.now(), Look: prev}
+		if r, ok, _ := store.Remembered(); ok {
+			u.Remembered = &r
+		}
+		if err := store.saveUndo(u); err != nil {
 			return nil, fmt.Errorf("saving the look to undo to: %w", err)
 		}
 	}
@@ -568,6 +572,11 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			continue
 		}
 		out[i].Done = true
+	}
+	// The preset is the one in use now, with the look it gave (an Undo's look isn't a preset).
+	// Not knowing it only loses the Changed mark, so a failure to write it doesn't fail the apply.
+	if store != nil && slices.ContainsFunc(out, func(o Outcome) bool { return o.Done }) {
+		_ = in.RememberPreset(ctx, store, p)
 	}
 	return out, nil
 }
@@ -603,7 +612,10 @@ func (in *Installer) UndoPreset(ctx context.Context, store *Presets) (Undo, []Ou
 		return u, out, err
 	}
 	if Failed(out) == nil {
-		err = store.clearUndo()
+		// The preset that was in use before the apply is again (or none, when there was none).
+		if err = store.remember(u.Remembered); err == nil {
+			err = store.clearUndo()
+		}
 	}
 	return u, out, err
 }

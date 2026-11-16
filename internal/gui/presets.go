@@ -27,6 +27,9 @@ const presetsKey = "presets"
 type presetsData struct {
 	list []appearance.Preset
 	undo *appearance.Undo
+	// remembered is the preset last applied or saved from the current look, for its Changed mark; nil when
+	// there is none.
+	remembered *appearance.Remembered
 	// bad says which files couldn't be read, if any.
 	bad error
 }
@@ -50,6 +53,9 @@ func (a *App) presets(ctx *ui.Context) ui.QueryResult[presetsData] {
 		d.list, d.bad = a.s.Presets.List()
 		if u, ok, _ := a.s.Presets.Undo(); ok {
 			d.undo = &u
+		}
+		if r, ok, _ := a.s.Presets.Remembered(); ok {
+			d.remembered = &r
 		}
 		return d, nil
 	}, ui.QueryStaleTime(5*time.Second))
@@ -124,7 +130,7 @@ func (a *App) presetsTab(ctx *ui.Context, q string) []ui.Element {
 			continue
 		}
 		n++
-		grid = grid.Child(a.presetCard(ctx, p, lk.Data))
+		grid = grid.Child(a.presetCard(ctx, p, appearance.StatusOf(p, d.remembered, lk.Data.current)))
 	}
 	if n == 0 {
 		return append(out, ui.Empty("No preset matches").Icon(icons.ListFilter).
@@ -158,18 +164,16 @@ func accentColor(name string) (ui.Color, bool) {
 	return c, err == nil
 }
 
-// presetCard is a preset in the grid: a preview of its look, its name and parts, and Apply.
-func (a *App) presetCard(ctx *ui.Context, p appearance.Preset, lk looks) ui.Element {
+// presetCard is a preset in the grid: a preview of its look, its name and parts, and Apply; or, when the look
+// changed since it was applied, Update and Apply again.
+func (a *App) presetCard(ctx *ui.Context, p appearance.Preset, st appearance.PresetStatus) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
 		id := "preset:" + strings.ToLower(p.Name)
 		job, busy := a.running(id)
-		inUse := appearance.InUse(p, lk.current)
 		name := ui.Div().Row().Align(ui.Center).Gap(space2).MinWidth(ui.Px(0)).Height(ui.Px(24)).
-			Child(ui.Text(p.Name).FontSize(14).Medium().Truncate().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)))
-		if inUse {
-			name = name.Child(statusChip(ctx, "In use", t.Success))
-		}
+			Child(ui.Text(p.Name).FontSize(14).Medium().Truncate().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))).
+			Child(presetStatusChip(ctx, st))
 		open := ui.Div().Column().Gap(space2).Cursor(ui.CursorPointer).Role(access.RoleLink).
 			Label(p.Name + ", change it").TabIndex(0).OnClick(func() { a.openPreset(p.Name) }).
 			Child(a.presetPreview(ctx, p, 116)).
@@ -177,12 +181,20 @@ func (a *App) presetCard(ctx *ui.Context, p appearance.Preset, lk looks) ui.Elem
 			Child(ui.Text(presetSummary(p)).FontSize(12).TextColor(t.TextSubtle).Truncate())
 		apply := ui.Button("Apply").Icon(icons.Check).Secondary().Small().Loading(busy).
 			Disabled(len(p.Parts) == 0).OnClick(func() { a.applyPreset(ctx, p) })
-		if inUse {
+		var update ui.Element
+		switch st {
+		case appearance.StatusInUse:
 			apply = ui.Button("Apply again").Icon(icons.Check).Ghost().Small().Loading(busy).
 				Tooltip("It is in use; applying it again sets anything that changed since").
 				OnClick(func() { a.applyPreset(ctx, p) })
+		case appearance.StatusChanged:
+			update = ui.Button("Update").Icon(icons.Save).Secondary().Small().Disabled(busy).
+				Tooltip("Save your current look into " + p.Name).OnClick(func() { a.updatePreset(ctx, p.Name) })
+			apply = ui.Button("Apply again").Ghost().Small().Loading(busy).
+				Tooltip("Go back to " + p.Name + "'s look").OnClick(func() { a.applyPreset(ctx, p) })
 		}
 		actions := ui.Div().Row().Align(ui.Center).Gap(space2).
+			Child(update).
 			Child(apply).
 			Child(ui.Div().Grow(1).MinWidth(ui.Px(0)).Child(ui.If(busy, caption(ctx, job.status).Truncate()))).
 			Child(a.presetMenu(ctx, p))
@@ -336,7 +348,6 @@ func (a *App) openPreset(name string) { a.open(view{page: pageLookPreset, arg: n
 // presetPage is a preset's page, where each part is changed, or left as it is.
 func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
-		t := ctx.Theme()
 		res := a.presets(ctx)
 		lk := a.looks(ctx)
 		page := pageBody(detailMaxWidth).Gap(space6)
@@ -354,10 +365,11 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 		}
 		id := "preset:" + strings.ToLower(p.Name)
 		_, busy := a.running(id)
-		inUse := appearance.InUse(p, lk.Data.current)
-		trailing := ui.Div().Row().Align(ui.Center).Gap(space2)
-		if inUse {
-			trailing = trailing.Child(statusChip(ctx, "In use", t.Success))
+		st := appearance.StatusOf(p, res.Data.remembered, lk.Data.current)
+		trailing := ui.Div().Row().Align(ui.Center).Gap(space2).Child(presetStatusChip(ctx, st))
+		if st == appearance.StatusChanged && a.canApply() {
+			trailing = trailing.Child(ui.Button("Update").Icon(icons.Save).Secondary().Disabled(busy).
+				Tooltip("Save your current look into " + p.Name).OnClick(func() { a.updatePreset(ctx, p.Name) }))
 		}
 		if a.canApply() {
 			trailing = trailing.Child(ui.Button("Apply").Icon(icons.Check).Primary().Loading(busy).
@@ -644,6 +656,8 @@ func (a *App) openNaming(mode, from string) {
 type presetNaming struct {
 	mode string // "" for New preset, "rename"
 	from string // the preset renamed
+	// add is the font or theme a new preset is made with, from an "Add to preset" menu.
+	add *presetItem
 }
 
 // presetApply is an apply waiting for the user's OK, with its plan.
@@ -746,6 +760,11 @@ func (a *App) presetSaveDialog(ctx *ui.Context) ui.Element {
 				return
 			}
 			close()
+			// Saved from the look it has: the one in use now, which Changed then follows.
+			go func() {
+				_ = a.s.Looks.RememberPreset(context.Background(), a.s.Presets, p)
+				ctx.Post(func() { refreshPresets(ctx) })
+			}()
 			a.lookTab.Set(lookPresets)
 			refreshPresets(ctx)
 			ctx.Toast(ui.ToastSuccess, "Apply it from Appearance to come back to this look.").Title("Saved " + p.Name)
@@ -785,6 +804,10 @@ func (a *App) presetNamingDialog(ctx *ui.Context) ui.Element {
 	if n.mode == "rename" {
 		title, label, msg = "Rename "+n.from, "Rename", ""
 	}
+	if n.add != nil {
+		msg = "A preset with " + n.add.name + " as its " + appearance.PartWord(n.add.part) + ". Add the rest " +
+			"from the preset's page; parts you leave as they are keep whatever the desktop has."
+	}
 	body := ui.Div().Column().Gap(space3)
 	if msg != "" {
 		body = body.Child(muted(ctx, msg))
@@ -797,9 +820,13 @@ func (a *App) presetNamingDialog(ctx *ui.Context) ui.Element {
 	ok := ui.Button(label).Primary().OnClick(func() {
 		var p appearance.Preset
 		var err error
-		if n.mode == "rename" {
+		switch {
+		case n.mode == "rename":
 			p, err = a.s.Presets.Rename(n.from, a.presetName.Peek())
-		} else {
+		case n.add != nil:
+			p, err = a.s.Presets.Save(appearance.Preset{Name: a.presetName.Peek(),
+				Parts: map[string]appearance.Part{n.add.part: n.add.value}}, false)
+		default:
 			p, err = a.s.Presets.Save(appearance.Preset{Name: a.presetName.Peek()}, false)
 		}
 		var exists *appearance.ExistsError
@@ -815,6 +842,10 @@ func (a *App) presetNamingDialog(ctx *ui.Context) ui.Element {
 		refreshPresets(ctx)
 		if n.mode == "rename" {
 			a.renamedPreset(n.from, p.Name)
+			return
+		}
+		if n.add != nil {
+			a.addedToPreset(ctx, p, *n.add)
 			return
 		}
 		a.lookTab.Set(lookPresets)
