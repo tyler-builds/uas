@@ -44,16 +44,18 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   a side panel with Source, License and Developer as label and value rows, then the install notes, "Why
   <source>?" and the Report an issue and Source code links, all in one icon-and-text row style; and "More in
   <category>" cards.
-- **Appearance:** the header, then tabs (a segmented control): Presets, Fonts, Icons, Cursors, GTK themes and
-  Installed.
+- **Appearance:** the header, then tabs (a segmented control): Presets, Fonts, Icons, Cursors, GTK themes,
+  Shell themes (GNOME only) and Installed.
   Presets, the first tab once there are any, is a grid of preset cards: a preview panel in the preset's
   light or dark style with three icons of its icon theme (or "Aa") and its accent as a dot, set as a small
   window in front of its wallpaper when it has one, the name with an "In use" chip, its themes and fonts as
   quiet words, an outlined Apply and a ⋯ menu. Save current look (teal) and New preset sit in the header; its
   dialog lists the wallpaper with a small thumbnail. A preset's page lists its parts in two bordered lists,
-  Look (style, accent, GTK theme, icons, cursor, wallpaper) and Fonts, each row with "Leave as is"; the GTK
+  Look (style, accent, GTK theme, Shell theme, icons, cursor, wallpaper) and Fonts, each row with "Leave as is"; the GTK
   theme row, once it is set, has one quiet line under its description about GTK 4 apps (the only place it is
-  said besides a GTK theme's page). The Wallpaper row, last in Look, has the fit select at the
+  said besides a GTK theme's page); the Shell theme row, once set, has the one line that a theme made for an
+  older GNOME may not look right (said too on the Shell themes tab and a GTK theme's Shell box), and its
+  select offers "Default (GNOME's own look)". The Wallpaper row, last in Look, has the fit select at the
   right and two 16:9 slots under it, Light and Dark, each a bordered thumbnail with its name and Choose…
   (From a file, System wallpapers), and "Same for dark" under the dark one. System wallpapers is a modal grid
   of thumbnails with names, a moon on the ones with their own dark picture and the chosen one outlined in
@@ -62,7 +64,12 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   alert with Undo follows it. Fonts, Icons, Cursors and GTK themes are grids of cards from the catalog; a GTK
   theme's card and page show its Pling previews, never a preview uas draws, and uas's own window keeps its
   look. Installed lists the system's GTK themes first (a theme without GTK 4 files says "No GTK 4 files"),
-  then icon and cursor themes; the GTK theme's "Changed by uas" row names the GTK 4 files uas copied.
+  then icon and cursor themes; the GTK theme's "Changed by uas" row names the GTK 4 files uas copied. Shell
+  themes is a bordered list like Installed's, not a grid: uas has no catalog of them. Default comes first;
+  each row says where the theme came from ("Comes with Orchis, installed by uas"), with an "In use" chip or
+  an outlined Use. When User Themes isn't running, an info alert above it says why, with the one button
+  that fixes it, and Use asks in an alert dialog first. An installed GTK theme's page has a small bordered
+  box under its actions, "Has a GNOME Shell theme", with Use for the Shell or "In use".
 - **Installed and Updates:** the same list for installed apps, with Update where there is one (outlined, with
   a teal icon), Update all, and Remove.
 

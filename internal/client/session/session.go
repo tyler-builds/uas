@@ -137,6 +137,7 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 	}
 	if looks, err := appearance.New(run.Exec{}, appearance.DetectDesktop(s.Platform.Desktop, run.Exec{})); err == nil {
 		s.Looks = looks
+		looks.Shell = s.Extensions // whether User Themes runs, for Shell themes
 		if cfg, err := os.UserConfigDir(); err == nil {
 			s.Presets = appearance.NewPresets(cfg, looks.Data)
 			// Stored wallpapers go once nothing uses them: after a preset changes, and after the desktop's

@@ -332,6 +332,11 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 	if app.Kind == catalog.KindGTKTheme && canUse {
 		col = col.Child(caption(ctx, appearance.GTKNote))
 	}
+	if app.Kind == catalog.KindGTKTheme && installed && !lk.Loading {
+		if el := a.shellLine(ctx, app, variant.Get(), lk.Data); el != nil {
+			col = col.Child(el)
+		}
+	}
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).

@@ -70,6 +70,8 @@ func (f *fakeGNOME) Run(_ context.Context, name string, args []string, _ func(st
 	// "lock picture-uri".
 	key := args[2]
 	switch args[1] {
+	case "org.gnome.shell.extensions.user-theme":
+		key = "shell " + key // the Shell theme, User Themes' name
 	case "org.gnome.desktop.background":
 		key = "bg " + key
 	case "org.gnome.desktop.screensaver":

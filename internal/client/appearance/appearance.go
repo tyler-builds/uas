@@ -68,6 +68,9 @@ type Installer struct {
 	// Presets are the user's presets, whose wallpapers PruneWallpapers keeps; nil keeps every stored
 	// wallpaper.
 	Presets *Presets
+	// Shell is GNOME Shell's extension service, which says whether the User Themes extension runs and turns
+	// it on when the user asks (see UserThemes); nil outside a GNOME session.
+	Shell *ShellManager
 
 	mu sync.Mutex // one change to the state file at a time
 }
@@ -780,7 +783,8 @@ func keysOf(rec state.AppearanceInstall) []string {
 	case catalog.KindCursorTheme:
 		return []string{KeyCursorTheme}
 	case catalog.KindGTKTheme:
-		return []string{KeyGTKTheme}
+		// Most GTK themes carry a Shell theme, of the same name.
+		return []string{KeyGTKTheme, KeyShellTheme}
 	case catalog.KindFont:
 		return FontKeys
 	}
@@ -795,8 +799,8 @@ func inUse(rec state.AppearanceInstall, key, value string) bool {
 	return slices.Contains(rec.Themes, value)
 }
 
-// Use sets a desktop setting: a theme's name for KeyIconTheme, KeyCursorTheme or KeyGTKTheme, a font for a
-// font key, or one of Choices for a setting that has them. A font given as a family alone ("Inter") keeps
+// Use sets a desktop setting: a theme's name for KeyIconTheme, KeyCursorTheme, KeyGTKTheme or KeyShellTheme
+// ("" for the Shell's own look), a font for a font key, or one of Choices for a setting that has them. A font given as a family alone ("Inter") keeps
 // the size the setting has; one with a size ("Inter 12") is set as it is. The value it replaces is saved for
 // Revert, unless uas changed the setting before, in which case the value from before that stays saved;
 // setting it back to that value forgets it.
@@ -804,6 +808,9 @@ func inUse(rec state.AppearanceInstall, key, value string) bool {
 // A GTK theme with files for GTK 4 apps has them copied into ~/.config/gtk-4.0 too, whether the setting
 // changes or not, and one without takes away the files of uas's that are there (see syncGTK4Locked). While
 // uas's files are there, the setting stays saved, so Revert takes them away.
+//
+// A Shell theme must be on the system, and the User Themes extension running: otherwise nothing changes and
+// the error is a *NeedsUserThemesError (see EnableUserThemes).
 func (in *Installer) Use(ctx context.Context, key, value string) error {
 	return in.use(ctx, key, value, true)
 }
@@ -816,6 +823,11 @@ func (in *Installer) use(ctx context.Context, key, value string, gtk4 bool) erro
 	}
 	if err := CheckValue(key, value); err != nil {
 		return err
+	}
+	if key == KeyShellTheme {
+		if err := in.checkShell(ctx, value); err != nil {
+			return err
+		}
 	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -841,7 +853,7 @@ func (in *Installer) use(ctx context.Context, key, value string, gtk4 bool) erro
 	}
 	if value != cur || ok {
 		saved.Value, saved.At = value, in.now().UTC()
-		if value == saved.Previous && saved.Previous != "" {
+		if value == saved.Previous && (saved.Previous != "" || EmptyValue(key)) {
 			st.DeleteSaved(in.Desktop.Name(), key) // back to where it was before uas
 		} else {
 			st.PutSaved(saved)

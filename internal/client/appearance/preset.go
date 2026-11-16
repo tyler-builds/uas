@@ -14,17 +14,19 @@ import (
 	"unicode/utf8"
 )
 
-// A preset is a look saved under a name: a GTK theme, a theme for icons and cursors, fonts, the light or dark
-// style, the accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
+// A preset is a look saved under a name: a GTK theme, a GNOME Shell theme, a theme for icons and cursors,
+// fonts, the light or dark style, the accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
 // the user's own, so they live with uas's settings, one JSON file each in ~/.config/uas/presets; the look
 // from before the last apply, for Undo, is uas's, and lives with its state.
 
 // Part names: the keys of Preset.Parts, which are also the setting names the command line takes.
 const (
-	PartScheme    = "scheme"
-	PartAccent    = "accent"
-	PartGTK       = "gtk"   // a GTK theme, by name
-	PartShell     = "shell" // a GNOME Shell theme, by name (a later version of uas)
+	PartScheme = "scheme"
+	PartAccent = "accent"
+	PartGTK    = "gtk" // a GTK theme, by name
+	// PartShell is a GNOME Shell theme, by name; an empty value is the Shell's own look. It stores only the
+	// theme (and where it came from), never the User Themes extension or its other settings.
+	PartShell     = "shell"
 	PartIcons     = "icons"
 	PartCursor    = "cursor"
 	PartInterface = "interface"
@@ -45,6 +47,7 @@ var partKeys = map[string]string{
 	PartScheme:    KeyColorScheme,
 	PartAccent:    KeyAccentColor,
 	PartGTK:       KeyGTKTheme,
+	PartShell:     KeyShellTheme,
 	PartIcons:     KeyIconTheme,
 	PartCursor:    KeyCursorTheme,
 	PartInterface: KeyFont,
@@ -76,8 +79,6 @@ func PartLabel(part string) string {
 		return KeyLabel(k)
 	}
 	switch part {
-	case PartShell:
-		return "Shell theme"
 	case PartWallpaper:
 		return "Wallpaper"
 	}
@@ -104,7 +105,8 @@ type Preset struct {
 
 // Part is one part of a preset.
 type Part struct {
-	// Value is what the setting is set to: a theme's name, a font ("Inter 11"), or one of Choices.
+	// Value is what the setting is set to: a theme's name, a font ("Inter 11"), or one of Choices. For the
+	// Shell theme, "" (a part with no value) is the Shell's own look.
 	Value string `json:"value,omitempty"`
 	// From is where it can be installed from when it isn't on the system; nil for one that came with the
 	// system.

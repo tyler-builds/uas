@@ -27,6 +27,7 @@ const (
 	lookIcons     = "icons"
 	lookCursors   = "cursors"
 	lookGTK       = "gtk"
+	lookShell     = "shell" // GNOME Shell themes, on GNOME only: the ones on the system, not the catalog's
 	lookInstalled = "installed"
 )
 
@@ -55,6 +56,10 @@ type looks struct {
 	// gtkThemes are the GTK themes on the system, and gtk4 what uas copied into ~/.config/gtk-4.0.
 	gtkThemes []appearance.Theme
 	gtk4      *state.GTK4Files
+	// shellThemes are the GNOME Shell themes on the system, and userThemes the state of the extension that
+	// applies them.
+	shellThemes []appearance.Theme
+	userThemes  appearance.UserThemes
 }
 
 // rec returns uas's install of a catalog ID.
@@ -115,6 +120,12 @@ func (a *App) looks(ctx *ui.Context) ui.QueryResult[looks] {
 		if l.gtkThemes, err = in.GTKThemes(); err != nil {
 			return l, err
 		}
+		if l.shellThemes, err = in.ShellThemes(); err != nil {
+			return l, err
+		}
+		if in.Desktop != nil && in.Desktop.Supports(appearance.KeyShellTheme) {
+			l.userThemes = in.UserThemes(c)
+		}
 		l.gtk4, err = in.GTK4()
 		return l, err
 	}, ui.QueryStaleTime(5*time.Second))
@@ -150,17 +161,21 @@ func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element
 			filterChip(ctx, "Icons", tab == lookIcons, func() { a.lookTab.Set(lookIcons) }),
 			filterChip(ctx, "Cursors", tab == lookCursors, func() { a.lookTab.Set(lookCursors) }),
 			filterChip(ctx, "GTK themes", tab == lookGTK, func() { a.lookTab.Set(lookGTK) }),
+			ui.If(a.canShell(), filterChip(ctx, "Shell themes", tab == lookShell, func() { a.lookTab.Set(lookShell) })),
 			filterChip(ctx, installed, tab == lookInstalled, func() { a.lookTab.Set(lookInstalled) }))
 		controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).Shrink(0).Child(chips)
 		if tab == lookPresets {
-			sub = "Your looks, saved under a name: GTK theme, icons, cursor, fonts, light or dark style, " +
-				"accent color and wallpaper, applied in one step."
+			sub = "Your looks, saved under a name: GTK and Shell themes, icons, cursor, fonts, light or dark " +
+				"style, accent color and wallpaper, applied in one step."
 			page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, a.presetHeaderButtons(ctx)))
 			return scroll(page.Child(controls).Children(a.presetsTab(ctx, q)...))
 		}
 		page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, nil))
 		if tab == lookInstalled {
 			return scroll(page.Child(controls).Children(a.lookInstalledSections(ctx, lk, q)...))
+		}
+		if tab == lookShell && a.canShell() {
+			return scroll(page.Child(controls).Children(a.shellThemesTab(ctx, lk, q)...))
 		}
 		sig := a.lookOrder
 		opts := []ui.Option[catalog.Order]{
@@ -618,6 +633,9 @@ func (a *App) themeRow(ctx *ui.Context, th appearance.Theme, kind catalog.Kind, 
 	if th.GTK && !th.GTK4 {
 		where += " · No GTK 4 files"
 	}
+	if th.GTK && th.Shell && a.canShell() {
+		where += " · Has a Shell theme"
+	}
 	row := ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(52)).PaddingX(space4).PaddingY(space2).
 		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(title).FontSize(14).Medium().Truncate()).
@@ -649,8 +667,9 @@ func lookKey(kind catalog.Kind) string {
 
 // useLook sets a desktop setting to a theme or font family, saving the old value for Revert.
 func (a *App) useLook(ctx *ui.Context, key, value string) {
-	a.startJob(ctx, "use:"+key, "Using "+value, false,
-		appearance.KeyLabel(key)+" set to "+value+". Revert is on the Installed tab.",
+	label := appearance.ValueLabel(key, value)
+	a.startJob(ctx, "use:"+key, "Using "+label, false,
+		appearance.KeyLabel(key)+" set to "+label+". Revert is on the Installed tab.",
 		func(c context.Context, _ func(backend.Progress)) error { return a.s.Looks.Use(c, key, value) })
 }
 
@@ -695,7 +714,8 @@ func (a *App) lookRemoveDialog(ctx *ui.Context) ui.Element {
 	}
 	what += " If it is in use, the setting goes back to what it was first."
 	if r.Kind == string(catalog.KindGTKTheme) {
-		what += " Its GTK 4 files in ~/.config/gtk-4.0 go too, and yours come back."
+		what += " Its GTK 4 files in ~/.config/gtk-4.0 go too, and yours come back. If its Shell theme is in " +
+			"use, the Shell goes back too."
 	}
 	return ui.AlertDialog("Remove "+r.Name+"?", what).Intent(ui.AlertDialogDestructive).
 		Confirm("Remove", func() {

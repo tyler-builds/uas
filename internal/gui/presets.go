@@ -217,6 +217,15 @@ func presetSummary(p appearance.Preset) string {
 			if !slices.Contains(words, fam) {
 				words = append(words, fam)
 			}
+		case appearance.PartShell:
+			// Often the GTK theme's name too, said once.
+			w := part.Value
+			if w == "" {
+				w = "Default Shell"
+			}
+			if !slices.Contains(words, w) {
+				words = append(words, w)
+			}
 		default:
 			if part.Value != "" {
 				words = append(words, part.Value)
@@ -367,7 +376,7 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 		}
 		var look, fonts []ui.Element
 		for _, part := range []string{appearance.PartScheme, appearance.PartAccent, appearance.PartGTK,
-			appearance.PartIcons, appearance.PartCursor} {
+			appearance.PartShell, appearance.PartIcons, appearance.PartCursor} {
 			if shown(part) {
 				look = append(look, a.presetPartRow(ctx, p, part, lk.Data))
 			}
@@ -437,24 +446,36 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			row = row.Child(sw)
 		}
 		control = row
-	case appearance.PartGTK, appearance.PartIcons, appearance.PartCursor:
+	case appearance.PartGTK, appearance.PartShell, appearance.PartIcons, appearance.PartCursor:
 		switch part {
 		case appearance.PartGTK:
 			desc = "How GTK apps draw windows, buttons and menus"
+		case appearance.PartShell:
+			desc = "The top bar, the overview and the Shell's menus"
 		case appearance.PartIcons:
 			desc = "The icons apps and the desktop draw"
 		default:
 			desc = "The mouse pointer"
 		}
 		themes := lk.themes
-		if part == appearance.PartGTK {
+		switch part {
+		case appearance.PartGTK:
 			themes = lk.gtkThemes
+		case appearance.PartShell:
+			themes = lk.shellThemes
 		}
 		opts := []ui.Option[string]{{Value: "", Label: "Leave as is"}}
-		have := false
+		value := cur.Value
+		if part == appearance.PartShell {
+			opts = append(opts, ui.Option[string]{Value: shellDefault, Label: "Default (GNOME's own look)"})
+			if p.Sets(part) && value == "" {
+				value = shellDefault
+			}
+		}
+		have := value == shellDefault
 		for _, th := range themes {
 			if (part == appearance.PartIcons && th.Icons) || (part == appearance.PartCursor && th.Cursors) ||
-				(part == appearance.PartGTK && th.GTK) {
+				(part == appearance.PartGTK && th.GTK) || (part == appearance.PartShell && th.Shell) {
 				label := th.Name
 				if th.Title != "" && th.Title != th.Name {
 					label += " · " + th.Title
@@ -470,9 +491,9 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			}
 			opts = append(opts, ui.Option[string]{Value: cur.Value, Label: label})
 		}
-		sig := ui.Local(ctx, "part:"+p.Name+":"+part, cur.Value)
-		if sig.Peek() != cur.Value {
-			sig.Set(cur.Value)
+		sig := ui.Local(ctx, "part:"+p.Name+":"+part, value)
+		if sig.Peek() != value {
+			sig.Set(value)
 		}
 		control = ui.Select(sig, opts...).Small().Width(ui.Px(320)).Label(appearance.PartLabel(part)).
 			Key("part-select:" + part).OnChange(set)
@@ -489,6 +510,12 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			TextColor(t.Warning))
 	} else if part == appearance.PartGTK && p.Sets(part) {
 		left = left.Child(caption(ctx, appearance.GTKNote))
+	} else if part == appearance.PartShell && cur.Value != "" {
+		note := appearance.ShellNote
+		if !lk.userThemes.Ready() {
+			note = "Needs GNOME's User Themes extension, which isn't running here; applying asks before turning it on."
+		}
+		left = left.Child(caption(ctx, note))
 	}
 	return ui.Div().Row().Align(ui.Center).Gap(space4).MinHeight(ui.Px(64)).PaddingX(space4).PaddingY(space2).
 		Child(left).Child(ui.Div().Shrink(0).Child(control))
@@ -556,6 +583,9 @@ func (a *App) presetFontControl(ctx *ui.Context, p appearance.Preset, part strin
 	}).Key("font-control:" + p.Name + ":" + part)
 }
 
+// shellDefault is the Shell theme part's choice of the Shell's own look, which the part holds as no value.
+const shellDefault = "\x00default"
+
 // setPresetPart changes one part of a preset, or with an empty value leaves it out. A theme or font uas
 // installed keeps where it came from, so the preset can install it elsewhere.
 func (a *App) setPresetPart(ctx *ui.Context, name, part, value string) {
@@ -572,6 +602,10 @@ func (a *App) setPresetPart(ctx *ui.Context, name, part, value string) {
 	_, err := a.s.Presets.Update(name, func(p *appearance.Preset) error {
 		if value == "" {
 			delete(p.Parts, part)
+			return nil
+		}
+		if part == appearance.PartShell && value == shellDefault {
+			p.Parts[part] = appearance.Part{} // the Shell's own look
 			return nil
 		}
 		old := p.Parts[part]
@@ -828,19 +862,21 @@ func (a *App) applyPreset(ctx *ui.Context, p appearance.Preset) {
 			if len(appearance.Downloads(plan)) > 0 || slices.ContainsFunc(plan, func(it appearance.PlanItem) bool {
 				return it.Step.Skipped()
 			}) {
+				a.presetUserThemes.Set(false)
 				a.presetApplying.Set(&presetApply{p: p, plan: plan})
 				return
 			}
-			a.runPresetApply(ctx, p, plan)
+			a.runPresetApply(ctx, p, plan, false)
 		})
 	}()
 }
 
-// runPresetApply applies a preset by its plan, as a job.
-func (a *App) runPresetApply(ctx *ui.Context, p appearance.Preset, plan []appearance.PlanItem) {
+// runPresetApply applies a preset by its plan, as a job. userThemes is the user's yes to turning on User
+// Themes for its Shell theme.
+func (a *App) runPresetApply(ctx *ui.Context, p appearance.Preset, plan []appearance.PlanItem, userThemes bool) {
 	a.startJob(ctx, "preset:"+strings.ToLower(p.Name), "Applying "+p.Name, false, p.Name+" is applied",
 		func(c context.Context, progress func(backend.Progress)) error {
-			out, err := a.s.ApplyPreset(c, p, plan, false, progress)
+			out, err := a.s.ApplyPreset(c, p, plan, false, userThemes, progress)
 			if err != nil {
 				return err
 			}
@@ -926,6 +962,10 @@ func (a *App) presetApplyDialog(ctx *ui.Context) ui.Element {
 	}
 	var skipped []ui.Element
 	for _, it := range ap.plan {
+		if it.Step == appearance.StepUserThemes {
+			body = body.Child(a.applyUserThemes(ctx, it))
+			continue
+		}
 		if it.Step.Skipped() {
 			v := appearance.ValueLabel(it.Key, it.Value)
 			title := appearance.PartLabel(it.Part)
@@ -954,9 +994,41 @@ func (a *App) presetApplyDialog(ctx *ui.Context) ui.Element {
 	return ui.AlertDialog("Apply "+ap.p.Name+"?", msg).Icon(icon).Body(body).Width(ui.Px(500)).
 		Confirm(label, func() {
 			close()
-			a.runPresetApply(ctx, ap.p, ap.plan)
+			a.runPresetApply(ctx, ap.p, ap.plan, a.presetUserThemes.Peek())
 		}).
 		Cancel("", close)
+}
+
+// applyUserThemes is the apply dialog's part for a Shell theme while User Themes isn't running: what it
+// needs, and the box that agrees to turning it on. Left unticked, the Shell theme is skipped.
+func (a *App) applyUserThemes(ctx *ui.Context, it appearance.PlanItem) ui.Element {
+	t := ctx.Theme()
+	u := a.looks(ctx).Data.userThemes
+	fix := u.Fix()
+	note := upperFirst(it.Note)
+	if it.Listing.Ref != "" {
+		note += " " + it.Listing.Name + " is installed first (" + installNoteText(it) + ")."
+	}
+	col := ui.Div().Column().Gap(space2).
+		Child(ui.Text("Needs User Themes").FontSize(13).Semibold()).
+		Child(ui.Div().Row().Align(ui.Start).Gap(space3).
+			Child(ui.Div().PaddingTop(2).Child(ui.Icon(icons.PanelTop).Size(15).Color(t.TextMuted))).
+			Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(ui.Text("Shell theme: " + appearance.ValueLabel(it.Key, it.Value)).FontSize(13).Medium()).
+				Child(ui.Text(note).FontSize(12).TextColor(t.TextSubtle))))
+	if fix == "" {
+		return col.Child(caption(ctx, "It is skipped."))
+	}
+	return col.Child(ui.Checkbox(fix+" for it", a.presetUserThemes).Key("apply-user-themes")).
+		Child(caption(ctx, "Left unticked, the Shell theme is skipped and nothing else changes."))
+}
+
+// installNoteText is where a plan item installs from, for a sentence.
+func installNoteText(it appearance.PlanItem) string {
+	if it.Note != "" && strings.HasPrefix(it.Note, "from ") {
+		return it.Note
+	}
+	return "from " + it.Listing.Source.Name()
 }
 
 func upperFirst(s string) string {

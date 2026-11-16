@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -21,7 +22,11 @@ const (
 	KeyCursorTheme = "cursor-theme"
 	// KeyGTKTheme is the GTK theme, by its folder's name: what GTK 3 apps, and GTK 4 apps that don't use
 	// libadwaita, are drawn with. uas sets only this setting (see Installer.Use).
-	KeyGTKTheme      = "gtk-theme"
+	KeyGTKTheme = "gtk-theme"
+	// KeyShellTheme is the GNOME Shell theme, by its folder's name, as the User Themes extension takes it:
+	// what draws the top bar, the overview and the Shell's menus. "" is the Shell's own look. GNOME applies
+	// it only while User Themes runs (see UserThemes).
+	KeyShellTheme    = "shell-theme"
 	KeyFont          = "font-name"           // the interface font
 	KeyDocumentFont  = "document-font-name"  // the font of documents
 	KeyMonospaceFont = "monospace-font-name" // the fixed-width font, as terminals use
@@ -72,8 +77,12 @@ var FontKeys = []string{KeyFont, KeyDocumentFont, KeyMonospaceFont}
 
 // SettingKeys are every setting uas can change, in the order they are listed and applied: the style and
 // accent first, as everything else is seen in them.
-var SettingKeys = []string{KeyColorScheme, KeyAccentColor, KeyGTKTheme, KeyIconTheme, KeyCursorTheme, KeyFont,
-	KeyDocumentFont, KeyMonospaceFont, KeyWallpaper, KeyWallpaperDark, KeyWallpaperFit}
+var SettingKeys = []string{KeyColorScheme, KeyAccentColor, KeyGTKTheme, KeyShellTheme, KeyIconTheme, KeyCursorTheme,
+	KeyFont, KeyDocumentFont, KeyMonospaceFont, KeyWallpaper, KeyWallpaperDark, KeyWallpaperFit}
+
+// EmptyValue reports whether "" is a value of a setting rather than no value: the Shell theme's, where it is
+// the Shell's own look.
+func EmptyValue(key string) bool { return key == KeyShellTheme }
 
 // The values of KeyColorScheme.
 const (
@@ -100,6 +109,9 @@ func Choices(key string) []string {
 
 // CheckValue refuses a value a setting can't take.
 func CheckValue(key, value string) error {
+	if value == "" && EmptyValue(key) {
+		return nil
+	}
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("%s: give a value", KeyWord(key))
 	}
@@ -122,6 +134,8 @@ func KeyLabel(key string) string {
 		return "Cursor"
 	case KeyGTKTheme:
 		return "GTK theme"
+	case KeyShellTheme:
+		return "Shell theme"
 	case KeyFont:
 		return "Interface text"
 	case KeyDocumentFont:
@@ -182,13 +196,17 @@ func ValueLabel(key, value string) string {
 		}
 	case KeyWallpaper, KeyWallpaperDark:
 		return PictureName(value)
+	case KeyShellTheme:
+		if value == "" {
+			return "Default"
+		}
 	}
 	return value
 }
 
 // ValueName is the word the command line takes for a value: "dark" for prefer-dark.
 func ValueName(key, value string) string {
-	if key == KeyColorScheme {
+	if key == KeyColorScheme || (key == KeyShellTheme && value == "") {
 		return strings.ToLower(ValueLabel(key, value))
 	}
 	return value
@@ -197,6 +215,9 @@ func ValueName(key, value string) string {
 // ParseValue reads a value as the command line gives it: "dark", "light" or "default" for the style, the
 // value itself for anything else.
 func ParseValue(key, s string) string {
+	if key == KeyShellTheme && strings.EqualFold(s, "default") {
+		return "" // the Shell's own look; a Shell theme called Default can't be named on the command line
+	}
 	if key == KeyWallpaperFit && strings.EqualFold(s, "tiled") {
 		return FitTiled
 	}
@@ -248,6 +269,11 @@ func DetectDesktop(current string, r run.Runner) Desktop {
 // settings portal).
 type GNOME struct {
 	Runner run.Runner
+	// ExtensionDirs are where GNOME Shell extensions are installed: the user's
+	// ($XDG_DATA_HOME/gnome-shell/extensions), then the system's under $XDG_DATA_DIRS. An extension installed
+	// for the user keeps its settings' schema in its own schemas folder, which plain gsettings can't see, so
+	// the Shell theme's setting is read there with --schemadir. Nil finds them from the environment.
+	ExtensionDirs []string
 
 	mu   sync.Mutex
 	keys map[string]map[string]bool // the keys of each schema asked about, nil when gsettings couldn't list them
@@ -260,6 +286,8 @@ const (
 	gnomePictureURI  = "picture-uri"
 	gnomePictureDark = "picture-uri-dark"
 	gnomePictureFit  = "picture-options"
+	// userThemesSchema is the User Themes extension's settings, whose name is the Shell theme.
+	userThemesSchema = "org.gnome.shell.extensions.user-theme"
 )
 
 // gnomeKeys are the settings uas changes, by key. Newer ones are only there from a GNOME release on, and
@@ -271,6 +299,7 @@ var gnomeKeys = map[string]struct {
 	KeyIconTheme:     {gnomeSchema, "icon-theme", false},
 	KeyCursorTheme:   {gnomeSchema, "cursor-theme", false},
 	KeyGTKTheme:      {gnomeSchema, "gtk-theme", false},
+	KeyShellTheme:    {userThemesSchema, "name", false},
 	KeyFont:          {gnomeSchema, "font-name", false},
 	KeyDocumentFont:  {gnomeSchema, "document-font-name", false},
 	KeyMonospaceFont: {gnomeSchema, "monospace-font-name", false},
@@ -291,13 +320,20 @@ func (g *GNOME) Supports(key string) bool {
 	if !k.newer {
 		return true
 	}
+	keys := g.listKeys(k.schema)
+	// When gsettings can't say, the setting is tried, and fails as a change of it would anyway.
+	return keys == nil || keys[k.key]
+}
+
+// listKeys returns the keys gsettings lists for a schema, asking once; nil when it couldn't list them.
+func (g *GNOME) listKeys(schema string) map[string]bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	keys, asked := g.keys[k.schema]
+	keys, asked := g.keys[schema]
 	if !asked {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if out, err := g.Runner.Run(ctx, "gsettings", []string{"list-keys", k.schema}, nil); err == nil {
+		if out, err := g.Runner.Run(ctx, "gsettings", []string{"list-keys", schema}, nil); err == nil {
 			keys = map[string]bool{}
 			for _, l := range strings.Fields(out) {
 				keys[l] = true
@@ -306,10 +342,63 @@ func (g *GNOME) Supports(key string) bool {
 		if g.keys == nil {
 			g.keys = map[string]map[string]bool{}
 		}
-		g.keys[k.schema] = keys
+		g.keys[schema] = keys
 	}
-	// When gsettings can't say, the setting is tried, and fails as a change of it would anyway.
-	return keys == nil || keys[k.key]
+	return keys
+}
+
+// extensionDirs are ExtensionDirs, or the user's and the system's extension folders.
+func (g *GNOME) extensionDirs() []string {
+	if g.ExtensionDirs != nil {
+		return g.ExtensionDirs
+	}
+	var out []string
+	data := os.Getenv("XDG_DATA_HOME")
+	if !filepath.IsAbs(data) {
+		if home, err := os.UserHomeDir(); err == nil {
+			data = filepath.Join(home, ".local", "share")
+		}
+	}
+	if data != "" {
+		out = append(out, filepath.Join(data, "gnome-shell", "extensions"))
+	}
+	sys := filepath.SplitList(os.Getenv("XDG_DATA_DIRS"))
+	if len(sys) == 0 {
+		sys = []string{"/usr/local/share", "/usr/share"}
+	}
+	for _, d := range sys {
+		if filepath.IsAbs(d) {
+			out = append(out, filepath.Join(d, "gnome-shell", "extensions"))
+		}
+	}
+	return out
+}
+
+// gsettings returns gsettings' arguments for a command on a setting: for the Shell theme, with --schemadir
+// when the system's schemas don't have User Themes' and the extension's own folder does, as when it was
+// installed for the user from extensions.gnome.org.
+func (g *GNOME) gsettings(schema string, args ...string) []string {
+	if schema != userThemesSchema {
+		return args
+	}
+	if keys := g.listKeys(schema); keys != nil && keys["name"] {
+		return args
+	}
+	for _, d := range g.extensionDirs() {
+		dir := filepath.Join(d, UserThemesUUID, "schemas")
+		if fi, err := os.Stat(filepath.Join(dir, "gschemas.compiled")); err == nil && fi.Mode().IsRegular() {
+			return append([]string{"--schemadir", dir}, args...)
+		}
+	}
+	return args
+}
+
+// shellErr explains a failure to read or change the Shell theme's setting, which is User Themes'.
+func shellErr(key string, err error) error {
+	if err != nil && key == KeyShellTheme {
+		return fmt.Errorf("the User Themes extension's settings can't be read (is it installed?): %w", err)
+	}
+	return err
 }
 
 func (g *GNOME) Get(ctx context.Context, key string) (string, error) {
@@ -317,9 +406,9 @@ func (g *GNOME) Get(ctx context.Context, key string) (string, error) {
 		return "", ErrUnsupported
 	}
 	k := gnomeKeys[key]
-	out, err := g.Runner.Run(ctx, "gsettings", []string{"get", k.schema, k.key}, nil)
+	out, err := g.Runner.Run(ctx, "gsettings", g.gsettings(k.schema, "get", k.schema, k.key), nil)
 	if err != nil {
-		return "", err
+		return "", shellErr(key, err)
 	}
 	v := parseGVariantString(strings.TrimSpace(out))
 	if key == KeyWallpaper || key == KeyWallpaperDark {
@@ -336,8 +425,9 @@ func (g *GNOME) Set(ctx context.Context, key, value string) error {
 	if key == KeyWallpaper || key == KeyWallpaperDark {
 		value = PathURI(value)
 	}
-	if _, err := g.Runner.Run(ctx, "gsettings", []string{"set", k.schema, k.key, quoteGVariant(value)}, nil); err != nil {
-		return err
+	if _, err := g.Runner.Run(ctx, "gsettings", g.gsettings(k.schema, "set", k.schema, k.key, quoteGVariant(value)),
+		nil); err != nil {
+		return shellErr(key, err)
 	}
 	if key == KeyWallpaper {
 		// The lock screen shows the wallpaper too, as when it is changed in GNOME's settings. A system
@@ -352,8 +442,8 @@ func (g *GNOME) Reset(ctx context.Context, key string) error {
 		return ErrUnsupported
 	}
 	k := gnomeKeys[key]
-	if _, err := g.Runner.Run(ctx, "gsettings", []string{"reset", k.schema, k.key}, nil); err != nil {
-		return err
+	if _, err := g.Runner.Run(ctx, "gsettings", g.gsettings(k.schema, "reset", k.schema, k.key), nil); err != nil {
+		return shellErr(key, err)
 	}
 	if key == KeyWallpaper {
 		_, _ = g.Runner.Run(ctx, "gsettings", []string{"reset", gnomeScreensaver, gnomePictureURI}, nil)

@@ -21,8 +21,8 @@ import (
 
 const presetUsage = `usage: uas appearance preset <command>
 
-A preset is a look saved under a name: the GTK theme, icons, cursor, fonts, the light or dark style, the
-accent color and the wallpaper, each optional. Applying one sets every part it has, installing fonts and themes it needs from
+A preset is a look saved under a name: the GTK theme, GNOME Shell theme, icons, cursor, fonts, the light or
+dark style, the accent color and the wallpaper, each optional. Applying one sets every part it has, installing fonts and themes it needs from
 the catalog first, and leaves the rest alone.
 
 commands:
@@ -30,7 +30,7 @@ commands:
   show <name>                   its parts, and what applying it would do here
   save [-replace] [-skip P,...] <name>
                                 save the current look as a preset; -skip leaves parts out
-  new [-replace] [-gtk T] [-icons T] [-cursor T] [-interface F] [-document F] [-monospace F]
+  new [-replace] [-gtk T] [-shell T] [-icons T] [-cursor T] [-interface F] [-document F] [-monospace F]
       [-scheme default|light|dark] [-accent C] [-wallpaper P [-wallpaper-dark P] [-fit F]] <name>
                                 make a preset from parts: a theme's name, or a catalog ID such as
                                 pling:1166289@Papirus-Dark; a font family, with a size or not
@@ -49,10 +49,15 @@ commands:
   copy <name> [<new name>]      copy it, as "<name> copy" unless you name the copy
   delete <name>
 
-parts: gtk, icons, cursor, interface, document, monospace, scheme, accent, wallpaper
+parts: gtk, shell, icons, cursor, interface, document, monospace, scheme, accent, wallpaper
 
 A GTK theme with files for GTK 4 apps has them copied into ~/.config/gtk-4.0 when the preset is applied,
 as "uas appearance use gtk" does; undo puts back what was there.
+
+The shell part is a GNOME Shell theme: a theme's name, "default" for the Shell's own look, or a GTK theme's
+catalog ID when the theme comes with it. Applying it needs GNOME's User Themes extension; when it isn't
+running, apply asks before turning it on, and skips the part when you say no. A preset never saves
+extensions or their settings.
 
 A picture of your own is copied into ~/.local/share/uas/wallpapers, so the preset keeps working when the
 original is moved or deleted; the system's wallpapers (/usr/share/backgrounds) are used where they are.
@@ -61,6 +66,7 @@ original is moved or deleted; the system's wallpapers (/usr/share/backgrounds) a
 // presetParts are the parts the command line makes, with their flags' descriptions.
 var presetParts = []struct{ part, help string }{
 	{appearance.PartGTK, "the GTK theme: a theme's name, or a catalog ID such as pling:1357889@Orchis-Dark"},
+	{appearance.PartShell, `the GNOME Shell theme: a theme's name, "default", or a GTK theme's catalog ID`},
 	{appearance.PartIcons, "the icon theme: a theme's name, or a catalog ID such as pling:1166289@Papirus-Dark"},
 	{appearance.PartCursor, "the cursor theme: a theme's name, or a catalog ID"},
 	{appearance.PartInterface, `the interface font: a family, with a size or not ("Inter 11"), or a catalog ID`},
@@ -71,7 +77,7 @@ var presetParts = []struct{ part, help string }{
 }
 
 // partNameList are the names of the parts, for messages.
-var partNameList = []string{appearance.PartGTK, appearance.PartIcons, appearance.PartCursor, appearance.PartInterface,
+var partNameList = []string{appearance.PartGTK, appearance.PartShell, appearance.PartIcons, appearance.PartCursor, appearance.PartInterface,
 	appearance.PartDocument, appearance.PartMonospace, appearance.PartScheme, appearance.PartAccent,
 	appearance.PartWallpaper}
 
@@ -401,6 +407,9 @@ func setWallpaperField(w io.Writer, e *session.Session, name, field, raw string)
 // among what uas installed for where it came from, or a catalog ID, which is looked up.
 func resolvePart(ctx context.Context, e *session.Session, part, raw string) (appearance.Part, error) {
 	key, _ := appearance.PartKey(part)
+	if key == appearance.KeyShellTheme && appearance.ParseValue(key, raw) == "" {
+		return appearance.Part{}, nil // the Shell's own look
+	}
 	if appearance.Choices(key) != nil {
 		v := appearance.ParseValue(key, raw)
 		if err := appearance.CheckValue(key, v); err != nil {
@@ -421,8 +430,8 @@ func resolvePart(ctx context.Context, e *session.Session, part, raw string) (app
 			want = catalog.KindIconTheme
 		case appearance.KeyCursorTheme:
 			want = catalog.KindCursorTheme
-		case appearance.KeyGTKTheme:
-			want = catalog.KindGTKTheme
+		case appearance.KeyGTKTheme, appearance.KeyShellTheme:
+			want = catalog.KindGTKTheme // a Shell theme comes with a GTK theme
 		}
 		if l.Kind != want {
 			return appearance.Part{}, fmt.Errorf("%s: %s is a %s, not a %s", part, id, l.Kind, want)
@@ -611,6 +620,29 @@ func applyPreset(ctx context.Context, w io.Writer, e *session.Session, p appeara
 	if dry {
 		return nil
 	}
+	// A Shell theme while User Themes isn't running: asked about apart, and never with -y alone.
+	userThemes := false
+	if i := slices.IndexFunc(plan, func(it appearance.PlanItem) bool { return it.Step == appearance.StepUserThemes }); i >= 0 {
+		u := e.Looks.UserThemes(ctx)
+		if fix := u.Fix(); fix != "" && isTerminal(os.Stdin) {
+			fmt.Fprintln(w, u.Why())
+			if !u.Installed {
+				fmt.Fprintln(w, "GNOME asks you before it installs it from extensions.gnome.org.")
+			}
+			var err error
+			if userThemes, err = confirm(fix + " for the Shell theme?"); err != nil {
+				return err
+			}
+			if userThemes && plan[i].Listing.Ref != "" && !noInstall && !yes {
+				ok, err := confirm(fmt.Sprintf("Install %s first?", plan[i].Listing.Name))
+				if err != nil || !ok {
+					return err
+				}
+			}
+		} else if fix != "" {
+			fmt.Fprintf(w, "Skipping the Shell theme: %s %s and apply again.\n", u.Why(), userThemesHint(u))
+		}
+	}
 	if downloads := appearance.Downloads(plan); len(downloads) > 0 && !noInstall && !yes {
 		names := make([]string, len(downloads))
 		for i, d := range downloads {
@@ -629,7 +661,7 @@ func applyPreset(ctx context.Context, w io.Writer, e *session.Session, p appeara
 			fmt.Fprintln(w, pr.Message)
 		}
 	}
-	out, err := e.ApplyPreset(ctx, p, plan, noInstall, progress)
+	out, err := e.ApplyPreset(ctx, p, plan, noInstall, userThemes, progress)
 	if err != nil {
 		return err
 	}

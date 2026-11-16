@@ -34,14 +34,15 @@ func (s *Session) PlanPreset(ctx context.Context, p appearance.Preset) ([]appear
 }
 
 // ApplyPreset applies a preset by its plan (see appearance.Installer.ApplyPreset), installing what it needs
-// first unless noInstall is set.
-func (s *Session) ApplyPreset(ctx context.Context, p appearance.Preset, plan []appearance.PlanItem, noInstall bool,
-	progress func(backend.Progress)) ([]appearance.Outcome, error) {
+// first unless noInstall is set. userThemes is the user's yes to turning on the User Themes extension for a
+// Shell theme that needs it.
+func (s *Session) ApplyPreset(ctx context.Context, p appearance.Preset, plan []appearance.PlanItem, noInstall,
+	userThemes bool, progress func(backend.Progress)) ([]appearance.Outcome, error) {
 	if s.Looks == nil || s.Presets == nil {
 		return nil, errNoPresets
 	}
 	return s.Looks.ApplyPreset(ctx, s.Presets, p, plan, appearance.ApplyOptions{NoInstall: noInstall,
-		Progress: progress,
+		UserThemes: userThemes, Progress: progress,
 		Install: func(ctx context.Context, l catalog.Listing, variant string,
 			progress func(backend.Progress)) (state.AppearanceInstall, error) {
 			rec, err := s.Looks.Install(ctx, l, variant, progress)
