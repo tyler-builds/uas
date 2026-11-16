@@ -38,10 +38,12 @@ COPR packages, searched and installed from one place.
 - **GNOME extensions.** On GNOME, an Extensions page lists every extension on the system, whichever app
   installed it, with its switch, settings and removal, and searches the ones extensions.gnome.org has for
   your version of GNOME. GNOME Shell does the installing, and its extension updates show under Updates.
-- **Fonts, icon themes and cursor themes.** An Appearance page browses fonts from Google Fonts and Nerd Fonts
-  (with previews drawn in the font itself) and icon and cursor themes from Pling (gnome-look.org), installs
-  them for your account with no root, and on GNOME (icons and cursors on KDE Plasma too) uses them in one
-  click, with Revert. Theme archives are checked against a checksum the catalog pins, and uas installs only
+- **Fonts, icon themes, cursor themes and GTK themes.** An Appearance page browses fonts from Google Fonts
+  and Nerd Fonts (with previews drawn in the font itself) and icon, cursor and GTK themes from Pling
+  (gnome-look.org), installs them for your account with no root, and on GNOME (icons and cursors on KDE
+  Plasma too) uses them in one click, with Revert. Using a GTK theme that has GTK 4 files also copies them
+  into `~/.config/gtk-4.0`, so GTK 4 and libadwaita apps follow it; files of yours there are kept aside and
+  put back by Revert. Theme archives are checked against a checksum the catalog pins, and uas installs only
   images and theme files from them, never scripts. Updates show under Updates.
 - **Your system's own tools.** On Bazzite, Bluefin and Aurora, the ujust commands (drivers, CoolerControl,
   Waydroid, audio tweaks…) are listed by group and run in a terminal window.
@@ -116,7 +118,7 @@ uas runs on any Linux distribution and enables each source it finds tools for.
 | Snap Store | `snap` with snapd running | Any distro with snapd |
 | COPR | `rpm-ostree`, or `dnf` and `pkexec` | Fedora Atomic (layered), or package-based Fedora |
 | GNOME Shell extensions | A GNOME session | GNOME 45 and newer |
-| Fonts, icon and cursor themes | — (Use and Revert: GNOME, or KDE Plasma for icons and cursors) | Any distro; installed only on other desktops |
+| Fonts, icon, cursor and GTK themes | — (Use and Revert: GNOME, or KDE Plasma for icons and cursors) | Any distro; installed only on other desktops |
 
 The desktop app needs a **Wayland** session. The CLI runs anywhere.
 
@@ -201,8 +203,8 @@ uas install https://github.com/owner/app   # an app that isn't in the catalog
 | `permissions <app-id> [<key> on\|off \| reset]` | Show or change what a Flatpak app may reach |
 | `migrate [-n] [-y] [-all]` | Hand AppImages that other tools or you set up over to uas |
 | `extensions [list \| search <words> \| install\|remove\|enable\|disable\|settings <uuid>]` | List and manage GNOME Shell extensions |
-| `appearance [list \| search -kind fonts\|icons\|cursors <words> \| info\|install\|remove <id> \| use <setting> <value> \| use wallpaper <file> [-dark <file>] [-fit <mode>] \| revert <setting>\|wallpaper\|all \| themes \| updates]` | Install, use and remove fonts and icon and cursor themes; set the light or dark style, accent color and wallpaper |
-| `appearance presets` / `appearance preset [show\|apply [-n] [-y] [-no-install]\|delete <name> \| save [-replace] [-skip parts] <name> \| new [-icons\|-cursor\|-interface\|-document\|-monospace\|-scheme\|-accent value] [-wallpaper file [-wallpaper-dark file] [-fit mode]] <name> \| set <name> <part> <value\|unset> \| set <name> wallpaper-dark <file\|same> \| set <name> fit <mode> \| rename\|copy <name> <new> \| undo]` | Save looks as named presets and apply one in a step: icons, cursor, fonts, style, accent and wallpaper; Undo goes back |
+| `appearance [list \| search -kind fonts\|icons\|cursors\|gtk <words> \| info\|install\|remove <id> \| use <setting> <value> \| use wallpaper <file> [-dark <file>] [-fit <mode>] \| revert <setting>\|wallpaper\|all \| themes \| updates]` | Install, use and remove fonts and icon, cursor and GTK themes; set the light or dark style, accent color and wallpaper |
+| `appearance presets` / `appearance preset [show\|apply [-n] [-y] [-no-install]\|delete <name> \| save [-replace] [-skip parts] <name> \| new [-gtk\|-icons\|-cursor\|-interface\|-document\|-monospace\|-scheme\|-accent value] [-wallpaper file [-wallpaper-dark file] [-fit mode]] <name> \| set <name> <part> <value\|unset> \| set <name> wallpaper-dark <file\|same> \| set <name> fit <mode> \| rename\|copy <name> <new> \| undo]` | Save looks as named presets and apply one in a step: GTK theme, icons, cursor, fonts, style, accent and wallpaper; Undo goes back |
 | `gui [--page <page>]` | Open the desktop app |
 | `self-update` | Update uas to the latest signed release |
 | `self-install` / `self-uninstall` | Install uas for you, or remove it |
