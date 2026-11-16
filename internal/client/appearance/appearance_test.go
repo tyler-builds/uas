@@ -73,19 +73,31 @@ func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ fun
 		}
 		return strings.Join(f.keys, "\n") + "\n", nil
 	}
-	if name != "gsettings" || len(args) < 3 || args[1] != gnomeSchema {
+	if name == "gsettings" && len(args) == 2 && args[0] == "list-keys" && args[1] == gnomeBackground {
+		return "picture-uri\npicture-uri-dark\npicture-options\nprimary-color\n", nil
+	}
+	if name != "gsettings" || len(args) < 3 ||
+		(args[1] != gnomeSchema && args[1] != gnomeBackground && args[1] != gnomeScreensaver) {
 		return "", fmt.Errorf("unexpected %s %v", name, args)
 	}
-	if args[0] == "set" && f.fail[args[2]] {
-		return "", fmt.Errorf("gsettings: can't set %s", args[2])
+	// The interface's keys by their name, the others' by schema and name (bg picture-uri).
+	key := args[2]
+	switch args[1] {
+	case gnomeBackground:
+		key = "bg " + key
+	case gnomeScreensaver:
+		key = "lock " + key
+	}
+	if args[0] == "set" && f.fail[key] {
+		return "", fmt.Errorf("gsettings: can't set %s", key)
 	}
 	switch args[0] {
 	case "get":
-		return quoteGVariant(f.values[args[2]]) + "\n", nil
+		return quoteGVariant(f.values[key]) + "\n", nil
 	case "set":
-		f.values[args[2]] = parseGVariantString(args[3])
+		f.values[key] = parseGVariantString(args[3])
 	case "reset":
-		f.values[args[2]] = "default-" + args[2]
+		f.values[key] = "default-" + args[2]
 	}
 	return "", nil
 }
@@ -621,6 +633,7 @@ func TestNewSettings(t *testing.T) {
 	}
 	want := []string{
 		"gsettings list-keys org.gnome.desktop.interface",
+		"gsettings list-keys org.gnome.desktop.background",
 		"gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'",
 		`gsettings set org.gnome.desktop.interface accent-color 'it\'s'`,
 		"gsettings get org.gnome.desktop.interface accent-color",

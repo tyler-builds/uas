@@ -46,10 +46,16 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   <category>" cards.
 - **Appearance:** the header, then tabs (a segmented control): Presets, Fonts, Icons, Cursors and Installed.
   Presets, the first tab once there are any, is a grid of preset cards: a preview panel in the preset's
-  light or dark style with three icons of its icon theme (or "Aa") and its accent as a dot, the name with an
-  "In use" chip, its themes and fonts as quiet words, an outlined Apply and a ⋯ menu. Save current look
-  (teal) and New preset sit in the header. A preset's page lists its parts in two bordered lists, Look and
-  Fonts, each row with "Leave as is". Applying asks first only when it downloads or skips something, and an
+  light or dark style with three icons of its icon theme (or "Aa") and its accent as a dot, set as a small
+  window in front of its wallpaper when it has one, the name with an "In use" chip, its themes and fonts as
+  quiet words, an outlined Apply and a ⋯ menu. Save current look (teal) and New preset sit in the header; its
+  dialog lists the wallpaper with a small thumbnail. A preset's page lists its parts in two bordered lists,
+  Look and Fonts, each row with "Leave as is"; the Wallpaper row, last in Look, has the fit select at the
+  right and two 16:9 slots under it, Light and Dark, each a bordered thumbnail with its name and Choose…
+  (From a file, System wallpapers), and "Same for dark" under the dark one. System wallpapers is a modal grid
+  of thumbnails with names, a moon on the ones with their own dark picture and the chosen one outlined in
+  teal. A picture that can't be drawn is a quiet tile with its file's name. "Changed by uas" shows the
+  wallpaper as one row, with a thumbnail and one Revert. Applying asks first only when it downloads or skips something, and an
   alert with Undo follows it. Fonts, Icons and Cursors are grids of cards from the catalog.
 - **Installed and Updates:** the same list for installed apps, with Update where there is one (outlined, with
   a teal icon), Update all, and Remove.

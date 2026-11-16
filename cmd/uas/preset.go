@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -19,9 +21,9 @@ import (
 
 const presetUsage = `usage: uas appearance preset <command>
 
-A preset is a look saved under a name: icons, cursor, fonts, the light or dark style and the accent color,
-each optional. Applying one sets every part it has, installing fonts and themes it needs from the catalog
-first, and leaves the rest alone.
+A preset is a look saved under a name: icons, cursor, fonts, the light or dark style, the accent color and
+the wallpaper, each optional. Applying one sets every part it has, installing fonts and themes it needs from
+the catalog first, and leaves the rest alone.
 
 commands:
   list                          your presets, and which is in use (also "uas appearance presets")
@@ -29,12 +31,17 @@ commands:
   save [-replace] [-skip P,...] <name>
                                 save the current look as a preset; -skip leaves parts out
   new [-replace] [-icons T] [-cursor T] [-interface F] [-document F] [-monospace F]
-      [-scheme default|light|dark] [-accent C] <name>
+      [-scheme default|light|dark] [-accent C] [-wallpaper P [-wallpaper-dark P] [-fit F]] <name>
                                 make a preset from parts: a theme's name, or a catalog ID such as
                                 pling:1166289@Papirus-Dark; a font family, with a size or not
-                                ("Inter 11"), or a catalog ID such as google-fonts:inter
+                                ("Inter 11"), or a catalog ID such as google-fonts:inter; a picture
+                                (jpg, png, webp, jxl or svg) for the wallpaper, and another for the
+                                dark style; how it fits: zoom (the default), centered, scaled,
+                                stretched, spanned, wallpaper (tiled) or none
   set <name> <part> <value>|unset
                                 change one part, or leave it out
+  set <name> wallpaper-dark <picture>|same
+  set <name> fit <F>            change the wallpaper's dark picture, or its fit
   apply [-y] [-n] [-no-install] <name>
                                 apply it; -n shows what it would do, -no-install skips what isn't here
   undo                          go back to the look from before the last apply
@@ -42,7 +49,10 @@ commands:
   copy <name> [<new name>]      copy it, as "<name> copy" unless you name the copy
   delete <name>
 
-parts: icons, cursor, interface, document, monospace, scheme, accent
+parts: icons, cursor, interface, document, monospace, scheme, accent, wallpaper
+
+A picture of your own is copied into ~/.local/share/uas/wallpapers, so the preset keeps working when the
+original is moved or deleted; the system's wallpapers (/usr/share/backgrounds) are used where they are.
 `
 
 // presetParts are the parts the command line makes, with their flags' descriptions.
@@ -55,6 +65,11 @@ var presetParts = []struct{ part, help string }{
 	{appearance.PartScheme, "the style: default, light or dark"},
 	{appearance.PartAccent, "the accent color: " + strings.Join(appearance.AccentColors, ", ")},
 }
+
+// partNameList are the names of the parts, for messages.
+var partNameList = []string{appearance.PartIcons, appearance.PartCursor, appearance.PartInterface,
+	appearance.PartDocument, appearance.PartMonospace, appearance.PartScheme, appearance.PartAccent,
+	appearance.PartWallpaper}
 
 // runPreset saves, applies and manages presets.
 func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) error {
@@ -77,10 +92,14 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 	dry := fs.Bool("n", false, "only show what applying would do")
 	noInstall := fs.Bool("no-install", false, "skip the parts that aren't on this system")
 	values := map[string]*string{}
+	var wallLight, wallDark, wallFit *string
 	if sub == "new" {
 		for _, p := range presetParts {
 			values[p.part] = fs.String(p.part, "", p.help)
 		}
+		wallLight = fs.String("wallpaper", "", "the wallpaper: a picture of yours (copied into uas's folder) or the system's")
+		wallDark = fs.String("wallpaper-dark", "", "the wallpaper with the dark style; the same picture without it")
+		wallFit = fs.String("fit", "", "how the wallpaper fits: "+strings.Join(appearance.WallpaperFits, ", "))
 	}
 	rest, err := parseArgs(fs, args)
 	if err != nil {
@@ -148,7 +167,7 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 			return clash(err)
 		}
 		fmt.Fprintf(w, "Saved %s:\n", p.Name)
-		return printParts(w, p)
+		return printParts(w, e, p)
 	case "new":
 		if err := n(1, "a name for the preset"); err != nil {
 			return err
@@ -163,23 +182,53 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 				p.Parts[pp.part] = part
 			}
 		}
+		light, dark, fit := strings.TrimSpace(*wallLight), strings.TrimSpace(*wallDark), strings.TrimSpace(*wallFit)
+		if light == "" && (dark != "" || fit != "") {
+			return errors.New("appearance preset new: -wallpaper-dark and -fit need -wallpaper")
+		}
+		if light != "" {
+			part, err := wallpaperPart(e, light, dark, fit)
+			if err != nil {
+				return err
+			}
+			p.Parts[appearance.PartWallpaper] = part
+		}
 		p, err := store.Save(p, *replace)
 		if err != nil {
 			return clash(err)
 		}
 		fmt.Fprintf(w, "Saved %s:\n", p.Name)
-		return printParts(w, p)
+		return printParts(w, e, p)
 	case "set":
 		if err := n(3, "a preset's name, a part and its value (or unset)"); err != nil {
 			return err
 		}
 		part := rest[1]
+		switch part {
+		case "wallpaper-dark", "dark", "wallpaper-fit", "fit":
+			return setWallpaperField(w, e, rest[0], part, rest[2])
+		}
 		if _, ok := appearance.PartKey(part); !ok {
 			return fmt.Errorf("appearance preset set: %q isn't a part (%s)", part, partNames())
 		}
 		var value appearance.Part
 		unset := rest[2] == "unset" || rest[2] == "-"
-		if !unset {
+		if !unset && part == appearance.PartWallpaper {
+			// A new picture keeps the dark one and the fit the preset has.
+			old, err := store.Get(rest[0])
+			if err != nil {
+				return err
+			}
+			if value, err = wallpaperPart(e, rest[2], "", ""); err != nil {
+				return err
+			}
+			if prev, ok := old.Parts[appearance.PartWallpaper]; ok {
+				value.Dark = prev.Dark
+				if prev.Fit != "" {
+					value.Fit = prev.Fit
+				}
+			}
+		} else if !unset {
 			if value, err = resolvePart(ctx, e, part, rest[2]); err != nil {
 				return err
 			}
@@ -196,7 +245,7 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 			return err
 		}
 		fmt.Fprintf(w, "Changed %s:\n", p.Name)
-		return printParts(w, p)
+		return printParts(w, e, p)
 	case "apply", "use":
 		if err := n(1, "a preset's name"); err != nil {
 			return err
@@ -216,7 +265,7 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 		} else if err != nil {
 			return err
 		}
-		printOutcomes(w, out)
+		printOutcomes(w, e, out)
 		if err := appearance.Failed(out); err != nil {
 			return err
 		}
@@ -261,12 +310,87 @@ func runPreset(ctx context.Context, w io.Writer, cmd string, args []string) erro
 	return nil
 }
 
-func partNames() string {
-	var names []string
-	for _, p := range presetParts {
-		names = append(names, p.part)
+func partNames() string { return strings.Join(partNameList, ", ") }
+
+// picturePath checks a picture given on the command line is there, and returns its absolute path.
+func picturePath(raw string) (string, error) {
+	p, err := filepath.Abs(raw)
+	if err != nil {
+		return "", err
 	}
-	return strings.Join(names, ", ")
+	fi, err := os.Stat(p)
+	if err != nil {
+		return "", fmt.Errorf("wallpaper: %w", err)
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("wallpaper: %s isn't a file", raw)
+	}
+	return p, nil
+}
+
+// wallpaperPart makes a preset's wallpaper part from pictures given on the command line: one of the user's
+// is copied into the store, one of the system's is named by its path. The fit is zoom unless given.
+func wallpaperPart(e *session.Session, light, dark, fit string) (appearance.Part, error) {
+	wp := appearance.Wallpaper{Fit: appearance.FitZoom}
+	var err error
+	if wp.Light, err = picturePath(light); err != nil {
+		return appearance.Part{}, err
+	}
+	if dark != "" {
+		if wp.Dark, err = picturePath(dark); err != nil {
+			return appearance.Part{}, err
+		}
+	}
+	if fit != "" {
+		wp.Fit = appearance.ParseValue(appearance.KeyWallpaperFit, fit)
+		if err := appearance.CheckValue(appearance.KeyWallpaperFit, wp.Fit); err != nil {
+			return appearance.Part{}, err
+		}
+	}
+	return e.Looks.WallpaperPart(wp)
+}
+
+// setWallpaperField changes a preset's wallpaper's dark picture ("same" uses the light one) or its fit.
+func setWallpaperField(w io.Writer, e *session.Session, name, field, raw string) error {
+	var dark, fit string
+	var err error
+	switch field {
+	case "wallpaper-dark", "dark":
+		if raw != "same" && raw != "unset" && raw != "-" {
+			if dark, err = picturePath(raw); err != nil {
+				return err
+			}
+			if dark, err = e.Looks.WallpaperRef(dark); err != nil {
+				return err
+			}
+		}
+	default:
+		fit = appearance.ParseValue(appearance.KeyWallpaperFit, raw)
+		if err := appearance.CheckValue(appearance.KeyWallpaperFit, fit); err != nil {
+			return err
+		}
+	}
+	p, err := e.Presets.Update(name, func(p *appearance.Preset) error {
+		part, ok := p.Parts[appearance.PartWallpaper]
+		if !ok {
+			return fmt.Errorf("%s has no wallpaper; set one first: uas appearance preset set %q wallpaper <picture>",
+				p.Name, p.Name)
+		}
+		if fit != "" {
+			part.Fit = fit
+		} else if dark == part.Light {
+			part.Dark = ""
+		} else {
+			part.Dark = dark
+		}
+		p.Parts[appearance.PartWallpaper] = part
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Changed %s:\n", p.Name)
+	return printParts(w, e, p)
 }
 
 // resolvePart reads a part's value as the command line gives it: a theme's or font's name, which is found
@@ -372,16 +496,27 @@ func listPresets(ctx context.Context, w io.Writer, e *session.Session) error {
 }
 
 // printParts lists a preset's parts and values.
-func printParts(w io.Writer, p appearance.Preset) error {
+func printParts(w io.Writer, e *session.Session, p appearance.Preset) error {
 	if len(p.Parts) == 0 {
 		fmt.Fprintln(w, "  (no parts: it leaves everything as it is)")
 		return nil
+	}
+	var system []appearance.SystemWallpaper
+	if p.Sets(appearance.PartWallpaper) {
+		system = e.Looks.SystemWallpapers()
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, name := range p.PartNames() {
 		part := p.Parts[name]
 		key, _ := appearance.PartKey(name)
 		v := appearance.ValueLabel(key, part.Value)
+		if name == appearance.PartWallpaper {
+			wp := part.Wallpaper()
+			if wp.Fit == "" {
+				wp.Fit = appearance.FitZoom
+			}
+			v = wallpaperLabel(system, wp)
+		}
 		if part.From != nil {
 			v += "  (" + part.From.ID + ")"
 		}
@@ -402,15 +537,37 @@ func showPreset(ctx context.Context, w io.Writer, e *session.Session, p appearan
 	plan, err := e.PlanPreset(ctx, p)
 	if errors.Is(err, appearance.ErrUnsupported) {
 		fmt.Fprintln(w, "This desktop's settings can't be changed from uas, so it can't be applied here.")
-		return printParts(w, p)
+		return printParts(w, e, p)
 	} else if err != nil {
 		return err
 	}
-	return printPlan(w, plan)
+	return printPlan(w, e, plan)
+}
+
+// planValue names a plan item's value: for the wallpaper, its pictures and fit.
+func planValue(system []appearance.SystemWallpaper, it appearance.PlanItem) string {
+	if it.Part == appearance.PartWallpaper {
+		if it.Wallpaper.Light != "" {
+			return wallpaperLabel(system, it.Wallpaper)
+		}
+		return appearance.WallpaperName(system, it.Value)
+	}
+	return appearance.ValueLabel(it.Key, it.Value)
+}
+
+// wallpapersOf is the system's wallpapers, for naming a plan's wallpaper; nil when it has none.
+func wallpapersOf(e *session.Session, plan []appearance.PlanItem) []appearance.SystemWallpaper {
+	for _, it := range plan {
+		if it.Part == appearance.PartWallpaper {
+			return e.Looks.SystemWallpapers()
+		}
+	}
+	return nil
 }
 
 // printPlan lists what applying a preset would do with each part.
-func printPlan(w io.Writer, plan []appearance.PlanItem) error {
+func printPlan(w io.Writer, e *session.Session, plan []appearance.PlanItem) error {
+	system := wallpapersOf(e, plan)
 	if len(plan) == 0 {
 		fmt.Fprintln(w, "It has no parts, so applying it leaves everything as it is.")
 		return nil
@@ -429,8 +586,7 @@ func printPlan(w io.Writer, plan []appearance.PlanItem) error {
 		default:
 			action = "skips it: " + it.Note
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", appearance.PartLabel(it.Part),
-			truncate(appearance.ValueLabel(it.Key, it.Value), 40), action)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", appearance.PartLabel(it.Part), truncate(planValue(system, it), 60), action)
 	}
 	return tw.Flush()
 }
@@ -443,7 +599,7 @@ func applyPreset(ctx context.Context, w io.Writer, e *session.Session, p appeara
 	} else if err != nil {
 		return err
 	}
-	if err := printPlan(w, plan); err != nil {
+	if err := printPlan(w, e, plan); err != nil {
 		return err
 	}
 	if dry {
@@ -472,7 +628,7 @@ func applyPreset(ctx context.Context, w io.Writer, e *session.Session, p appeara
 		return err
 	}
 	fmt.Fprintln(w)
-	printOutcomes(w, out)
+	printOutcomes(w, e, out)
 	failed := appearance.Failed(out)
 	what := "Applied"
 	if failed != nil {
@@ -488,11 +644,17 @@ func applyPreset(ctx context.Context, w io.Writer, e *session.Session, p appeara
 }
 
 // printOutcomes says what applying did with each part.
-func printOutcomes(w io.Writer, out []appearance.Outcome) {
+func printOutcomes(w io.Writer, e *session.Session, out []appearance.Outcome) {
+	var system []appearance.SystemWallpaper
+	for _, o := range out {
+		if o.Part == appearance.PartWallpaper {
+			system = e.Looks.SystemWallpapers()
+		}
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, o := range out {
 		label := appearance.PartLabel(o.Part) + ":"
-		value := appearance.ValueLabel(o.Key, o.Value)
+		value := planValue(system, o.PlanItem)
 		switch {
 		case o.Err != nil:
 			fmt.Fprintf(tw, "%s\t%s\tfailed: %v\n", label, value, o.Err)

@@ -14,8 +14,8 @@ import (
 	"unicode/utf8"
 )
 
-// A preset is a look saved under a name: a theme for icons and cursors, fonts, the light or dark style and
-// the accent color, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
+// A preset is a look saved under a name: a theme for icons and cursors, fonts, the light or dark style, the
+// accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
 // the user's own, so they live with uas's settings, one JSON file each in ~/.config/uas/presets; the look
 // from before the last apply, for Undo, is uas's, and lives with its state.
 
@@ -30,7 +30,7 @@ const (
 	PartInterface = "interface"
 	PartDocument  = "document"
 	PartMonospace = "monospace"
-	PartWallpaper = "wallpaper" // a wallpaper, with light and dark pictures (a later version of uas)
+	PartWallpaper = "wallpaper" // a wallpaper: Part.Light, Part.Dark and Part.Fit, rather than Value
 )
 
 // PartOrder is the order parts are listed and applied in: the style and accent first, as everything else
@@ -38,8 +38,9 @@ const (
 var PartOrder = []string{PartScheme, PartAccent, PartGTK, PartShell, PartIcons, PartCursor, PartInterface,
 	PartDocument, PartMonospace, PartWallpaper}
 
-// partKeys are the parts that are one desktop setting, by part. Parts not here are ones this version of
-// uas keeps in a preset's file but can't apply.
+// partKeys are the parts that are one desktop setting, by part, and the wallpaper, which is
+// KeyWallpaper and the other WallpaperKeys. Parts not here are ones this version of uas keeps in a preset's
+// file but can't apply.
 var partKeys = map[string]string{
 	PartScheme:    KeyColorScheme,
 	PartAccent:    KeyAccentColor,
@@ -48,6 +49,7 @@ var partKeys = map[string]string{
 	PartInterface: KeyFont,
 	PartDocument:  KeyDocumentFont,
 	PartMonospace: KeyMonospaceFont,
+	PartWallpaper: KeyWallpaper,
 }
 
 // PartKey returns the setting a part sets, and false for a part this version of uas can't apply.
@@ -58,6 +60,7 @@ func PartKey(part string) (string, bool) {
 
 // KeyPart returns the part that sets a setting, or "".
 func KeyPart(key string) string {
+	key = GroupKey(key)
 	for p, k := range partKeys {
 		if k == key {
 			return p
@@ -104,10 +107,19 @@ type Part struct {
 	// From is where it can be installed from when it isn't on the system; nil for one that came with the
 	// system.
 	From *Origin `json:"from,omitempty"`
+	// Light, Dark and Fit are a wallpaper's, in place of Value: its picture, its picture with the dark style
+	// ("" is Light) and how they fit the screen (one of WallpaperFits; "" is FitZoom). A picture is a
+	// stored one's "sha256:<hex>" or a system one's path (see WallpaperRef).
+	Light string `json:"light,omitempty"`
+	Dark  string `json:"dark,omitempty"`
+	Fit   string `json:"fit,omitempty"`
 
-	// rest are the fields this version of uas doesn't know, such as a wallpaper's, kept as they are.
+	// rest are the fields this version of uas doesn't know, kept as they are.
 	rest map[string]json.RawMessage
 }
+
+// Wallpaper is a wallpaper part's pictures and fit, as its references.
+func (p Part) Wallpaper() Wallpaper { return Wallpaper{Light: p.Light, Dark: p.Dark, Fit: p.Fit} }
 
 // Origin is a font or theme of the catalog.
 type Origin struct {
@@ -134,6 +146,14 @@ func (p *Part) UnmarshalJSON(b []byte) error {
 		}
 		delete(all, "from")
 	}
+	for name, dst := range map[string]*string{"light": &p.Light, "dark": &p.Dark, "fit": &p.Fit} {
+		if v, ok := all[name]; ok {
+			if err := json.Unmarshal(v, dst); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			delete(all, name)
+		}
+	}
 	if len(all) > 0 {
 		p.rest = all
 	}
@@ -141,7 +161,7 @@ func (p *Part) UnmarshalJSON(b []byte) error {
 }
 
 func (p Part) MarshalJSON() ([]byte, error) {
-	// value first, then from, then the rest by name, so the file reads in that order.
+	// value first, then from, a wallpaper's fields, then the rest by name, so the file reads in that order.
 	var b bytes.Buffer
 	b.WriteByte('{')
 	field := func(name string, v any) error {
@@ -166,6 +186,13 @@ func (p Part) MarshalJSON() ([]byte, error) {
 	if p.From != nil {
 		if err := field("from", p.From); err != nil {
 			return nil, err
+		}
+	}
+	for _, f := range []struct{ name, v string }{{"light", p.Light}, {"dark", p.Dark}, {"fit", p.Fit}} {
+		if f.v != "" {
+			if err := field(f.name, f.v); err != nil {
+				return nil, err
+			}
 		}
 	}
 	names := make([]string, 0, len(p.rest))
@@ -213,6 +240,9 @@ type Presets struct {
 	UndoFile string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Changed, when set, is called after a preset is saved, changed or deleted: the session removes the
+	// stored wallpapers no preset uses any more (Installer.PruneWallpapers).
+	Changed func()
 }
 
 // NewPresets returns the user's presets: $XDG_CONFIG_HOME/uas/presets, with the look to undo to in
@@ -329,7 +359,11 @@ func (s *Presets) Save(p Preset, replace bool) (Preset, error) {
 	}
 	now := s.now()
 	p.CreatedAt, p.UpdatedAt = now, now
-	return p, s.write(&p)
+	if err := s.write(&p); err != nil {
+		return Preset{}, err
+	}
+	s.changed()
+	return p, nil
 }
 
 // Update changes a preset and writes it.
@@ -342,7 +376,17 @@ func (s *Presets) Update(name string, change func(*Preset) error) (Preset, error
 		return Preset{}, err
 	}
 	p.UpdatedAt = s.now()
-	return p, s.write(&p)
+	if err := s.write(&p); err != nil {
+		return Preset{}, err
+	}
+	s.changed()
+	return p, nil
+}
+
+func (s *Presets) changed() {
+	if s.Changed != nil {
+		s.Changed()
+	}
 }
 
 // Rename gives a preset a new name, which no other preset may have; a change of case is allowed.
@@ -409,7 +453,11 @@ func (s *Presets) Delete(name string) error {
 	if err != nil {
 		return err
 	}
-	return os.Remove(p.file)
+	if err := os.Remove(p.file); err != nil {
+		return err
+	}
+	s.changed()
+	return nil
 }
 
 // write writes a preset to its file, or to a new file named for it.
@@ -532,5 +580,6 @@ func (s *Presets) clearUndo() error {
 	if err := os.Remove(s.UndoFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	s.changed()
 	return nil
 }

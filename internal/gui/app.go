@@ -141,6 +141,7 @@ type App struct {
 	presetApplying *ui.Signal[*presetApply]       // an apply waiting for the user's OK
 	presetDeleting *ui.Signal[*appearance.Preset] // a preset's deletion waiting for the user's OK
 	presetApplied  *ui.Signal[*presetApplied]     // what the last apply did, for its note with Undo
+	wallChooser    *ui.Signal[*wallSlot]          // the slot the system wallpapers chooser fills
 
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
@@ -200,6 +201,7 @@ func New(s *session.Session) *App {
 		presetApplying:  ui.NewSignal[*presetApply](nil),
 		presetDeleting:  ui.NewSignal[*appearance.Preset](nil),
 		presetApplied:   ui.NewSignal[*presetApplied](nil),
+		wallChooser:     ui.NewSignal[*wallSlot](nil),
 		catalogGen:      ui.NewSignal(0),
 		icons:           newIconLoader(),
 	}
@@ -349,6 +351,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.presetNamingDialog(ctx)).
 		Child(a.presetApplyDialog(ctx)).
 		Child(a.presetDeleteDialog(ctx)).
+		Child(a.wallChooserDialog(ctx)).
 		Child(a.migrateDialog(ctx)).
 		Child(a.uninstallDialog(ctx)).
 		Child(ui.Toaster().Key("toaster"))

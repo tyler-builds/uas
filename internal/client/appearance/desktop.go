@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -25,7 +26,43 @@ const (
 	KeyColorScheme = "color-scheme"
 	// KeyAccentColor is the accent color, one of AccentColors.
 	KeyAccentColor = "accent-color"
+	// KeyWallpaper is the wallpaper: a picture's path (or, for one that isn't a local file, its URI). On
+	// GNOME, setting it sets the lock screen's picture too, as GNOME's settings do.
+	KeyWallpaper = "wallpaper"
+	// KeyWallpaperDark is the wallpaper with the dark style, as KeyWallpaper.
+	KeyWallpaperDark = "wallpaper-dark"
+	// KeyWallpaperFit is how the wallpaper fills the screen, one of WallpaperFits.
+	KeyWallpaperFit = "wallpaper-fit"
 )
+
+// WallpaperKeys are the settings of the wallpaper. They are listed, saved and reverted as one: "Wallpaper".
+var WallpaperKeys = []string{KeyWallpaper, KeyWallpaperDark, KeyWallpaperFit}
+
+// IsWallpaperKey reports whether a setting is one of WallpaperKeys.
+func IsWallpaperKey(key string) bool { return slices.Contains(WallpaperKeys, key) }
+
+// GroupKey is the setting a setting is listed and reverted under: KeyWallpaper for the wallpaper's, the
+// setting itself for any other.
+func GroupKey(key string) string {
+	if IsWallpaperKey(key) {
+		return KeyWallpaper
+	}
+	return key
+}
+
+// The values of KeyWallpaperFit, as GNOME's picture-options has them.
+const (
+	FitZoom      = "zoom"
+	FitCentered  = "centered"
+	FitScaled    = "scaled"
+	FitStretched = "stretched"
+	FitSpanned   = "spanned"
+	FitTiled     = "wallpaper"
+	FitNone      = "none"
+)
+
+// WallpaperFits are the values of KeyWallpaperFit; FitZoom, the first, is the default.
+var WallpaperFits = []string{FitZoom, FitCentered, FitScaled, FitStretched, FitSpanned, FitTiled, FitNone}
 
 // FontKeys are the settings a font can be used for.
 var FontKeys = []string{KeyFont, KeyDocumentFont, KeyMonospaceFont}
@@ -33,7 +70,7 @@ var FontKeys = []string{KeyFont, KeyDocumentFont, KeyMonospaceFont}
 // SettingKeys are every setting uas can change, in the order they are listed and applied: the style and
 // accent first, as everything else is seen in them.
 var SettingKeys = []string{KeyColorScheme, KeyAccentColor, KeyIconTheme, KeyCursorTheme, KeyFont,
-	KeyDocumentFont, KeyMonospaceFont}
+	KeyDocumentFont, KeyMonospaceFont, KeyWallpaper, KeyWallpaperDark, KeyWallpaperFit}
 
 // The values of KeyColorScheme.
 const (
@@ -52,6 +89,8 @@ func Choices(key string) []string {
 		return []string{SchemeDefault, SchemeLight, SchemeDark}
 	case KeyAccentColor:
 		return AccentColors
+	case KeyWallpaperFit:
+		return WallpaperFits
 	}
 	return nil
 }
@@ -88,6 +127,12 @@ func KeyLabel(key string) string {
 		return "Style"
 	case KeyAccentColor:
 		return "Accent color"
+	case KeyWallpaper:
+		return "Wallpaper"
+	case KeyWallpaperDark:
+		return "Dark wallpaper"
+	case KeyWallpaperFit:
+		return "Wallpaper fit"
 	}
 	return key
 }
@@ -109,6 +154,15 @@ func ValueLabel(key, value string) string {
 		if value != "" {
 			return strings.ToUpper(value[:1]) + value[1:]
 		}
+	case KeyWallpaperFit:
+		if value == FitTiled {
+			return "Tiled"
+		}
+		if value != "" {
+			return strings.ToUpper(value[:1]) + value[1:]
+		}
+	case KeyWallpaper, KeyWallpaperDark:
+		return PictureName(value)
 	}
 	return value
 }
@@ -124,6 +178,9 @@ func ValueName(key, value string) string {
 // ParseValue reads a value as the command line gives it: "dark", "light" or "default" for the style, the
 // value itself for anything else.
 func ParseValue(key, s string) string {
+	if key == KeyWallpaperFit && strings.EqualFold(s, "tiled") {
+		return FitTiled
+	}
 	if key == KeyColorScheme {
 		for _, v := range Choices(key) {
 			if strings.EqualFold(s, ValueName(key, v)) {
@@ -173,11 +230,18 @@ func DetectDesktop(current string, r run.Runner) Desktop {
 type GNOME struct {
 	Runner run.Runner
 
-	once sync.Once
-	keys map[string]bool // the keys of gnomeSchema, or nil when gsettings couldn't list them
+	mu   sync.Mutex
+	keys map[string]map[string]bool // the keys of each schema asked about, nil when gsettings couldn't list them
 }
 
-const gnomeSchema = "org.gnome.desktop.interface"
+const (
+	gnomeSchema      = "org.gnome.desktop.interface"
+	gnomeBackground  = "org.gnome.desktop.background"
+	gnomeScreensaver = "org.gnome.desktop.screensaver" // the lock screen
+	gnomePictureURI  = "picture-uri"
+	gnomePictureDark = "picture-uri-dark"
+	gnomePictureFit  = "picture-options"
+)
 
 // gnomeKeys are the settings uas changes, by key. Newer ones are only there from a GNOME release on, and
 // are checked for: color-scheme from GNOME 42, accent-color from GNOME 47.
@@ -192,6 +256,9 @@ var gnomeKeys = map[string]struct {
 	KeyMonospaceFont: {gnomeSchema, "monospace-font-name", false},
 	KeyColorScheme:   {gnomeSchema, "color-scheme", true},
 	KeyAccentColor:   {gnomeSchema, "accent-color", true},
+	KeyWallpaper:     {gnomeBackground, gnomePictureURI, false},
+	KeyWallpaperDark: {gnomeBackground, gnomePictureDark, true},
+	KeyWallpaperFit:  {gnomeBackground, gnomePictureFit, false},
 }
 
 func (*GNOME) Name() string { return "gnome" }
@@ -204,20 +271,25 @@ func (g *GNOME) Supports(key string) bool {
 	if !k.newer {
 		return true
 	}
-	g.once.Do(func() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	keys, asked := g.keys[k.schema]
+	if !asked {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		out, err := g.Runner.Run(ctx, "gsettings", []string{"list-keys", gnomeSchema}, nil)
-		if err != nil {
-			return
+		if out, err := g.Runner.Run(ctx, "gsettings", []string{"list-keys", k.schema}, nil); err == nil {
+			keys = map[string]bool{}
+			for _, l := range strings.Fields(out) {
+				keys[l] = true
+			}
 		}
-		g.keys = map[string]bool{}
-		for _, l := range strings.Fields(out) {
-			g.keys[l] = true
+		if g.keys == nil {
+			g.keys = map[string]map[string]bool{}
 		}
-	})
+		g.keys[k.schema] = keys
+	}
 	// When gsettings can't say, the setting is tried, and fails as a change of it would anyway.
-	return g.keys == nil || g.keys[k.key]
+	return keys == nil || keys[k.key]
 }
 
 func (g *GNOME) Get(ctx context.Context, key string) (string, error) {
@@ -229,7 +301,11 @@ func (g *GNOME) Get(ctx context.Context, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return parseGVariantString(strings.TrimSpace(out)), nil
+	v := parseGVariantString(strings.TrimSpace(out))
+	if key == KeyWallpaper || key == KeyWallpaperDark {
+		v = URIPath(v)
+	}
+	return v, nil
 }
 
 func (g *GNOME) Set(ctx context.Context, key, value string) error {
@@ -237,8 +313,18 @@ func (g *GNOME) Set(ctx context.Context, key, value string) error {
 		return ErrUnsupported
 	}
 	k := gnomeKeys[key]
-	_, err := g.Runner.Run(ctx, "gsettings", []string{"set", k.schema, k.key, quoteGVariant(value)}, nil)
-	return err
+	if key == KeyWallpaper || key == KeyWallpaperDark {
+		value = PathURI(value)
+	}
+	if _, err := g.Runner.Run(ctx, "gsettings", []string{"set", k.schema, k.key, quoteGVariant(value)}, nil); err != nil {
+		return err
+	}
+	if key == KeyWallpaper {
+		// The lock screen shows the wallpaper too, as when it is changed in GNOME's settings. A system
+		// without the lock screen's schema still has its wallpaper changed.
+		_, _ = g.Runner.Run(ctx, "gsettings", []string{"set", gnomeScreensaver, gnomePictureURI, quoteGVariant(value)}, nil)
+	}
+	return nil
 }
 
 func (g *GNOME) Reset(ctx context.Context, key string) error {
@@ -246,8 +332,48 @@ func (g *GNOME) Reset(ctx context.Context, key string) error {
 		return ErrUnsupported
 	}
 	k := gnomeKeys[key]
-	_, err := g.Runner.Run(ctx, "gsettings", []string{"reset", k.schema, k.key}, nil)
-	return err
+	if _, err := g.Runner.Run(ctx, "gsettings", []string{"reset", k.schema, k.key}, nil); err != nil {
+		return err
+	}
+	if key == KeyWallpaper {
+		_, _ = g.Runner.Run(ctx, "gsettings", []string{"reset", gnomeScreensaver, gnomePictureURI}, nil)
+	}
+	return nil
+}
+
+// PathURI is a picture's path as the file:// URI the desktop's settings take, with everything but the
+// characters a URI's path may have escaped: spaces, "#", "%", "?" and every byte of a non-ASCII letter.
+// A value that isn't an absolute path (a URI already, or "") is as it is.
+func PathURI(p string) string {
+	if !strings.HasPrefix(p, "/") {
+		return p
+	}
+	const keep = "-._~!$&'()*+,;=:@/"
+	var b strings.Builder
+	b.WriteString("file://")
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if c < 0x80 && ('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
+			strings.IndexByte(keep, c) >= 0) {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
+}
+
+// URIPath is the path of a file:// URI, unescaped. Any other value (another kind of URI, or "") is as it
+// is.
+func URIPath(uri string) string {
+	if !strings.HasPrefix(uri, "file://") {
+		return uri
+	}
+	u, err := url.Parse(uri)
+	if err != nil || (u.Host != "" && u.Host != "localhost") || !strings.HasPrefix(u.Path, "/") {
+		return uri
+	}
+	return u.Path
 }
 
 // parseGVariantString reads a GVariant string as gsettings prints it: 'Adwaita', or "it's" when it holds a

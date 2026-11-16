@@ -59,6 +59,9 @@ type Installer struct {
 	Limits   looks.Limits
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Presets are the user's presets, whose wallpapers PruneWallpapers keeps; nil keeps every stored
+	// wallpaper.
+	Presets *Presets
 
 	mu sync.Mutex // one change to the state file at a time
 }
@@ -805,18 +808,50 @@ func (in *Installer) Use(ctx context.Context, key, value string) error {
 	return nil
 }
 
-// Revert puts a setting back to what it was before uas first changed it.
+// Revert puts a setting back to what it was before uas first changed it. Any of WallpaperKeys puts back the
+// whole wallpaper: each of its settings uas changed, or when it changed none, all of them to the desktop's
+// defaults.
 func (in *Installer) Revert(ctx context.Context, key string) error {
 	in.mu.Lock()
-	defer in.mu.Unlock()
 	st, err := in.State.Load()
 	if err != nil {
+		in.mu.Unlock()
 		return err
 	}
-	if err := in.revertLocked(ctx, &st, key); err != nil {
-		return err
+	if IsWallpaperKey(key) {
+		err = in.revertWallpaperLocked(ctx, &st)
+	} else {
+		err = in.revertLocked(ctx, &st, key)
 	}
-	return in.State.Save(st)
+	if err == nil {
+		err = in.State.Save(st)
+	}
+	in.mu.Unlock()
+	if err == nil && IsWallpaperKey(key) {
+		in.PruneWallpapers(ctx)
+	}
+	return err
+}
+
+// revertWallpaperLocked puts back the wallpaper's settings uas changed, or all of them when it changed none.
+func (in *Installer) revertWallpaperLocked(ctx context.Context, st *state.State) error {
+	if in.Desktop == nil {
+		return ErrUnsupported
+	}
+	keys := slices.DeleteFunc(slices.Clone(WallpaperKeys), func(k string) bool {
+		_, ok := st.FindSaved(in.Desktop.Name(), k)
+		return !ok
+	})
+	if len(keys) == 0 {
+		keys = slices.DeleteFunc(slices.Clone(WallpaperKeys), func(k string) bool { return !in.Desktop.Supports(k) })
+	}
+	var errs []error
+	for _, k := range keys {
+		if err := in.revertLocked(ctx, st, k); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(k)), err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (in *Installer) revertLocked(ctx context.Context, st *state.State, key string) error {
@@ -844,9 +879,9 @@ func (in *Installer) RevertAll(ctx context.Context) error {
 		return ErrUnsupported
 	}
 	in.mu.Lock()
-	defer in.mu.Unlock()
 	st, err := in.State.Load()
 	if err != nil {
+		in.mu.Unlock()
 		return err
 	}
 	var errs []error
@@ -861,6 +896,8 @@ func (in *Installer) RevertAll(ctx context.Context) error {
 	if err := in.State.Save(st); err != nil {
 		errs = append(errs, err)
 	}
+	in.mu.Unlock()
+	in.PruneWallpapers(ctx)
 	return errors.Join(errs...)
 }
 
@@ -876,6 +913,9 @@ func (in *Installer) Current(ctx context.Context) map[string]string {
 		}
 		if v, err := in.Desktop.Get(ctx, key); err == nil {
 			out[key] = v
+			if key == KeyWallpaper || key == KeyWallpaperDark {
+				pictureHash(v) // so InUse, which may run on a UI's thread, finds it hashed
+			}
 		}
 	}
 	return out

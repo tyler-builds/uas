@@ -141,8 +141,8 @@ func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element
 			filterChip(ctx, installed, tab == lookInstalled, func() { a.lookTab.Set(lookInstalled) }))
 		controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).Shrink(0).Child(chips)
 		if tab == lookPresets {
-			sub = "Your looks, saved under a name: icons, cursor, fonts, light or dark style and accent " +
-				"color, applied in one step."
+			sub = "Your looks, saved under a name: icons, cursor, fonts, light or dark style, accent color " +
+				"and wallpaper, applied in one step."
 			page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, a.presetHeaderButtons(ctx)))
 			return scroll(page.Child(controls).Children(a.presetsTab(ctx, q)...))
 		}
@@ -461,11 +461,20 @@ func (a *App) lookInstalledSections(ctx *ui.Context, lk ui.QueryResult[looks], q
 	var out []ui.Element
 	if len(d.saved) > 0 {
 		var rows []ui.Element
+		wallpaper := false
 		for _, s := range d.saved {
+			if appearance.IsWallpaperKey(s.Key) {
+				// The wallpaper's settings are one row, reverted together.
+				if !wallpaper {
+					rows = append(rows, a.savedWallpaperSetting(ctx, d))
+				}
+				wallpaper = true
+				continue
+			}
 			rows = append(rows, a.savedRow(ctx, s, d.current[s.Key]))
 		}
 		var all []ui.Element
-		if len(d.saved) > 1 {
+		if len(rows) > 1 {
 			_, busy := a.running("revert:all")
 			all = append(all, ui.Button("Revert all").Icon(icons.Undo2).Ghost().Small().Loading(busy).
 				Tooltip("Put every setting back to what it was before uas").OnClick(func() { a.revertAllLooks(ctx) }))
