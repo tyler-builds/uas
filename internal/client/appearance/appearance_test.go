@@ -50,6 +50,8 @@ type fakeGSettings struct {
 	keys []string
 	// fail makes a set of a key fail.
 	fail map[string]bool
+	// fonts is what fc-list answers; "" makes it fail.
+	fonts string
 }
 
 func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ func(string)) (string, error) {
@@ -58,6 +60,12 @@ func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ fun
 	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
 	if name == "fc-cache" {
 		return "", nil
+	}
+	if name == "fc-list" {
+		if f.fonts == "" {
+			return "", fmt.Errorf("no fontconfig")
+		}
+		return f.fonts, nil
 	}
 	if name == "gsettings" && len(args) == 2 && args[0] == "list-keys" && args[1] == gnomeSchema {
 		if f.keys == nil {

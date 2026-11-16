@@ -770,6 +770,7 @@ func (in *Installer) Use(ctx context.Context, key, value string) error {
 		value = FontValue(cur, value)
 	}
 	saved, ok := st.FindSaved(in.Desktop.Name(), key)
+	old := saved
 	if !ok {
 		saved = state.SavedSetting{Desktop: in.Desktop.Name(), Key: key, Previous: cur}
 	}
@@ -789,7 +790,19 @@ func (in *Installer) Use(ctx context.Context, key, value string) error {
 	if value == cur {
 		return nil
 	}
-	return in.Desktop.Set(ctx, key, value)
+	if err := in.Desktop.Set(ctx, key, value); err != nil {
+		// Nothing changed, so what was saved before stays as it was.
+		if ok {
+			st.PutSaved(old)
+		} else {
+			st.DeleteSaved(in.Desktop.Name(), key)
+		}
+		if serr := in.State.Save(st); serr != nil {
+			return errors.Join(err, serr)
+		}
+		return err
+	}
+	return nil
 }
 
 // Revert puts a setting back to what it was before uas first changed it.

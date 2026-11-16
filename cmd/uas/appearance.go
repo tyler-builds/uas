@@ -37,6 +37,8 @@ commands:
   themes                        the icon and cursor themes on this system
   updates                       fonts and themes uas installed that have a newer version
   update <id>                   install one's newer version
+  presets                       your presets: looks saved under a name (see "uas appearance preset")
+  preset <command>              save, apply and manage presets
 `
 
 // settingKeys are the names "use" and "revert" take for each setting, which are also the names of a
@@ -58,6 +60,9 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 	cmd := "list"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
+	}
+	if cmd == "presets" || cmd == "preset" {
+		return runPreset(ctx, w, cmd, args)
 	}
 	fs := flag.NewFlagSet("appearance "+cmd, flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(fs.Output(), appearanceUsage) }
