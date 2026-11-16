@@ -13,7 +13,8 @@ import (
 )
 
 // Capture reads the desktop's settings as preset parts: every setting the desktop supports, with where to
-// install it from when uas installed it.
+// install it from when uas installed it, and the wallpaper, whose picture is copied into the store when it
+// is the user's own (see WallpaperRef).
 func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 	if in.Desktop == nil {
 		return nil, ErrUnsupported
@@ -25,7 +26,7 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 	parts := map[string]Part{}
 	var errs []error
 	for _, key := range SettingKeys {
-		if !in.Desktop.Supports(key) {
+		if IsWallpaperKey(key) || !in.Desktop.Supports(key) {
 			continue
 		}
 		v, err := in.Desktop.Get(ctx, key)
@@ -37,6 +38,11 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 			continue
 		}
 		parts[KeyPart(key)] = Part{Value: v, From: OriginOf(recs, key, v)}
+	}
+	if w, ok, err := in.captureWallpaper(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("wallpaper: %w", err))
+	} else if ok {
+		parts[PartWallpaper] = w
 	}
 	if len(parts) == 0 {
 		return nil, errors.Join(append(errs, errors.New("couldn't read any of the desktop's settings"))...)
@@ -123,6 +129,8 @@ type PlanItem struct {
 	// Listing and Variant are what is installed, for StepInstall.
 	Listing catalog.Listing
 	Variant string
+	// Wallpaper is what the wallpaper is set to, by path, for the wallpaper part; Value is its picture.
+	Wallpaper Wallpaper
 	// Note explains a skipped part, or for StepInstall where it comes from.
 	Note string
 }
@@ -168,6 +176,10 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 			continue
 		}
 		it.Key = key
+		if name == PartWallpaper {
+			items = append(items, in.planWallpaper(ctx, it, part))
+			continue
+		}
 		if err := CheckValue(key, part.Value); err != nil {
 			it.Step, it.Note = StepMissing, err.Error()
 			items = append(items, it)
@@ -225,6 +237,41 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 		items = append(items, it)
 	}
 	return items, nil
+}
+
+// planWallpaper decides what applying does with a wallpaper part: it is skipped when a picture can't be
+// found.
+func (in *Installer) planWallpaper(ctx context.Context, it PlanItem, part Part) PlanItem {
+	it.Value = part.Light
+	switch {
+	case part.Light == "":
+		it.Step, it.Note = StepMissing, "it has no picture"
+		return it
+	case part.Fit != "" && !slices.Contains(WallpaperFits, part.Fit):
+		it.Step, it.Note = StepMissing, fmt.Sprintf("%q isn't a fit uas knows", part.Fit)
+		return it
+	}
+	w, missing := in.PartWallpaper(part)
+	if missing != "" {
+		it.Value = missing
+		it.Step, it.Note = StepMissing, "the picture can't be found"
+		if missing != part.Light {
+			it.Note = "the dark picture can't be found"
+		}
+		return it
+	}
+	it.Value, it.Wallpaper, it.Step = w.Light, w, StepSet
+	if cur, err := in.CurrentWallpaper(ctx); err == nil && sameWallpaper(cur, w) {
+		it.Step = StepSame
+	}
+	return it
+}
+
+// sameWallpaper reports whether the desktop's wallpaper is w, by path, leaving out what the desktop doesn't
+// have.
+func sameWallpaper(cur, w Wallpaper) bool {
+	return cur.Light == w.Light && (cur.Dark == "" || cur.Dark == w.DarkOrLight()) &&
+		(cur.Fit == "" || cur.Fit == w.Fit)
 }
 
 // sameValue reports whether a setting's value is a part's: for a font given without a size, the same
@@ -365,6 +412,16 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		if o.Err != nil || (o.Step != StepSet && o.Step != StepInstall) {
 			continue
 		}
+		if o.Part == PartWallpaper {
+			cur, err := in.CurrentWallpaper(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("reading the wallpaper: %w", err)
+			}
+			if cur.Light != "" {
+				prev.Parts[o.Part] = in.snapshotPart(cur)
+			}
+			continue
+		}
 		cur, err := in.Desktop.Get(ctx, o.Key)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", strings.ToLower(KeyLabel(o.Key)), err)
@@ -386,6 +443,14 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			continue
 		}
 		progress(backend.Progress{Message: "Setting " + strings.ToLower(KeyLabel(o.Key)) + "…"})
+		if o.Part == PartWallpaper {
+			if err := in.setWallpaper(ctx, o.Wallpaper); err != nil {
+				out[i].Err = err
+				continue
+			}
+			out[i].Done = true
+			continue
+		}
 		if err := in.Use(ctx, o.Key, o.Value); err != nil {
 			out[i].Err = err
 			continue
@@ -444,10 +509,40 @@ func InUse(p Preset, current map[string]string) bool {
 		if !ok {
 			continue
 		}
+		if name == PartWallpaper {
+			if !wallpaperInUse(part, current) {
+				return false
+			}
+			n++
+			continue
+		}
 		if !sameValue(key, cur, part.Value) {
 			return false
 		}
 		n++
 	}
 	return n > 0
+}
+
+// wallpaperInUse reports whether the desktop's wallpaper settings (as Current returns them) are a wallpaper
+// part's.
+func wallpaperInUse(part Part, current map[string]string) bool {
+	if !sameRef(current[KeyWallpaper], part.Light) {
+		return false
+	}
+	if dark, ok := current[KeyWallpaperDark]; ok && dark != "" {
+		want := part.Dark
+		if want == "" {
+			want = part.Light
+		}
+		if !sameRef(dark, want) {
+			return false
+		}
+	}
+	fit := part.Fit
+	if fit == "" {
+		fit = FitZoom
+	}
+	cur, ok := current[KeyWallpaperFit]
+	return !ok || cur == "" || cur == fit
 }

@@ -139,6 +139,10 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 		s.Looks = looks
 		if cfg, err := os.UserConfigDir(); err == nil {
 			s.Presets = appearance.NewPresets(cfg, looks.Data)
+			// Stored wallpapers go once nothing uses them: after a preset changes, and after the desktop's
+			// wallpaper does (the installer does that itself).
+			looks.Presets = s.Presets
+			s.Presets.Changed = func() { looks.PruneWallpapers(context.Background()) }
 		}
 		// Flatpak apps see the user's fonts only if the folder is there when they start.
 		_ = looks.EnsureFontsDir()
