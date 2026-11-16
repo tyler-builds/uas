@@ -164,7 +164,7 @@ func newWorld(t *testing.T) *world {
 	w.sysIcons = filepath.Join(root, "usr", "share")
 	os.MkdirAll(filepath.Join(w.sysIcons, "icons", "Adwaita", "cursors"), 0o755)
 	w.in = &Installer{Data: filepath.Join(root, "data"), Home: filepath.Join(root, "home"),
-		SystemData: []string{w.sysIcons}, Cache: filepath.Join(root, "cache"),
+		SystemData: []string{w.sysIcons}, Cache: filepath.Join(root, "cache"), Config: filepath.Join(root, "config"),
 		State:  state.Store{Path: filepath.Join(root, "data", "uas", "state.json")},
 		Client: &http.Client{Transport: w.transp}, Runner: w.gs, Desktop: &GNOME{Runner: w.gs},
 		PlingAPI: "https://api.opendesktop.org/ocs/v1", Limits: looks.DefaultLimits}
@@ -616,7 +616,7 @@ func TestNewSettings(t *testing.T) {
 			t.Errorf("GNOME doesn't support %s", key)
 		}
 	}
-	if g.Supports("gtk-theme") || g.Supports("nonsense") {
+	if g.Supports("shell-theme") || g.Supports("nonsense") {
 		t.Error("GNOME supports a setting uas doesn't change yet")
 	}
 	if err := g.Set(ctx, KeyColorScheme, SchemeDark); err != nil {

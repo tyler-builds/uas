@@ -223,7 +223,7 @@ func TestPlanApplyUndo(t *testing.T) {
 		PartScheme:    {Value: SchemeDark},        // set
 		PartDocument:  {Value: "Adwaita Sans 12"}, // already so
 		PartInterface: {Value: "Inter"},           // a family alone: set, keeping the size
-		PartGTK:       {Value: "Nordic"},          // a later uas's
+		PartShell:     {Value: "Nordic"},          // a later uas's
 	}}
 	lookup := func(id string) (catalog.Listing, bool) { return l, id == "pling:1166289" }
 	plan, err := w.in.PlanPreset(ctx, p, lookup)
@@ -234,7 +234,7 @@ func TestPlanApplyUndo(t *testing.T) {
 	for _, it := range plan {
 		steps = append(steps, it.Part+":"+string(it.Step))
 	}
-	wantSteps := []string{"scheme:set", "accent:set", "gtk:unknown", "icons:install", "cursor:missing",
+	wantSteps := []string{"scheme:set", "accent:set", "shell:unknown", "icons:install", "cursor:missing",
 		"interface:set", "document:same", "monospace:set"}
 	if !slices.Equal(steps, wantSteps) {
 		t.Errorf("plan = %v\nwant %v", steps, wantSteps)

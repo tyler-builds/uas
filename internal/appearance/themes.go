@@ -13,7 +13,7 @@ import (
 	"github.com/tyler-builds/uas/internal/catalog"
 )
 
-// Theme is one icon or cursor theme found in an archive.
+// Theme is one icon, cursor or GTK theme found in an archive.
 type Theme struct {
 	// Name is the theme's folder name, which is its name on the system: what GNOME's icon-theme setting
 	// holds ("Papirus-Dark").
@@ -28,18 +28,30 @@ type Theme struct {
 	Cursors bool `json:"cursors,omitempty"`
 	// Inherits are the themes its index.theme falls back on.
 	Inherits []string `json:"inherits,omitempty"`
+	// GTK is true for a GTK theme: a gtk-3.0 or gtk-4.0 folder with a gtk.css or gtk-dark.css in it. What
+	// else the folder holds (gnome-shell, gtk-2.0, xfwm4, cinnamon and the like) is part of the theme and
+	// is written with it, but uas uses only the GTK theme.
+	GTK bool `json:"gtk,omitempty"`
 }
 
-// Is reports whether the theme is of kind: an icon theme (KindIconTheme) or a cursor theme
-// (KindCursorTheme).
+// Is reports whether the theme is of kind: an icon theme (KindIconTheme), a cursor theme (KindCursorTheme)
+// or a GTK theme (KindGTKTheme).
 func (t Theme) Is(kind catalog.Kind) bool {
 	switch kind {
 	case catalog.KindIconTheme:
 		return t.Icons
 	case catalog.KindCursorTheme:
 		return t.Cursors
+	case catalog.KindGTKTheme:
+		return t.GTK
 	}
 	return false
+}
+
+// SameFolders reports whether two kinds of theme are installed into the same folder, and so share their
+// names: icon and cursor themes go to the icons folder, GTK themes to the themes folder.
+func SameFolders(a, b catalog.Kind) bool {
+	return (a == catalog.KindGTKTheme) == (b == catalog.KindGTKTheme)
 }
 
 // Contents is what Inspect found in an archive.
@@ -71,8 +83,8 @@ func (c *Contents) Of(kind catalog.Kind) []Theme {
 	return out
 }
 
-// ThemeName is what a theme's folder may be called: it becomes a folder in ~/.local/share/icons and a value
-// of the desktop's settings.
+// ThemeName is what a theme's folder may be called: it becomes a folder in ~/.local/share/icons (or themes)
+// and a value of the desktop's settings.
 var ThemeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._+@,()-]{0,127}$`)
 
 // reservedThemes are theme names that mean something to every desktop: "default" picks the cursor theme
@@ -80,13 +92,22 @@ var ThemeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._+@,()-]{0,127}$`)
 // user's folder would take over.
 var reservedThemes = map[string]bool{"default": true, "hicolor": true, "locolor": true}
 
-// Inspect reads the archive at p, checks every entry (see the package comment), and finds the icon and cursor
-// themes in it.
+// reservedGTKThemes are the GTK themes built into GTK itself, which GTK loads from its own resources
+// whatever a folder of that name holds, and "Default", which GTK 2 falls back on. A GTK theme of one of
+// these names would install and never show, or confuse which is which.
+var reservedGTKThemes = map[string]bool{"default": true, "adwaita": true, "adwaita-dark": true,
+	"highcontrast": true, "highcontrastinverse": true, "emacs": true}
+
+// Inspect reads the archive at p, checks every entry (see the package comment), and finds the icon, cursor
+// and GTK themes in it.
 //
 // A theme is a folder with an index.theme whose [Icon Theme] section lists icon folders (an icon theme), or
-// with a cursors folder (a cursor theme), or both. Inspect refuses an archive in which no theme can be found
-// or the themes can't be told apart cleanly: one inside another, two of the same name, a theme with no
-// folder of its own, or a name no desktop would take.
+// with a cursors folder (a cursor theme), or both; or a folder with a gtk-3.0 or gtk-4.0 folder that has a
+// gtk.css or gtk-dark.css (a GTK theme). Inspect refuses an archive in which no theme can be found or the
+// themes can't be told apart cleanly: one inside another, two of the same name, a theme with no folder of
+// its own, or a name no desktop would take. Icon and cursor themes are judged apart from GTK themes, as they
+// install to other folders: a GTK theme that holds an icon theme is no theme inside another, and an archive
+// whose icon or cursor themes are clean keeps them when its GTK themes aren't (they are left out of it).
 func Inspect(p string, lim Limits) (*Contents, error) {
 	c := &Contents{LeftOut: map[string]string{}, index: map[string]entry{}, dirs: map[string]bool{}}
 	indexFiles := map[string][]byte{} // the index.theme files, by folder
@@ -217,32 +238,110 @@ func (c *Contents) findThemes(indexFiles map[string][]byte) error {
 			delete(candidates, dir)
 		}
 	}
-	if len(candidates) == 0 {
-		return refuse("it holds no icon or cursor theme: no folder has an index.theme for icons or a cursors folder")
+	gtk := c.gtkThemes()
+	if len(candidates) == 0 && len(gtk) == 0 {
+		return refuse("it holds no theme: no folder has an index.theme for icons, a cursors folder, or a " +
+			"gtk-3.0 or gtk-4.0 folder with a gtk.css")
 	}
+	// Icon and cursor themes first, judged as they were before GTK themes: an archive refused for them stays
+	// refused, and one that was taken stays taken.
+	themes, err := cleanThemes(candidates, reservedThemes)
+	if len(candidates) > 0 && err != nil {
+		return err
+	}
+	gtkThemes, gtkErr := cleanThemes(gtk, reservedGTKThemes)
+	switch {
+	case gtkErr != nil && len(candidates) == 0:
+		return gtkErr
+	case gtkErr != nil:
+		gtkThemes = nil // the archive's icon or cursor themes are clean: they stand alone
+	}
+	byDir := map[string]int{}
+	for _, t := range themes {
+		byDir[t.Path] = len(c.Themes)
+		c.Themes = append(c.Themes, t)
+	}
+	for _, t := range gtkThemes {
+		if i, ok := byDir[t.Path]; ok {
+			c.Themes[i].GTK = true // one folder that is both: it installs to each place for its kind
+			continue
+		}
+		c.Themes = append(c.Themes, t)
+	}
+	sort.Slice(c.Themes, func(i, j int) bool { return c.Themes[i].Name < c.Themes[j].Name })
+	return nil
+}
+
+// gtkThemes finds the archive's GTK themes: the folders with a gtk-3.0 or gtk-4.0 folder that has a gtk.css
+// or gtk-dark.css (a file, or a link to one) written. GTK 3 and 4 load a theme from exactly those files, so
+// a folder of style sources (gtk-3.0/*.scss, as in a theme's source code) is no theme.
+func (c *Contents) gtkThemes() map[string]*Theme {
+	out := map[string]*Theme{}
+	var gtkDirs []string
+	for d := range c.dirs {
+		gtkDirs = append(gtkDirs, d)
+	}
+	for name, e := range c.index {
+		if e.typ == typeSymlink || e.typ == typeHardlink {
+			gtkDirs = append(gtkDirs, name) // a gtk-4.0 that is a link to another variant's
+		}
+	}
+	for _, d := range gtkDirs {
+		if b := path.Base(d); b != "gtk-3.0" && b != "gtk-4.0" {
+			continue
+		}
+		parent := path.Dir(d)
+		if parent == "." {
+			parent = ""
+		}
+		if out[parent] != nil || !(c.writesFile(d+"/gtk.css") || c.writesFile(d+"/gtk-dark.css")) {
+			continue
+		}
+		out[parent] = &Theme{Name: path.Base(parent), Path: parent, GTK: true}
+	}
+	return out
+}
+
+// writesFile reports whether an archive path is a file that is written: a file, or a link (or a path
+// through a linked folder) that leads to one, and not left out.
+func (c *Contents) writesFile(name string) bool {
+	if _, skipped := c.Skipped[name]; skipped {
+		return false
+	}
+	target, err := c.resolve(name, 0)
+	if err != nil {
+		return false
+	}
+	e, ok := c.index[target]
+	return ok && e.typ == typeFile
+}
+
+// cleanThemes checks that themes of one kind can be told apart, and returns them; reserved are the names
+// they can't have.
+func cleanThemes(candidates map[string]*Theme, reserved map[string]bool) ([]Theme, error) {
+	var out []Theme
 	names := map[string]string{}
 	for dir, t := range candidates {
 		switch {
 		case dir == "" || dir == ".":
-			return refuse("its theme is at the top of the archive, with no folder to name it")
+			return nil, refuse("its theme is at the top of the archive, with no folder to name it")
 		case !ThemeName.MatchString(t.Name):
-			return refuse("its theme folder %q has a name uas won't use", t.Name)
-		case reservedThemes[strings.ToLower(t.Name)]:
-			return refuse("its theme is called %q, which would take over the desktop's own %s", t.Name, t.Name)
+			return nil, refuse("its theme folder %q has a name uas won't use", t.Name)
+		case reserved[strings.ToLower(t.Name)]:
+			return nil, refuse("its theme is called %q, which would take over the desktop's own %s", t.Name, t.Name)
 		}
 		if other, ok := names[strings.ToLower(t.Name)]; ok {
-			return refuse("two of its themes are called %q (%s and %s)", t.Name, other, dir)
+			return nil, refuse("two of its themes are called %q (%s and %s)", t.Name, other, dir)
 		}
 		names[strings.ToLower(t.Name)] = dir
 		for other := range candidates {
 			if other != dir && strings.HasPrefix(other, dir+"/") {
-				return refuse("its theme %q has another theme inside it (%s)", t.Name, other)
+				return nil, refuse("its theme %q has another theme inside it (%s)", t.Name, other)
 			}
 		}
-		c.Themes = append(c.Themes, *t)
+		out = append(out, *t)
 	}
-	sort.Slice(c.Themes, func(i, j int) bool { return c.Themes[i].Name < c.Themes[j].Name })
-	return nil
+	return out, nil
 }
 
 // hasFiles reports whether a folder has a file or link in it that is written: a cursors folder of links

@@ -63,6 +63,14 @@ func cursors(name string) map[string]string {
 		name + "/cursors/default": "Xcur", name + "/cursors/left_ptr": "->default"}
 }
 
+// gtk is a GTK theme as Pling's are: GTK 3 and 4 styles, with a GNOME Shell style and a metatheme
+// index.theme beside them, which come along but aren't what makes it a GTK theme.
+func gtk(name string) map[string]string {
+	return map[string]string{name + "/index.theme": "[Desktop Entry]\nType=X-GNOME-Metatheme\nName=" + name + "\n",
+		name + "/gtk-3.0/gtk.css": "@import 'gtk-main.css';", name + "/gtk-3.0/gtk-main.css": "window {}",
+		name + "/gtk-4.0/gtk.css": "window {}", name + "/gnome-shell/gnome-shell.css": "stage {}"}
+}
+
 func merge(ms ...map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, m := range ms {
@@ -94,10 +102,20 @@ func newServer(t *testing.T) *plingServer {
 		"1411743/1": tgz(t, cursors("WhiteSur-cursors")),
 		"1197198/2": tgz(t, map[string]string{"Bibata/Install.inf": "[Windows]"}),
 		"1197198/3": tgz(t, cursors("Bibata-Modern-Ice")),
+		// Orchis's shape: variants side by side, one's gtk-4.0 a link to another's.
+		"1357889/1": tgz(t, merge(gtk("Orchis-Green"), map[string]string{
+			"Orchis-Green-Dark/gtk-3.0/gtk.css": "window {}", "Orchis-Green-Dark/gtk-4.0": "->../Orchis-Green/gtk-4.0"})),
+		// A theme's source code: styles to build, no gtk.css, and the install script, which is left out.
+		"1357889/2": tgz(t, map[string]string{"Orchis-src/src/gtk-3.0/_common.scss": "window {}",
+			"Orchis-src/install.sh": "#!/bin/sh\n"}),
+		"1687249/1": tgz(t, merge(gtk("Dracula"), map[string]string{"Dracula/assets/sed.sh": "#!/bin/sh\n"})),
+		// A GNOME Shell style alone is no GTK theme.
+		"1687249/2": tgz(t, map[string]string{"Dracula-shell/gnome-shell/gnome-shell.css": "stage {}"}),
 	}
 	s := &plingServer{}
 	lists := map[string][]byte{}
-	for cat, file := range map[string]string{"132": "testdata/icons.json", "107": "testdata/cursors.json"} {
+	for cat, file := range map[string]string{"132": "testdata/icons.json", "107": "testdata/cursors.json",
+		"135": "testdata/gtk.json"} {
 		raw, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
@@ -172,7 +190,7 @@ func TestFetch(t *testing.T) {
 	for _, l := range ls {
 		byRef[l.Ref] = l
 	}
-	if len(ls) != 4 {
+	if len(ls) != 6 {
 		t.Fatalf("listings = %d", len(ls))
 	}
 	papirus := byRef["1166289"]
@@ -229,8 +247,29 @@ func TestFetch(t *testing.T) {
 	if byRef["1411743"].Kind != catalog.KindCursorTheme {
 		t.Errorf("WhiteSur = %+v", byRef["1411743"])
 	}
+	// GTK themes: every variant of a file, the GNOME Shell style and metatheme beside them included in the
+	// folder; a theme's source code and a Shell style alone are left out.
+	orchis := byRef["1357889"]
+	if orchis.Kind != catalog.KindGTKTheme || len(orchis.Assets) != 1 ||
+		!slices.Equal(orchis.Assets[0].Themes, []string{"Orchis-Green", "Orchis-Green-Dark"}) ||
+		orchis.License != "GPL-3.0-only" {
+		t.Errorf("Orchis = %+v", orchis)
+	}
+	dracula := byRef["1687249"]
+	if dracula.Kind != catalog.KindGTKTheme || len(dracula.Assets) != 1 || dracula.Assets[0].LeftOut != 1 ||
+		!slices.Equal(dracula.Assets[0].Themes, []string{"Dracula"}) {
+		t.Errorf("Dracula = %+v", dracula)
+	}
+	for _, want := range []string{
+		`msg="pling file refused" item=1357889 name="Orchis gtk theme" kind=gtk-theme file=Orchis-Grey.tar.xz why="it holds no theme`,
+		`msg="pling file refused" item=1687249 name=Dracula kind=gtk-theme file=Dracula-legacy-shell.tar.xz why="it holds no theme`,
+	} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("log lacks %s:\n%s", want, logged.String())
+		}
+	}
 	// Every archive once; Bibata's link to a web page never.
-	if srv.downloads != 7 {
+	if srv.downloads != 11 {
 		t.Errorf("downloads = %d", srv.downloads)
 	}
 	first := srv.downloads
@@ -238,7 +277,7 @@ func TestFetch(t *testing.T) {
 	// A second run reads nothing again.
 	f2 := &Fetcher{Client: srv.Client(), API: srv.URL, CacheDir: cache, Every: time.Millisecond}
 	ls2, err := f2.Fetch(context.Background())
-	if err != nil || len(ls2) != 4 || srv.downloads != first {
+	if err != nil || len(ls2) != 6 || srv.downloads != first {
 		t.Errorf("second run: %d listings, %v, %d downloads (first %d)", len(ls2), err, srv.downloads, first)
 	}
 }
@@ -252,12 +291,12 @@ func TestFetchBudgetAndFloor(t *testing.T) {
 	if err != nil || len(ls) != 1 || ls[0].Ref != "1305251" {
 		t.Fatalf("Fetch = %v, %v", ls, err)
 	}
-	// A floor above Papirus and every cursor theme.
+	// A floor above Papirus, every cursor theme and Dracula.
 	f = &Fetcher{Client: srv.Client(), API: srv.URL, CacheDir: cache, Every: time.Millisecond,
-		MinDownloads: 3_000_000, MinCursorDownloads: 3_000_000}
+		MinDownloads: 3_000_000, MinCursorDownloads: 3_000_000, MinGTKDownloads: 500_000}
 	ls, err = f.Fetch(context.Background())
-	if err != nil || len(ls) != 1 || ls[0].Ref != "1305251" {
-		t.Errorf("with a floor: %v, %v", ls, err)
+	if got := refs(ls); err != nil || !slices.Equal(got, []string{"1305251", "1357889"}) {
+		t.Errorf("with a floor: %v, %v", got, err)
 	}
 }
 
@@ -282,24 +321,24 @@ func TestFetchBudgetShared(t *testing.T) {
 		t.Errorf("two files: %v, %v", got, err)
 	}
 
-	// 60 MiB: icon themes' half takes Candy (1.7 MiB) but not Papirus's first file (31 MiB, which would make
-	// 33); cursor themes take what is left of the budget, and use 12 MiB of it; what they leave goes to
-	// Papirus afterwards, whose first file fits and the second doesn't.
+	// 60 MiB: icon themes' third takes Candy (1.7 MiB) but not Papirus's first file (31 MiB, which would make
+	// 33); cursor themes take half of what is left, and use 12 MiB of it; GTK themes take the rest, and use
+	// about 1 MiB; what they leave goes to Papirus afterwards, whose first file fits and the second doesn't.
 	srv = newServer(t)
 	f = &Fetcher{Client: srv.Client(), API: srv.URL, CacheDir: t.TempDir(), Every: time.Millisecond,
 		PinBytes: 60 << 20}
 	ls, err = f.Fetch(context.Background())
-	if got := refs(ls); err != nil || !slices.Equal(got, []string{"1197198", "1305251", "1411743"}) ||
-		f.postponed != 1 || srv.downloads != 5 {
+	if got := refs(ls); err != nil || !slices.Equal(got, []string{"1197198", "1305251", "1357889", "1411743", "1687249"}) ||
+		f.postponed != 1 || srv.downloads != 9 {
 		t.Errorf("60 MiB: %v, %v; %d postponed, %d downloads", got, err, f.postponed, srv.downloads)
 	}
 
-	// Enough for all: what cursor themes leave lets Papirus finish in the same run, each file read once.
+	// Enough for all: what the others leave lets Papirus finish in the same run, each file read once.
 	srv = newServer(t)
 	f = &Fetcher{Client: srv.Client(), API: srv.URL, CacheDir: t.TempDir(), Every: time.Millisecond,
 		PinBytes: 100 << 20}
 	ls, err = f.Fetch(context.Background())
-	if got := refs(ls); err != nil || len(got) != 4 || f.postponed != 0 || srv.downloads != 7 {
+	if got := refs(ls); err != nil || len(got) != 6 || f.postponed != 0 || srv.downloads != 11 {
 		t.Errorf("100 MiB: %v, %v; %d postponed, %d downloads", got, err, f.postponed, srv.downloads)
 	}
 }
@@ -326,6 +365,9 @@ func TestReasonKind(t *testing.T) {
 		"it contains a library (a/libx.so)":                               "a program or script inside",
 		`its theme "L" has another theme inside it (L/dist)`:              "a theme inside another theme",
 		"no cursor theme inside":                                          "no theme of the item's kind inside",
+		"no GTK theme inside":                                             "no theme of the item's kind inside",
+		"it holds no theme: no folder has an index.theme for icons":       "no theme inside",
+		"it holds no icon or cursor theme: no folder has an index.theme":  "no theme inside",
 		"download: the file doesn't match Pling's MD5":                    "didn't match Pling's MD5",
 		"it is a 7-Zip archive, which uas doesn't open; it opens .tar.gz": "an archive format uas doesn't open",
 	} {

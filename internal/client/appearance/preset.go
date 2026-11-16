@@ -14,8 +14,8 @@ import (
 	"unicode/utf8"
 )
 
-// A preset is a look saved under a name: a theme for icons and cursors, fonts, the light or dark style, the
-// accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
+// A preset is a look saved under a name: a GTK theme, a theme for icons and cursors, fonts, the light or dark
+// style, the accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
 // the user's own, so they live with uas's settings, one JSON file each in ~/.config/uas/presets; the look
 // from before the last apply, for Undo, is uas's, and lives with its state.
 
@@ -23,7 +23,7 @@ import (
 const (
 	PartScheme    = "scheme"
 	PartAccent    = "accent"
-	PartGTK       = "gtk"   // a GTK theme, by name (a later version of uas)
+	PartGTK       = "gtk"   // a GTK theme, by name
 	PartShell     = "shell" // a GNOME Shell theme, by name (a later version of uas)
 	PartIcons     = "icons"
 	PartCursor    = "cursor"
@@ -44,6 +44,7 @@ var PartOrder = []string{PartScheme, PartAccent, PartGTK, PartShell, PartIcons, 
 var partKeys = map[string]string{
 	PartScheme:    KeyColorScheme,
 	PartAccent:    KeyAccentColor,
+	PartGTK:       KeyGTKTheme,
 	PartIcons:     KeyIconTheme,
 	PartCursor:    KeyCursorTheme,
 	PartInterface: KeyFont,
@@ -75,8 +76,6 @@ func PartLabel(part string) string {
 		return KeyLabel(k)
 	}
 	switch part {
-	case PartGTK:
-		return "GTK theme"
 	case PartShell:
 		return "Shell theme"
 	case PartWallpaper:
@@ -113,6 +112,10 @@ type Part struct {
 	Light string `json:"light,omitempty"`
 	Dark  string `json:"dark,omitempty"`
 	Fit   string `json:"fit,omitempty"`
+	// GTK4 is for a GTK theme part: false leaves the theme's files for GTK 4 apps out of ~/.config/gtk-4.0
+	// and puts back what uas moved aside there, as a Previous look does when uas had put none there before
+	// the apply. Missing (nil), the theme's GTK 4 files are copied in when it has them, as Use does.
+	GTK4 *bool `json:"gtk4,omitempty"`
 
 	// rest are the fields this version of uas doesn't know, kept as they are.
 	rest map[string]json.RawMessage
@@ -145,6 +148,12 @@ func (p *Part) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("from: %w", err)
 		}
 		delete(all, "from")
+	}
+	if v, ok := all["gtk4"]; ok {
+		if err := json.Unmarshal(v, &p.GTK4); err != nil {
+			return fmt.Errorf("gtk4: %w", err)
+		}
+		delete(all, "gtk4")
 	}
 	for name, dst := range map[string]*string{"light": &p.Light, "dark": &p.Dark, "fit": &p.Fit} {
 		if v, ok := all[name]; ok {
@@ -193,6 +202,11 @@ func (p Part) MarshalJSON() ([]byte, error) {
 			if err := field(f.name, f.v); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if p.GTK4 != nil {
+		if err := field("gtk4", *p.GTK4); err != nil {
+			return nil, err
 		}
 	}
 	names := make([]string, 0, len(p.rest))

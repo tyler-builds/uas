@@ -1,9 +1,10 @@
-// Package pling lists icon and cursor themes from the Pling store family (gnome-look.org, store.kde.org,
-// pling.com), through OpenDesktop's OCS API.
+// Package pling lists icon, cursor and GTK themes from the Pling store family (gnome-look.org,
+// store.kde.org, pling.com), through OpenDesktop's OCS API.
 //
 // The API lists a category's items most downloaded first, 100 a page, with each item's files. Only items with
 // at least MinDownloads are kept, a lower floor for cursor themes, which are downloaded less: in November
-// 2026, 10,000 downloads kept about 300 icon themes and 3,000 about 300 cursor themes. Each file is downloaded once, through the list's own download link, checked against the MD5 Pling
+// 2026, 10,000 downloads kept about 300 icon themes, 3,000 about 300 cursor themes, and 10,000 about 270
+// GTK themes. Each file is downloaded once, through the list's own download link, checked against the MD5 Pling
 // publishes, and read with internal/appearance: its SHA-256 and the themes inside are pinned in the catalog,
 // and a file uas wouldn't install (a program inside, no theme, a layout it can't tell apart) is left out, with
 // the item if none of its files is left. Scripts and the like inside a file are left out of it, not the file
@@ -54,13 +55,17 @@ type Category struct {
 	Kind catalog.Kind
 }
 
-// Categories are the categories indexed: full icon themes and X11 mouse themes.
-var Categories = []Category{{132, catalog.KindIconTheme}, {107, catalog.KindCursorTheme}}
+// Categories are the categories indexed: full icon themes, X11 mouse themes, and GTK3/4 themes (gnome-look's
+// "GTK3/4 Themes", whose items usually carry a gnome-shell, gtk-2.0, xfwm4 or cinnamon folder too). GTK 2
+// themes (136), GNOME Shell themes (134) and Cinnamon themes (133) are categories of their own, and not
+// indexed. GTK themes come last, so the run's budget reaches icon and cursor themes as before.
+var Categories = []Category{{132, catalog.KindIconTheme}, {107, catalog.KindCursorTheme}, {135, catalog.KindGTKTheme}}
 
 // Defaults.
 const (
 	DefaultMinDownloads       = 10_000
 	DefaultMinCursorDownloads = 3_000
+	DefaultMinGTKDownloads    = 10_000
 	DefaultMaxFiles           = 30
 	DefaultMaxFileBytes       = 200 << 20
 	// PinVersion changes when what is recorded per file changes, so files are read again.
@@ -76,10 +81,12 @@ type Fetcher struct {
 	API    string // API, or a test server
 	// CacheDir keeps what was found per file (pins/).
 	CacheDir string
-	// MinDownloads leaves out icon themes downloaded fewer times, and MinCursorDownloads cursor themes;
-	// DefaultMinDownloads and DefaultMinCursorDownloads when zero.
+	// MinDownloads leaves out icon themes downloaded fewer times, MinCursorDownloads cursor themes and
+	// MinGTKDownloads GTK themes; DefaultMinDownloads, DefaultMinCursorDownloads and DefaultMinGTKDownloads
+	// when zero.
 	MinDownloads       int
 	MinCursorDownloads int
+	MinGTKDownloads    int
 	// MaxItems caps the items read per category (0: no cap), for development.
 	MaxItems int
 	// MaxFiles caps the files read per item; DefaultMaxFiles when zero. Some items carry a file per color.
@@ -90,9 +97,9 @@ type Fetcher struct {
 	// downloaded is left out until a later run has read them all.
 	//
 	// Each category gets a fair share first, so that icon themes, which come first and are much larger, don't
-	// spend it all before any cursor theme is read: of what is left, a category may spend its part (half for
-	// icon themes, all that is left for cursor themes, the last). What the shares leave then goes to the items
-	// still waiting, in the same order.
+	// spend it all before any cursor or GTK theme is read: of what is left, a category may spend its part (a
+	// third for icon themes, half of what is left for cursor themes, all that is left for GTK themes, the
+	// last). What the shares leave then goes to the items still waiting, in the same order.
 	PinCount int
 	PinBytes int64
 	Every    time.Duration // the pause between requests; every when zero
@@ -232,8 +239,11 @@ type listPage struct {
 // list reads a category's items, most downloaded first, down to MinDownloads.
 func (f *Fetcher) list(ctx context.Context, cat Category) ([]item, error) {
 	api, minDL := f.API, f.MinDownloads
-	if cat.Kind == catalog.KindCursorTheme {
+	switch cat.Kind {
+	case catalog.KindCursorTheme:
 		minDL = f.MinCursorDownloads
+	case catalog.KindGTKTheme:
+		minDL = f.MinGTKDownloads
 	}
 	if api == "" {
 		api = API
@@ -242,6 +252,8 @@ func (f *Fetcher) list(ctx context.Context, cat Category) ([]item, error) {
 	case minDL > 0:
 	case cat.Kind == catalog.KindCursorTheme:
 		minDL = DefaultMinCursorDownloads
+	case cat.Kind == catalog.KindGTKTheme:
+		minDL = DefaultMinGTKDownloads
 	default:
 		minDL = DefaultMinDownloads
 	}
@@ -465,8 +477,11 @@ func (f *Fetcher) listing(ctx context.Context, it item, kind catalog.Kind) (cata
 }
 
 func kindWord(k catalog.Kind) string {
-	if k == catalog.KindCursorTheme {
+	switch k {
+	case catalog.KindCursorTheme:
 		return "cursor theme"
+	case catalog.KindGTKTheme:
+		return "GTK theme"
 	}
 	return "icon theme"
 }
@@ -488,7 +503,8 @@ var reasonKinds = []struct{ part, kind string }{
 	{"another theme inside", "a theme inside another theme"},
 	{"two of its themes", "two themes of one name"},
 	{"top of the archive", "a theme with no folder"},
-	{"no icon or cursor theme", "no theme inside"},
+	{"no icon or cursor theme", "no theme inside"}, // as uas before GTK themes said it
+	{"holds no theme", "no theme inside"},
 	{"inside", "no theme of the item's kind inside"},
 	{"take over", "a reserved theme name"},
 	{"won't use", "an unusable theme name"},

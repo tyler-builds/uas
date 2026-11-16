@@ -1,4 +1,4 @@
-// Package appearance reads the archives that fonts and icon and cursor themes come in, safely: it checks
+// Package appearance reads the archives that fonts and icon, cursor and GTK themes come in, safely: it checks
 // every entry before anything is written, finds the themes inside, and writes only those, into a folder
 // the caller made for it. The indexer uses it to keep archives that can't be installed out of the catalog,
 // and the client to install them.

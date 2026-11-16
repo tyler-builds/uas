@@ -13,13 +13,16 @@ import (
 	"github.com/tyler-builds/uas/internal/client/state"
 )
 
-// Theme is an icon or cursor theme on this system, whoever installed it.
+// Theme is an icon, cursor or GTK theme on this system, whoever installed it.
 type Theme struct {
 	Name    string // its folder name, which the desktop's settings use
 	Title   string // what its index.theme calls it, if anything
 	Dir     string
 	Icons   bool
 	Cursors bool
+	// GTK is true for a GTK theme (from GTKThemes), and GTK4 when it has files for GTK 4 apps too.
+	GTK  bool
+	GTK4 bool
 	// User is true for a theme in the user's own folders; the others came with the system.
 	User bool
 	// By is the catalog ID of the uas install it came from, or "".
@@ -36,6 +39,9 @@ func (in *Installer) Themes() ([]Theme, error) {
 	}
 	by := map[string]string{}
 	for _, rec := range st.Appearance {
+		if catalog.Kind(rec.Kind) == catalog.KindGTKTheme {
+			continue
+		}
 		for _, t := range rec.Themes {
 			by[t] = rec.ID
 		}
@@ -78,6 +84,74 @@ func (in *Installer) Themes() ([]Theme, error) {
 			}
 			if !t.Icons && !t.Cursors {
 				continue
+			}
+			seen[name] = true
+			out = append(out, t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out, nil
+}
+
+// GTKThemes lists the GTK themes GTK can find: the user's (~/.local/share/themes, then ~/.themes, the order
+// GTK looks in) and the system's, where a theme GTK would find first hides one of the same name. A folder is
+// a GTK theme when its gtk-3.0 or gtk-4.0 folder has a gtk.css or gtk-dark.css. GTK's own themes (Adwaita,
+// HighContrast), which it has built in, are listed only when a folder of theirs is. They are sorted by name.
+func (in *Installer) GTKThemes() ([]Theme, error) {
+	st, err := in.State.Load()
+	if err != nil {
+		return nil, err
+	}
+	by := map[string]string{}
+	for _, rec := range st.Appearance {
+		if catalog.Kind(rec.Kind) == catalog.KindGTKTheme {
+			for _, t := range rec.Themes {
+				by[t] = rec.ID
+			}
+		}
+	}
+	type root struct {
+		dir  string
+		user bool
+	}
+	roots := []root{{in.ThemesDir(), true}}
+	if in.Home != "" {
+		roots = append(roots, root{filepath.Join(in.Home, ".themes"), true})
+	}
+	for _, d := range in.SystemData {
+		roots = append(roots, root{filepath.Join(d, "themes"), false})
+	}
+	has := func(dir, sub string) bool {
+		for _, f := range []string{"gtk.css", "gtk-dark.css"} {
+			if fi, err := os.Stat(filepath.Join(dir, sub, f)); err == nil && fi.Mode().IsRegular() {
+				return true
+			}
+		}
+		return false
+	}
+	seen := map[string]bool{}
+	var out []Theme
+	for _, r := range roots {
+		entries, err := os.ReadDir(r.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if seen[name] || strings.HasPrefix(name, ".") {
+				continue
+			}
+			dir := filepath.Join(r.dir, name)
+			if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+				continue
+			}
+			gtk3, gtk4 := has(dir, "gtk-3.0"), has(dir, "gtk-4.0")
+			if !gtk3 && !gtk4 {
+				continue
+			}
+			t := Theme{Name: name, Dir: dir, User: r.user, GTK: true, GTK4: gtk4}
+			if r.user && filepath.Dir(dir) == in.ThemesDir() {
+				t.By = by[name]
 			}
 			seen[name] = true
 			out = append(out, t)

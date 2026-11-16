@@ -99,6 +99,8 @@ func kindName(k catalog.Kind) string {
 		return "icon theme"
 	case catalog.KindCursorTheme:
 		return "cursor theme"
+	case catalog.KindGTKTheme:
+		return "GTK theme"
 	case catalog.KindFont:
 		return "font"
 	}
