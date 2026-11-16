@@ -913,6 +913,9 @@ func (in *Installer) Current(ctx context.Context) map[string]string {
 		}
 		if v, err := in.Desktop.Get(ctx, key); err == nil {
 			out[key] = v
+			if key == KeyWallpaper || key == KeyWallpaperDark {
+				pictureHash(v) // so InUse, which may run on a UI's thread, finds it hashed
+			}
 		}
 	}
 	return out

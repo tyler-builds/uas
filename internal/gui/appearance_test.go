@@ -64,12 +64,23 @@ func (f *fakeGNOME) Run(_ context.Context, name string, args []string, _ func(st
 		return fakeFonts, nil
 	case name != "gsettings" || len(args) < 3:
 		return "", fmt.Errorf("unexpected %s %v", name, args)
-	case args[0] == "get":
-		return "'" + f.values[args[2]] + "'\n", nil
-	case args[0] == "set":
-		f.values[args[2]] = strings.Trim(args[3], "'")
-	case args[0] == "reset":
-		f.values[args[2]] = ""
+	}
+	// The interface's settings by their name; the wallpaper's as "bg picture-uri", the lock screen's as
+	// "lock picture-uri".
+	key := args[2]
+	switch args[1] {
+	case "org.gnome.desktop.background":
+		key = "bg " + key
+	case "org.gnome.desktop.screensaver":
+		key = "lock " + key
+	}
+	switch args[0] {
+	case "get":
+		return "'" + f.values[key] + "'\n", nil
+	case "set":
+		f.values[key] = strings.Trim(args[3], "'")
+	case "reset":
+		f.values[key] = ""
 	}
 	return "", nil
 }

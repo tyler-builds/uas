@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -222,17 +223,53 @@ func PictureName(v string) string {
 
 func shortHash(s string) string { return s[:min(len(s), 8)] }
 
-// sameRef reports whether a picture on the desktop (a path) is the one a reference names.
+// sameRef reports whether a picture on the desktop (a path) is the one a reference names: the same path, or
+// for a stored picture, the stored file or another with its contents (the original of a look just saved).
 func sameRef(path, ref string) bool {
 	if path == "" || ref == "" {
 		return path == ref
 	}
 	if sum, ok := strings.CutPrefix(ref, wallpaperPrefix); ok {
 		name := filepath.Base(path)
-		return filepath.Base(filepath.Dir(path)) == "wallpapers" &&
-			strings.EqualFold(strings.TrimSuffix(name, filepath.Ext(name)), sum)
+		if filepath.Base(filepath.Dir(path)) == "wallpapers" &&
+			strings.EqualFold(strings.TrimSuffix(name, filepath.Ext(name)), sum) {
+			return true
+		}
+		h, ok := pictureHash(path)
+		return ok && strings.EqualFold(h, sum)
 	}
 	return filepath.Clean(path) == filepath.Clean(ref)
+}
+
+// pictureHashes remembers the SHA-256 of the pictures hashed, by path, size and time, so a picture is read
+// once however often it is compared.
+var pictureHashes sync.Map
+
+// pictureHash returns the SHA-256 of a picture of the user's, and false for anything that can't be stored.
+func pictureHash(path string) (string, bool) {
+	if !filepath.IsAbs(path) || !IsWallpaperFile(path) {
+		return "", false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxWallpaper {
+		return "", false
+	}
+	key := fmt.Sprintf("%s\x00%d\x00%d", path, fi.Size(), fi.ModTime().UnixNano())
+	if v, ok := pictureHashes.Load(key); ok {
+		return v.(string), true
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", false
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	pictureHashes.Store(key, sum)
+	return sum, true
 }
 
 // WallpaperPart is a wallpaper as a preset part, from the desktop's: each picture named as WallpaperRef

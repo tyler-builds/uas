@@ -263,6 +263,16 @@ func (a *App) presetPreview(ctx *ui.Context, p appearance.Preset, height float32
 	if len(words) > 0 {
 		tag = tag.Child(ui.Text(strings.Join(words, " · ")).FontSize(12).TextColor(muted))
 	}
+	if wp, ok := a.presetWallpaper(p); ok {
+		// The wallpaper fills the panel, with the style's colors on a card in front of it, as a window
+		// on the desktop.
+		front := ui.Div().Column().Align(ui.Center).Justify(ui.Center).Gap(space2).PaddingX(space4).
+			PaddingY(space2 + 2).Radius(radiusM).Background(bg.Alpha(0.9)).
+			Child(mark).Child(ui.If(len(words) > 0, tag))
+		return ui.Div().Height(ui.Px(height)).Radius(radiusM).Border(1, t.Border).Background(bg).ClipContent().
+			Child(ui.Div().Inset(0).Child(a.wallThumb(ctx, wp, ui.Full, height, 0))).
+			Child(ui.Div().Inset(0).Center().Child(front))
+	}
 	return ui.Div().Column().Align(ui.Center).Justify(ui.Center).Gap(space3).Height(ui.Px(height)).
 		Radius(radiusM).Background(bg).Border(1, t.Border).ClipContent().
 		Child(mark).Child(ui.If(len(words) > 0, tag))
@@ -369,6 +379,10 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 		}
 		if len(look) > 0 {
 			page = page.Child(section(sectionHeader(ctx, "Look", ""), settingsList(ctx, look...)))
+		}
+		if shown(appearance.PartWallpaper) {
+			page = page.Child(section(sectionHeader(ctx, "Wallpaper", ""),
+				settingsList(ctx, a.presetWallpaperRow(ctx, p))))
 		}
 		if len(fonts) > 0 {
 			page = page.Child(section(sectionHeader(ctx, "Fonts",
@@ -639,6 +653,10 @@ func (a *App) presetSaveDialog(ctx *ui.Context) ui.Element {
 				names = append(names, n)
 				key, _ := appearance.PartKey(n)
 				keep[n] = ui.Local(ctx, "keep:"+n, true)
+				if n == appearance.PartWallpaper {
+					list = list.Child(a.savedWallpaperRow(ctx, part, keep[n]))
+					continue
+				}
 				label := appearance.PartLabel(n) + ": " + appearance.ValueLabel(key, part.Value)
 				row := ui.Div().Row().Align(ui.Center).Gap(space2).
 					Child(ui.Checkbox(label, keep[n]).Key("keep:" + n))
