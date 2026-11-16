@@ -46,6 +46,12 @@ type fakeGSettings struct {
 	mu     sync.Mutex
 	values map[string]string
 	calls  []string
+	// keys are what list-keys answers; nil makes it fail, as on a system without the schema's keys listed.
+	keys []string
+	// fail makes a set of a key fail.
+	fail map[string]bool
+	// fonts is what fc-list answers; "" makes it fail.
+	fonts string
 }
 
 func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ func(string)) (string, error) {
@@ -55,8 +61,23 @@ func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ fun
 	if name == "fc-cache" {
 		return "", nil
 	}
+	if name == "fc-list" {
+		if f.fonts == "" {
+			return "", fmt.Errorf("no fontconfig")
+		}
+		return f.fonts, nil
+	}
+	if name == "gsettings" && len(args) == 2 && args[0] == "list-keys" && args[1] == gnomeSchema {
+		if f.keys == nil {
+			return "", fmt.Errorf("no keys")
+		}
+		return strings.Join(f.keys, "\n") + "\n", nil
+	}
 	if name != "gsettings" || len(args) < 3 || args[1] != gnomeSchema {
 		return "", fmt.Errorf("unexpected %s %v", name, args)
+	}
+	if args[0] == "set" && f.fail[args[2]] {
+		return "", fmt.Errorf("gsettings: can't set %s", args[2])
 	}
 	switch args[0] {
 	case "get":
@@ -539,4 +560,190 @@ func TestDetectDesktop(t *testing.T) {
 			t.Errorf("DetectDesktop(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func TestFontNames(t *testing.T) {
+	for value, want := range map[string][2]string{
+		"Inter 11":                            {"Inter", "11"},
+		"Fira Code weight=450 10":             {"Fira Code", "10"},
+		"Cantarell Italic Light 15 @wght=200": {"Cantarell", "15"},
+		"Source Code Pro Semi-Bold 10.5 #tnum=1 @wght=600,wdth=90": {"Source Code Pro", "10.5"},
+		"JetBrainsMono Nerd Font Mono 10.5":                        {"JetBrainsMono Nerd Font Mono", "10.5"},
+		"Noto Sans, Bold 12":                                       {"Noto Sans", "12"},
+		"Inter":                                                    {"Inter", ""},
+		"Bold":                                                     {"Bold", ""},
+		"Monospace 14px":                                           {"Monospace", "14px"},
+	} {
+		if got := FontFamily(value); got != want[0] {
+			t.Errorf("FontFamily(%q) = %q, want %q", value, got, want[0])
+		}
+		if got := FontSize(value); got != want[1] {
+			t.Errorf("FontSize(%q) = %q, want %q", value, got, want[1])
+		}
+	}
+	if got := FontValue("Fira Code weight=450 10", "Inter"); got != "Inter 10" {
+		t.Errorf("FontValue = %q", got)
+	}
+	if got := FontValue("Inter", "Fira Code"); got != "Fira Code 11" {
+		t.Errorf("FontValue without a size = %q", got)
+	}
+	// A font with variations is in use.
+	rec := state.AppearanceInstall{Kind: string(catalog.KindFont), Families: []string{"Fira Code"}}
+	if !inUse(rec, KeyMonospaceFont, "Fira Code weight=450 10") {
+		t.Error("Fira Code weight=450 10 isn't seen as Fira Code")
+	}
+}
+
+func TestNewSettings(t *testing.T) {
+	ctx := context.Background()
+	gs := &fakeGSettings{values: map[string]string{KeyColorScheme: SchemeDefault, KeyAccentColor: "blue"},
+		keys: []string{"icon-theme", "color-scheme", "accent-color"}}
+	g := &GNOME{Runner: gs}
+	for _, key := range SettingKeys {
+		if !g.Supports(key) {
+			t.Errorf("GNOME doesn't support %s", key)
+		}
+	}
+	if g.Supports("gtk-theme") || g.Supports("nonsense") {
+		t.Error("GNOME supports a setting uas doesn't change yet")
+	}
+	if err := g.Set(ctx, KeyColorScheme, SchemeDark); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Set(ctx, KeyAccentColor, "it's"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := g.Get(ctx, KeyAccentColor); v != "it's" {
+		t.Errorf("accent = %q", v)
+	}
+	if err := g.Reset(ctx, KeyColorScheme); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"gsettings list-keys org.gnome.desktop.interface",
+		"gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'",
+		`gsettings set org.gnome.desktop.interface accent-color 'it\'s'`,
+		"gsettings get org.gnome.desktop.interface accent-color",
+		"gsettings reset org.gnome.desktop.interface color-scheme",
+	}
+	if !slices.Equal(gs.calls, want) {
+		t.Errorf("calls =\n%s\nwant\n%s", strings.Join(gs.calls, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A GNOME from before accent colors (46) lists no accent-color, so uas doesn't offer it.
+	old := &GNOME{Runner: &fakeGSettings{keys: []string{"icon-theme", "color-scheme"}}}
+	if old.Supports(KeyAccentColor) || !old.Supports(KeyColorScheme) || !old.Supports(KeyIconTheme) {
+		t.Error("GNOME 46 supports the wrong settings")
+	}
+	if err := old.Set(ctx, KeyAccentColor, "teal"); err != ErrUnsupported {
+		t.Errorf("setting the accent on GNOME 46: %v", err)
+	}
+	// When gsettings can't list the keys, they are tried.
+	if !(&GNOME{Runner: &fakeGSettings{}}).Supports(KeyAccentColor) {
+		t.Error("an unlisted key isn't tried")
+	}
+
+	// Plasma changes neither, and no desktop at all changes nothing.
+	p := &Plasma{ChangeIcons: "/bin/true"}
+	if p.Supports(KeyColorScheme) || p.Supports(KeyAccentColor) || p.Supports(KeyFont) || !p.Supports(KeyIconTheme) {
+		t.Error("Plasma supports the wrong settings")
+	}
+	in := &Installer{State: state.Store{Path: filepath.Join(t.TempDir(), "state.json")}}
+	if err := in.Use(ctx, KeyColorScheme, SchemeDark); err != ErrUnsupported {
+		t.Errorf("Use without a desktop: %v", err)
+	}
+	if err := in.RevertAll(ctx); err != ErrUnsupported {
+		t.Errorf("RevertAll without a desktop: %v", err)
+	}
+	if len(in.Current(ctx)) != 0 {
+		t.Error("Current without a desktop isn't empty")
+	}
+}
+
+func TestValues(t *testing.T) {
+	for in, want := range map[string]string{"dark": SchemeDark, "Light": SchemeLight, "default": SchemeDefault,
+		"prefer-dark": "prefer-dark"} {
+		if got := ParseValue(KeyColorScheme, in); got != want {
+			t.Errorf("ParseValue(scheme, %q) = %q", in, got)
+		}
+	}
+	if got := ParseValue(KeyAccentColor, "Teal"); got != "teal" {
+		t.Errorf("ParseValue(accent, Teal) = %q", got)
+	}
+	if got := ParseValue(KeyIconTheme, "Papirus-Dark"); got != "Papirus-Dark" {
+		t.Errorf("ParseValue(icons) = %q", got)
+	}
+	if err := CheckValue(KeyColorScheme, "dark"); err == nil || !strings.Contains(err.Error(), "default, light, dark") {
+		t.Errorf("CheckValue(scheme, dark) = %v", err)
+	}
+	if CheckValue(KeyAccentColor, "mauve") == nil || CheckValue(KeyAccentColor, "slate") != nil ||
+		CheckValue(KeyIconTheme, "") == nil || CheckValue(KeyIconTheme, "Anything") != nil {
+		t.Error("CheckValue is wrong")
+	}
+	if ValueLabel(KeyColorScheme, SchemeDark) != "Dark" || ValueLabel(KeyAccentColor, "teal") != "Teal" ||
+		ValueLabel(KeyIconTheme, "kora") != "kora" {
+		t.Error("ValueLabel is wrong")
+	}
+}
+
+func TestUseRevertAll(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	w.gs.values[KeyColorScheme] = SchemeDefault
+	w.gs.values[KeyAccentColor] = "blue"
+	if err := w.in.Use(ctx, KeyColorScheme, SchemeDark); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.in.Use(ctx, KeyAccentColor, "teal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.in.Use(ctx, KeyAccentColor, "mauve"); err == nil {
+		t.Error("used an accent GNOME doesn't have")
+	}
+	// A font with a size is set as it is; a family alone keeps the size.
+	if err := w.in.Use(ctx, KeyFont, "Inter 12"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.in.Use(ctx, KeyMonospaceFont, "Fira Code"); err != nil {
+		t.Fatal(err)
+	}
+	if w.gs.values[KeyFont] != "Inter 12" || w.gs.values[KeyMonospaceFont] != "Fira Code 11" {
+		t.Errorf("fonts = %q, %q", w.gs.values[KeyFont], w.gs.values[KeyMonospaceFont])
+	}
+	// Setting a value it already has saves nothing.
+	if err := w.in.Use(ctx, KeyIconTheme, "Adwaita"); err != nil {
+		t.Fatal(err)
+	}
+	if saved, _ := w.in.Saved(); len(saved) != 4 {
+		t.Errorf("Saved = %+v", saved)
+	}
+	// Setting one back to its value from before uas forgets it.
+	if err := w.in.Use(ctx, KeyAccentColor, "blue"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := savedKey(w.in, KeyAccentColor); ok || w.gs.values[KeyAccentColor] != "blue" {
+		t.Errorf("accent is %q, saved %v", w.gs.values[KeyAccentColor], ok)
+	}
+	if err := w.in.RevertAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{KeyColorScheme: SchemeDefault, KeyFont: "Adwaita Sans 11",
+		KeyMonospaceFont: "Adwaita Mono 11"} {
+		if w.gs.values[key] != want {
+			t.Errorf("after RevertAll, %s = %q, want %q", key, w.gs.values[key], want)
+		}
+	}
+	if saved, _ := w.in.Saved(); len(saved) != 0 {
+		t.Errorf("Saved after RevertAll = %+v", saved)
+	}
+}
+
+func savedKey(in *Installer, key string) (state.SavedSetting, bool) {
+	saved, _ := in.Saved()
+	for _, s := range saved {
+		if s.Key == key {
+			return s, true
+		}
+	}
+	return state.SavedSetting{}, false
 }

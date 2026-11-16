@@ -58,6 +58,8 @@ type Session struct {
 	// aren't apps, so they have no backend and aren't in Installed. Nil only when the home folder can't be
 	// found.
 	Looks *appearance.Installer
+	// Presets are the user's saved looks; nil when Looks is.
+	Presets *appearance.Presets
 	// SysApps are the apps that came with the system, by AppStream ID (see SystemApps). Nil reads them on
 	// first use; tests set it.
 	SysApps map[string]sysapps.App
@@ -135,6 +137,9 @@ func Load(ctx context.Context, scope, catalogPath string) (*Session, error) {
 	}
 	if looks, err := appearance.New(run.Exec{}, appearance.DetectDesktop(s.Platform.Desktop, run.Exec{})); err == nil {
 		s.Looks = looks
+		if cfg, err := os.UserConfigDir(); err == nil {
+			s.Presets = appearance.NewPresets(cfg, looks.Data)
+		}
 		// Flatpak apps see the user's fonts only if the folder is there when they start.
 		_ = looks.EnsureFontsDir()
 	}

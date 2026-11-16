@@ -44,6 +44,13 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   a side panel with Source, License and Developer as label and value rows, then the install notes, "Why
   <source>?" and the Report an issue and Source code links, all in one icon-and-text row style; and "More in
   <category>" cards.
+- **Appearance:** the header, then tabs (a segmented control): Presets, Fonts, Icons, Cursors and Installed.
+  Presets, the first tab once there are any, is a grid of preset cards: a preview panel in the preset's
+  light or dark style with three icons of its icon theme (or "Aa") and its accent as a dot, the name with an
+  "In use" chip, its themes and fonts as quiet words, an outlined Apply and a ⋯ menu. Save current look
+  (teal) and New preset sit in the header. A preset's page lists its parts in two bordered lists, Look and
+  Fonts, each row with "Leave as is". Applying asks first only when it downloads or skips something, and an
+  alert with Undo follows it. Fonts, Icons and Cursors are grids of cards from the catalog.
 - **Installed and Updates:** the same list for installed apps, with Update where there is one (outlined, with
   a teal icon), Update all, and Remove.
 

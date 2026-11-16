@@ -59,7 +59,7 @@ func (a *App) startJob(ctx *ui.Context, id, title string, restart bool, success 
 			}
 			ui.InvalidateQueries(ctx, func(key string) bool {
 				// What can install without a restart may have changed too.
-				return key == "installed" || key == "updates" || key == extensionsKey || key == looksKey ||
+				return key == "installed" || key == "updates" || key == extensionsKey || key == looksKey || key == presetsKey ||
 					strings.HasPrefix(key, liveKeyPrefix) || strings.Contains(key, ":look-ups") ||
 					strings.Contains(key, ":font-sample:")
 			})

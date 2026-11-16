@@ -3,9 +3,12 @@ package appearance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
-	"strconv"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/tyler-builds/uas/internal/client/run"
 )
@@ -18,10 +21,55 @@ const (
 	KeyFont          = "font-name"           // the interface font
 	KeyDocumentFont  = "document-font-name"  // the font of documents
 	KeyMonospaceFont = "monospace-font-name" // the fixed-width font, as terminals use
+	// KeyColorScheme is the light or dark style: SchemeDefault, SchemeLight or SchemeDark.
+	KeyColorScheme = "color-scheme"
+	// KeyAccentColor is the accent color, one of AccentColors.
+	KeyAccentColor = "accent-color"
 )
 
 // FontKeys are the settings a font can be used for.
 var FontKeys = []string{KeyFont, KeyDocumentFont, KeyMonospaceFont}
+
+// SettingKeys are every setting uas can change, in the order they are listed and applied: the style and
+// accent first, as everything else is seen in them.
+var SettingKeys = []string{KeyColorScheme, KeyAccentColor, KeyIconTheme, KeyCursorTheme, KeyFont,
+	KeyDocumentFont, KeyMonospaceFont}
+
+// The values of KeyColorScheme.
+const (
+	SchemeDefault = "default"
+	SchemeLight   = "prefer-light"
+	SchemeDark    = "prefer-dark"
+)
+
+// AccentColors are the values of KeyAccentColor, in the order GNOME's settings show them.
+var AccentColors = []string{"blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "slate"}
+
+// Choices are the values a setting takes, for one that has a fixed set; nil for one that takes a name.
+func Choices(key string) []string {
+	switch key {
+	case KeyColorScheme:
+		return []string{SchemeDefault, SchemeLight, SchemeDark}
+	case KeyAccentColor:
+		return AccentColors
+	}
+	return nil
+}
+
+// CheckValue refuses a value a setting can't take.
+func CheckValue(key, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s: give a value", strings.ToLower(KeyLabel(key)))
+	}
+	if c := Choices(key); c != nil && !slices.Contains(c, value) {
+		names := make([]string, len(c))
+		for i, v := range c {
+			names[i] = ValueName(key, v)
+		}
+		return fmt.Errorf("%s: %q isn't %s", strings.ToLower(KeyLabel(key)), value, strings.Join(names, ", "))
+	}
+	return nil
+}
 
 // KeyLabel names a setting for people.
 func KeyLabel(key string) string {
@@ -36,8 +84,57 @@ func KeyLabel(key string) string {
 		return "Document text"
 	case KeyMonospaceFont:
 		return "Monospace text"
+	case KeyColorScheme:
+		return "Style"
+	case KeyAccentColor:
+		return "Accent color"
 	}
 	return key
+}
+
+// ValueLabel names a setting's value for people: "Dark" for prefer-dark, "Teal" for teal. Names of themes
+// and fonts are as they are.
+func ValueLabel(key, value string) string {
+	switch key {
+	case KeyColorScheme:
+		switch value {
+		case SchemeDefault:
+			return "Default"
+		case SchemeLight:
+			return "Light"
+		case SchemeDark:
+			return "Dark"
+		}
+	case KeyAccentColor:
+		if value != "" {
+			return strings.ToUpper(value[:1]) + value[1:]
+		}
+	}
+	return value
+}
+
+// ValueName is the word the command line takes for a value: "dark" for prefer-dark.
+func ValueName(key, value string) string {
+	if key == KeyColorScheme {
+		return strings.ToLower(ValueLabel(key, value))
+	}
+	return value
+}
+
+// ParseValue reads a value as the command line gives it: "dark", "light" or "default" for the style, the
+// value itself for anything else.
+func ParseValue(key, s string) string {
+	if key == KeyColorScheme {
+		for _, v := range Choices(key) {
+			if strings.EqualFold(s, ValueName(key, v)) {
+				return v
+			}
+		}
+	}
+	if Choices(key) != nil {
+		return strings.ToLower(s)
+	}
+	return s
 }
 
 // ErrUnsupported is returned for a setting the desktop can't change from uas.
@@ -71,27 +168,64 @@ func DetectDesktop(current string, r run.Runner) Desktop {
 	return nil
 }
 
-// GNOME changes org.gnome.desktop.interface with gsettings. The change applies at once, in Flatpak apps
-// too (through the settings portal).
-type GNOME struct{ Runner run.Runner }
+// GNOME changes its settings with gsettings. A change applies at once, in Flatpak apps too (through the
+// settings portal).
+type GNOME struct {
+	Runner run.Runner
+
+	once sync.Once
+	keys map[string]bool // the keys of gnomeSchema, or nil when gsettings couldn't list them
+}
 
 const gnomeSchema = "org.gnome.desktop.interface"
 
+// gnomeKeys are the settings uas changes, by key. Newer ones are only there from a GNOME release on, and
+// are checked for: color-scheme from GNOME 42, accent-color from GNOME 47.
+var gnomeKeys = map[string]struct {
+	schema, key string
+	newer       bool
+}{
+	KeyIconTheme:     {gnomeSchema, "icon-theme", false},
+	KeyCursorTheme:   {gnomeSchema, "cursor-theme", false},
+	KeyFont:          {gnomeSchema, "font-name", false},
+	KeyDocumentFont:  {gnomeSchema, "document-font-name", false},
+	KeyMonospaceFont: {gnomeSchema, "monospace-font-name", false},
+	KeyColorScheme:   {gnomeSchema, "color-scheme", true},
+	KeyAccentColor:   {gnomeSchema, "accent-color", true},
+}
+
 func (*GNOME) Name() string { return "gnome" }
 
-func (*GNOME) Supports(key string) bool {
-	switch key {
-	case KeyIconTheme, KeyCursorTheme, KeyFont, KeyDocumentFont, KeyMonospaceFont:
+func (g *GNOME) Supports(key string) bool {
+	k, ok := gnomeKeys[key]
+	if !ok {
+		return false
+	}
+	if !k.newer {
 		return true
 	}
-	return false
+	g.once.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		out, err := g.Runner.Run(ctx, "gsettings", []string{"list-keys", gnomeSchema}, nil)
+		if err != nil {
+			return
+		}
+		g.keys = map[string]bool{}
+		for _, l := range strings.Fields(out) {
+			g.keys[l] = true
+		}
+	})
+	// When gsettings can't say, the setting is tried, and fails as a change of it would anyway.
+	return g.keys == nil || g.keys[k.key]
 }
 
 func (g *GNOME) Get(ctx context.Context, key string) (string, error) {
 	if !g.Supports(key) {
 		return "", ErrUnsupported
 	}
-	out, err := g.Runner.Run(ctx, "gsettings", []string{"get", gnomeSchema, key}, nil)
+	k := gnomeKeys[key]
+	out, err := g.Runner.Run(ctx, "gsettings", []string{"get", k.schema, k.key}, nil)
 	if err != nil {
 		return "", err
 	}
@@ -102,7 +236,8 @@ func (g *GNOME) Set(ctx context.Context, key, value string) error {
 	if !g.Supports(key) {
 		return ErrUnsupported
 	}
-	_, err := g.Runner.Run(ctx, "gsettings", []string{"set", gnomeSchema, key, quoteGVariant(value)}, nil)
+	k := gnomeKeys[key]
+	_, err := g.Runner.Run(ctx, "gsettings", []string{"set", k.schema, k.key, quoteGVariant(value)}, nil)
 	return err
 }
 
@@ -110,7 +245,8 @@ func (g *GNOME) Reset(ctx context.Context, key string) error {
 	if !g.Supports(key) {
 		return ErrUnsupported
 	}
-	_, err := g.Runner.Run(ctx, "gsettings", []string{"reset", gnomeSchema, key}, nil)
+	k := gnomeKeys[key]
+	_, err := g.Runner.Run(ctx, "gsettings", []string{"reset", k.schema, k.key}, nil)
 	return err
 }
 
@@ -215,27 +351,4 @@ func (p *Plasma) Reset(ctx context.Context, key string) error {
 		return p.Set(ctx, key, d)
 	}
 	return ErrUnsupported
-}
-
-// FontValue is a font setting with its family replaced and its size kept: ("Cantarell 11", "Inter") is
-// "Inter 11".
-func FontValue(current, family string) string {
-	fields := strings.Fields(current)
-	if n := len(fields); n > 1 {
-		if _, err := strconv.ParseFloat(fields[n-1], 64); err == nil {
-			return family + " " + fields[n-1]
-		}
-	}
-	return family + " 11"
-}
-
-// FontFamily is the family of a font setting: "Inter" of "Inter 11".
-func FontFamily(value string) string {
-	fields := strings.Fields(value)
-	if n := len(fields); n > 1 {
-		if _, err := strconv.ParseFloat(fields[n-1], 64); err == nil {
-			return strings.Join(fields[:n-1], " ")
-		}
-	}
-	return strings.TrimSpace(value)
 }
