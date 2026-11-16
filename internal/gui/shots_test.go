@@ -140,6 +140,11 @@ func TestShots(t *testing.T) {
 		{"appearance-icons", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookIcons) }, 1000, "", 0},
 		{"appearance-cursors", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookCursors) }, 1000,
 			"", 0},
+		// The icon themes' grid, which scrolls under its header, in a narrow window and in one past its widest.
+		{"appearance-icons-narrow", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookIcons) }, 800,
+			"", 900},
+		{"appearance-icons-wide", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookIcons) }, 900,
+			"", 1800},
 		{"look-icons", func(a *App) {
 			a.goTo(view{page: pageAppearance})
 			a.lookTab.Set(lookIcons)

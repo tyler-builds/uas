@@ -232,7 +232,7 @@ func (a *App) lookGrid(ctx *ui.Context, info catalog.BuildInfo, lk looks, kind c
 		what += " Search to find others."
 	}
 	return ui.Div().Column().Gap(space3).MinHeight(ui.Px(0)).Child(muted(ctx, what)).
-		Child(ui.Div().Column().ScrollY().MinHeight(ui.Px(0)).PaddingBottom(space2).Child(grid))
+		Child(scrollArea(grid).PaddingBottom(space2))
 }
 
 func kindSingular(k catalog.Kind) string {
