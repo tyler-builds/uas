@@ -145,6 +145,19 @@ func TestShots(t *testing.T) {
 			"", 900},
 		{"appearance-icons-wide", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookIcons) }, 900,
 			"", 1800},
+		// GTK themes: the catalog's, one's page, and one uas installed and uses, with its GTK 4 files.
+		{"appearance-gtk", func(a *App) { a.goTo(view{page: pageAppearance}); a.lookTab.Set(lookGTK) }, 1000, "", 0},
+		{"look-gtk", func(a *App) {
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookGTK)
+			a.openLook(catalog.AppearanceAppID(catalog.SourcePling, "1357889")) // Orchis
+		}, 1200, "", 0},
+		{"appearance-installed-gtk", func(a *App) {
+			shotPresets(t, a)
+			shotGTK(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookInstalled)
+		}, 1500, "", 0},
 		{"look-icons", func(a *App) {
 			a.goTo(view{page: pageAppearance})
 			a.lookTab.Set(lookIcons)
@@ -392,7 +405,7 @@ func shotLooks(t *testing.T) *appearance.Installer {
 	dir := t.TempDir()
 	gs := newFakeGNOME()
 	cache := filepath.Join(os.TempDir(), "uas-shot-fonts") // font previews, kept between runs
-	return &appearance.Installer{Data: filepath.Join(dir, "data"), Cache: cache,
+	return &appearance.Installer{Data: filepath.Join(dir, "data"), Config: filepath.Join(dir, "config"), Cache: cache,
 		State:  state.Store{Path: filepath.Join(dir, "state.json")},
 		Client: &http.Client{Timeout: time.Minute}, Runner: gs, Desktop: &appearance.GNOME{Runner: gs},
 		PlingAPI: appearance.PlingAPI, Limits: archives.DefaultLimits}
@@ -430,7 +443,8 @@ func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
 			appearance.PartWallpaper: wall("/usr/share/backgrounds/gnome/adwaita-l.jxl",
 				"/usr/share/backgrounds/gnome/adwaita-d.jxl")}},
 		{Name: "Evening", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeDark),
-			appearance.PartAccent: part("teal"), appearance.PartIcons: part("kora"),
+			appearance.PartAccent: part("teal"), appearance.PartGTK: part("adw-gtk3-dark"),
+			appearance.PartIcons:  part("kora"),
 			appearance.PartCursor: part("Adwaita"), appearance.PartInterface: part("Inter 11"),
 			appearance.PartMonospace: part("Fira Code 10"),
 			appearance.PartWallpaper: wall("/usr/share/backgrounds/fedora-workstation/montclair_light.webp",
@@ -440,6 +454,7 @@ func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
 			appearance.PartWallpaper: wall(mine, "")}},
 		{Name: "Papirus night", Parts: map[string]appearance.Part{appearance.PartScheme: part(appearance.SchemeDark),
 			appearance.PartAccent:    part("purple"),
+			appearance.PartGTK:       from("Orchis-Green-Dark", "pling:1357889", true),
 			appearance.PartIcons:     from("Papirus-Dark", "pling:1166289", true),
 			appearance.PartCursor:    from("Bibata-Modern-Ice", "pling:1197198", true),
 			appearance.PartMonospace: from("JetBrainsMono Nerd Font 11", "nerd-fonts:JetBrainsMono", false),
@@ -467,6 +482,25 @@ func shotPresets(t *testing.T, a *App) map[string]appearance.Preset {
 	gs.values["bg picture-options"] = ev.Fit
 	gs.mu.Unlock()
 	return out
+}
+
+// shotGTK installs Orchis from the catalog (from Pling) into the temporary folders, with a gtk.css of the
+// user's in the temporary ~/.config/gtk-4.0, and uses its dark variant, as Install and use does.
+func shotGTK(t *testing.T, a *App) {
+	ctx := context.Background()
+	db, err := a.catalog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := db.App(ctx, catalog.AppearanceAppID(catalog.SourcePling, "1357889"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(a.s.Looks.GTK4Dir(), 0o755)
+	os.WriteFile(filepath.Join(a.s.Looks.GTK4Dir(), "gtk.css"), []byte("/* mine */\n"), 0o644)
+	if _, err := a.s.InstallLook(ctx, app.Listings[0], "Orchis-Green-Dark", appearance.KeyGTKTheme, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // shotPicture is a picture of the user's: a soft gradient, as a photo would be in a preset's preview.

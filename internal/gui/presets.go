@@ -366,8 +366,8 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 			return (desk != nil && desk.Supports(key)) || p.Sets(part)
 		}
 		var look, fonts []ui.Element
-		for _, part := range []string{appearance.PartScheme, appearance.PartAccent, appearance.PartIcons,
-			appearance.PartCursor} {
+		for _, part := range []string{appearance.PartScheme, appearance.PartAccent, appearance.PartGTK,
+			appearance.PartIcons, appearance.PartCursor} {
 			if shown(part) {
 				look = append(look, a.presetPartRow(ctx, p, part, lk.Data))
 			}
@@ -437,15 +437,24 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			row = row.Child(sw)
 		}
 		control = row
-	case appearance.PartIcons, appearance.PartCursor:
-		desc = "The icons apps and the desktop draw"
-		if part == appearance.PartCursor {
+	case appearance.PartGTK, appearance.PartIcons, appearance.PartCursor:
+		switch part {
+		case appearance.PartGTK:
+			desc = "How GTK apps draw windows, buttons and menus"
+		case appearance.PartIcons:
+			desc = "The icons apps and the desktop draw"
+		default:
 			desc = "The mouse pointer"
+		}
+		themes := lk.themes
+		if part == appearance.PartGTK {
+			themes = lk.gtkThemes
 		}
 		opts := []ui.Option[string]{{Value: "", Label: "Leave as is"}}
 		have := false
-		for _, th := range lk.themes {
-			if (part == appearance.PartIcons && th.Icons) || (part == appearance.PartCursor && th.Cursors) {
+		for _, th := range themes {
+			if (part == appearance.PartIcons && th.Icons) || (part == appearance.PartCursor && th.Cursors) ||
+				(part == appearance.PartGTK && th.GTK) {
 				label := th.Name
 				if th.Title != "" && th.Title != th.Name {
 					label += " · " + th.Title
@@ -478,6 +487,8 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 	if desk == nil || !desk.Supports(key) {
 		left = left.Child(caption(ctx, "This desktop can't set it from uas; it is kept in the preset.").
 			TextColor(t.Warning))
+	} else if part == appearance.PartGTK && p.Sets(part) {
+		left = left.Child(caption(ctx, appearance.GTKNote))
 	}
 	return ui.Div().Row().Align(ui.Center).Gap(space4).MinHeight(ui.Px(64)).PaddingX(space4).PaddingY(space2).
 		Child(left).Child(ui.Div().Shrink(0).Child(control))
@@ -836,7 +847,7 @@ func (a *App) runPresetApply(ctx *ui.Context, p appearance.Preset, plan []appear
 			note := &presetApplied{name: p.Name, failed: appearance.Failed(out)}
 			for _, o := range out {
 				if o.Step.Skipped() {
-					note.skipped = append(note.skipped, appearance.PartLabel(o.Part))
+					note.skipped = append(note.skipped, appearance.PartWord(o.Part))
 				}
 			}
 			ctx.Post(func() { a.presetApplied.Set(note) })
@@ -854,7 +865,7 @@ func (a *App) appliedAlert(ctx *ui.Context) ui.Element {
 	desc := "Undo goes back to the look you had before."
 	al := ui.Alert("Applied " + n.name).Success()
 	if len(n.skipped) > 0 {
-		desc = "Skipped " + strings.ToLower(joinAnd(n.skipped)) + ", which can't be set here. " + desc
+		desc = "Skipped " + joinAnd(n.skipped) + ", which can't be set here. " + desc
 		al = ui.Alert("Applied " + n.name).Info()
 	}
 	if n.failed != nil {

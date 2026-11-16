@@ -31,8 +31,14 @@ import (
 const GTKNote = "Newer (GTK 4) apps change only with themes that have GTK 4 files, and open apps show a new " +
 	"theme after a restart."
 
-// GTK4Dir is where GTK 4 apps load the user's own style from: $XDG_CONFIG_HOME/gtk-4.0.
-func (in *Installer) GTK4Dir() string { return filepath.Join(in.Config, "gtk-4.0") }
+// GTK4Dir is where GTK 4 apps load the user's own style from: $XDG_CONFIG_HOME/gtk-4.0; "" when Config isn't
+// known.
+func (in *Installer) GTK4Dir() string {
+	if in.Config == "" {
+		return ""
+	}
+	return filepath.Join(in.Config, "gtk-4.0")
+}
 
 // GTK4 returns what uas put in ~/.config/gtk-4.0, or nil.
 func (in *Installer) GTK4() (*state.GTK4Files, error) {
@@ -86,7 +92,8 @@ const (
 func (in *Installer) syncGTK4Locked(st *state.State, theme string, style bool) error {
 	dir := in.GTK4Dir()
 	var names []string
-	if style {
+	// Without a config folder there is nowhere to copy to; uas's earlier files still go.
+	if style && in.Config != "" {
 		if src, themeDir := in.gtk4Source(theme); src != "" {
 			// Copied first, into a folder of its own next to where the files go, so a copy that fails
 			// changes nothing.
