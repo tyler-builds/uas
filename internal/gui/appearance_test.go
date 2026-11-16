@@ -45,7 +45,8 @@ func newFakeGNOME() *fakeGNOME {
 	return &fakeGNOME{values: map[string]string{appearance.KeyIconTheme: "Adwaita",
 		appearance.KeyCursorTheme: "Adwaita", appearance.KeyFont: "Adwaita Sans 11",
 		appearance.KeyDocumentFont: "Adwaita Sans 12", appearance.KeyMonospaceFont: "Adwaita Mono 11",
-		appearance.KeyColorScheme: appearance.SchemeDefault, appearance.KeyAccentColor: "blue"}}
+		appearance.KeyColorScheme: appearance.SchemeDefault, appearance.KeyAccentColor: "blue",
+		appearance.KeyGTKTheme: "Adwaita"}}
 }
 
 func (f *fakeGNOME) get(key string) string {
@@ -149,7 +150,7 @@ func TestAppearanceInstallUseRemove(t *testing.T) {
 		w.Write(archive)
 	})
 	gs := newFakeGNOME()
-	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Cache: filepath.Join(dir, "cache"),
+	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Config: filepath.Join(dir, "config"), Cache: filepath.Join(dir, "cache"),
 		State:  state.Store{Path: filepath.Join(dir, "data", "uas", "state.json")},
 		Client: &http.Client{Transport: routedTransport{mux}}, Runner: gs, Desktop: &appearance.GNOME{Runner: gs},
 		PlingAPI: appearance.PlingAPI, Limits: archives.DefaultLimits}
@@ -250,7 +251,7 @@ func TestAppearanceLive(t *testing.T) {
 	useBundledFont(t)
 	home := t.TempDir()
 	gs := newFakeGNOME()
-	in := &appearance.Installer{Data: filepath.Join(home, ".local", "share"), Home: home,
+	in := &appearance.Installer{Data: filepath.Join(home, ".local", "share"), Config: filepath.Join(home, ".config"), Home: home,
 		SystemData: []string{"/usr/local/share", "/usr/share"}, Cache: filepath.Join(home, ".cache", "uas", "fonts"),
 		State:  state.Store{Path: filepath.Join(home, ".local", "share", "uas", "state.json")},
 		Client: &http.Client{Timeout: 10 * time.Minute}, Runner: gs, Desktop: &appearance.GNOME{Runner: gs},
@@ -359,4 +360,87 @@ func TestAppearanceLive(t *testing.T) {
 		}
 	}
 	shot("after-remove")
+}
+
+// TestAppearanceGTKTheme browses the GTK themes tab, installs and uses a theme against a fake Pling and a fake
+// GNOME, with a gtk.css of the user's in a temporary ~/.config/gtk-4.0, and reverts it from the Installed tab.
+func TestAppearanceGTKTheme(t *testing.T) {
+	dir := t.TempDir()
+	var raw bytes.Buffer
+	tw := tar.NewWriter(&raw)
+	for name, body := range map[string]string{
+		"Orchis/gtk-3.0/gtk.css": "/* 3 */", "Orchis/gtk-4.0/gtk.css": "/* 4 */",
+		"Orchis-Dark/gtk-3.0/gtk.css": "/* dark 3 */", "Orchis-Dark/gtk-4.0/gtk.css": "/* dark 4 */",
+	} {
+		tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	zw.Write(raw.Bytes())
+	zw.Close()
+	archive := gz.Bytes()
+	sha, md := sha256.Sum256(archive), md5.Sum(archive)
+	asset := catalog.Asset{Kind: catalog.AssetTheme, Name: "orchis.tar.gz", Slot: 1, MD5: hex.EncodeToString(md[:]),
+		SHA256: hex.EncodeToString(sha[:]), Size: int64(len(archive)), Themes: []string{"Orchis", "Orchis-Dark"}}
+	l := catalog.Listing{Source: catalog.SourcePling, Ref: "1357889", Kind: catalog.KindGTKTheme, Name: "Orchis",
+		Summary: "A GTK theme", Developer: "vinceliuice", Installs: 1000000, Score: 80, Assets: []catalog.Asset{asset}}
+	id := catalog.AppearanceAppID(l.Source, l.Ref)
+	path := filepath.Join(dir, "catalog.db")
+	apps := []catalog.App{{ID: id, Kind: l.Kind, Name: l.Name, Summary: l.Summary, Developer: l.Developer,
+		Popularity: l.Installs, Listings: []catalog.Listing{l}}}
+	if err := catalog.Write(context.Background(), path, apps, catalog.BuildInfo{BuiltAt: time.Now(),
+		Appearance: []catalog.SourceStatus{{Source: catalog.SourcePling, Listings: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ocs/v1/content/data/1357889", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "data": []any{map[string]any{
+			"downloadname1": asset.Name, "downloadmd5sum1": asset.MD5,
+			"downloadlink1": "https://files.pling.com/api/files/download/j/x/orchis.tar.gz"}}})
+	})
+	mux.HandleFunc("/api/files/download/j/x/orchis.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(archive)
+	})
+	gs := newFakeGNOME()
+	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Config: filepath.Join(dir, "config"),
+		Cache: filepath.Join(dir, "cache"), State: state.Store{Path: filepath.Join(dir, "data", "uas", "state.json")},
+		Client: &http.Client{Transport: routedTransport{mux}}, Runner: gs, Desktop: &appearance.GNOME{Runner: gs},
+		PlingAPI: appearance.PlingAPI, Limits: archives.DefaultLimits}
+	mine := filepath.Join(in.GTK4Dir(), "gtk.css")
+	os.MkdirAll(in.GTK4Dir(), 0o755)
+	os.WriteFile(mine, []byte("/* mine */"), 0o644)
+	s := &session.Session{Settings: settings.Default(), Telemetry: telemetry.Nop{}, CatalogPath: path, Looks: in,
+		Backends: map[catalog.SourceID]backend.Backend{}}
+	a := New(s)
+	a.icons.dir = filepath.Join(dir, "images")
+	a.startup.Do(func() {})
+	u := uitest.New(t, a.Root, uitest.Size(1280, 860))
+	defer u.Close()
+
+	a.goTo(view{page: pageAppearance})
+	u.WaitFor("the GTK themes tab", func() bool { return u.HasName("GTK themes") })
+	u.ByName("GTK themes").Click()
+	u.WaitFor("the Orchis card", func() bool { return u.Has("look-card:" + id) })
+	u.Click("look-card:" + id)
+	u.WaitFor("the theme's page", func() bool { return u.Has("look:" + id) })
+	waitText(t, u, "look:"+id, appearance.GTKNote)
+	a.lookTabVariant(t, u, id, "Orchis-Dark")
+	clickButton(u, "Install and use")
+	u.WaitFor("the install", func() bool { return gs.get(appearance.KeyGTKTheme) == "Orchis-Dark" })
+	if b, _ := os.ReadFile(mine); string(b) != "/* dark 4 */" {
+		t.Errorf("gtk.css = %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(in.ThemesDir(), "Orchis", "gtk-3.0", "gtk.css")); err != nil {
+		t.Error(err)
+	}
+
+	// The Installed tab lists it among the GTK themes, marks it in use, and Revert puts back the user's file.
+	a.goTo(view{page: pageAppearance})
+	a.lookTab.Set(lookInstalled)
+	u.WaitFor("the Installed tab", func() bool { return u.HasName("GTK themes") && u.HasRole(access.RoleButton, "Revert") })
+	clickButton(u, "Revert")
+	u.WaitFor("the revert", func() bool { return gs.get(appearance.KeyGTKTheme) == "Adwaita" })
+	u.WaitFor("the user's file", func() bool { b, _ := os.ReadFile(mine); return string(b) == "/* mine */" })
 }

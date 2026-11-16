@@ -26,6 +26,7 @@ const (
 	lookFonts     = "fonts"
 	lookIcons     = "icons"
 	lookCursors   = "cursors"
+	lookGTK       = "gtk"
 	lookInstalled = "installed"
 )
 
@@ -36,6 +37,8 @@ func lookTabKind(tab string) catalog.Kind {
 		return catalog.KindIconTheme
 	case lookCursors:
 		return catalog.KindCursorTheme
+	case lookGTK:
+		return catalog.KindGTKTheme
 	}
 	return catalog.KindFont
 }
@@ -49,6 +52,9 @@ type looks struct {
 	saved   []state.SavedSetting
 	current map[string]string // the desktop's settings, by key
 	themes  []appearance.Theme
+	// gtkThemes are the GTK themes on the system, and gtk4 what uas copied into ~/.config/gtk-4.0.
+	gtkThemes []appearance.Theme
+	gtk4      *state.GTK4Files
 }
 
 // rec returns uas's install of a catalog ID.
@@ -78,8 +84,7 @@ func (l looks) using(r state.AppearanceInstall) []string {
 		switch {
 		case slices.Contains(appearance.FontKeys, key) && slices.Contains(r.Families, appearance.FontFamily(v)):
 		case !slices.Contains(appearance.FontKeys, key) && slices.Contains(r.Themes, v) &&
-			((key == appearance.KeyIconTheme && r.Kind == string(catalog.KindIconTheme)) ||
-				(key == appearance.KeyCursorTheme && r.Kind == string(catalog.KindCursorTheme))):
+			slices.Contains(appearance.KeysOf(r), key):
 		default:
 			continue
 		}
@@ -104,7 +109,13 @@ func (a *App) looks(ctx *ui.Context) ui.QueryResult[looks] {
 		}
 		l.saved, _ = in.Saved()
 		l.current = in.Current(c)
-		l.themes, err = in.Themes()
+		if l.themes, err = in.Themes(); err != nil {
+			return l, err
+		}
+		if l.gtkThemes, err = in.GTKThemes(); err != nil {
+			return l, err
+		}
+		l.gtk4, err = in.GTK4()
 		return l, err
 	}, ui.QueryStaleTime(5*time.Second))
 }
@@ -117,15 +128,15 @@ func refreshLooks(ctx *ui.Context) {
 // openLook shows a font's or theme's page.
 func (a *App) openLook(id string) { a.open(view{page: pageLook, arg: id}) }
 
-// appearancePage lets the user browse fonts, icon themes and cursor themes, and see what is installed. The
+// appearancePage lets the user browse fonts and icon, cursor and GTK themes, and see what is installed. The
 // top bar's field searches the tab's kind.
 func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		tab := a.lookTabNow(ctx)
 		q := strings.TrimSpace(a.listFilter.Get())
 		lk := a.looks(ctx)
-		sub := "Fonts from Google Fonts and Nerd Fonts, and icon and cursor themes from Pling (gnome-look.org), " +
-			"installed for your account."
+		sub := "Fonts from Google Fonts and Nerd Fonts, and icon, cursor and GTK themes from Pling " +
+			"(gnome-look.org), installed for your account."
 		if a.s.Looks != nil && a.s.Looks.Desktop == nil {
 			sub += " This desktop's settings can't be changed from uas, so they are installed only."
 		}
@@ -138,11 +149,12 @@ func (a *App) appearancePage(ctx *ui.Context, info catalog.BuildInfo) ui.Element
 			filterChip(ctx, "Fonts", tab == lookFonts, func() { a.lookTab.Set(lookFonts) }),
 			filterChip(ctx, "Icons", tab == lookIcons, func() { a.lookTab.Set(lookIcons) }),
 			filterChip(ctx, "Cursors", tab == lookCursors, func() { a.lookTab.Set(lookCursors) }),
+			filterChip(ctx, "GTK themes", tab == lookGTK, func() { a.lookTab.Set(lookGTK) }),
 			filterChip(ctx, installed, tab == lookInstalled, func() { a.lookTab.Set(lookInstalled) }))
 		controls := ui.Div().Row().Wrap().Align(ui.Center).Justify(ui.SpaceBetween).Gap(space3).Shrink(0).Child(chips)
 		if tab == lookPresets {
-			sub = "Your looks, saved under a name: icons, cursor, fonts, light or dark style, accent color " +
-				"and wallpaper, applied in one step."
+			sub = "Your looks, saved under a name: GTK theme, icons, cursor, fonts, light or dark style, " +
+				"accent color and wallpaper, applied in one step."
 			page := pageBody(listMaxWidth).Child(pageHeader(ctx, "Appearance", sub, a.presetHeaderButtons(ctx)))
 			return scroll(page.Child(controls).Children(a.presetsTab(ctx, q)...))
 		}
@@ -217,6 +229,11 @@ func (a *App) lookGrid(ctx *ui.Context, info catalog.BuildInfo, lk looks, kind c
 		return grid
 	case res.Err != nil:
 		return ui.Empty("Something went wrong").Icon(icons.TriangleAlert).Description(errText(res.Err))
+	case len(res.Data) == 0 && q == "":
+		// A catalog from before this kind: its source has others.
+		return ui.Empty("No " + kindPlural(kind) + " in the catalog yet").Icon(icons.SwatchBook).
+			Description("The app catalog on this computer was built before it listed " + kindPlural(kind) + ".").
+			Action(ui.Button("Check for a newer catalog").Secondary().OnClick(func() { a.checkCatalog(ctx, true) }))
 	case len(res.Data) == 0:
 		return ui.Empty("Nothing found").Icon(icons.Search).
 			Description("No " + kindSingular(kind) + " matches “" + q + "”. Try other words.")
@@ -233,7 +250,7 @@ func (a *App) lookGrid(ctx *ui.Context, info catalog.BuildInfo, lk looks, kind c
 	case order == catalog.OrderUpdated:
 		what = "The most recently updated " + kindPlural(kind)
 	case order == catalog.OrderName:
-		what = strings.ToUpper(kindPlural(kind)[:1]) + kindPlural(kind)[1:] + " by name"
+		what = upperFirst(kindPlural(kind)) + " by name"
 	}
 	what += ", from " + strings.Join(have, " and ") + "."
 	if len(res.Data) == 60 {
@@ -249,6 +266,8 @@ func kindSingular(k catalog.Kind) string {
 		return "icon theme"
 	case catalog.KindCursorTheme:
 		return "cursor theme"
+	case catalog.KindGTKTheme:
+		return "GTK theme"
 	}
 	return "font"
 }
@@ -317,8 +336,11 @@ func (a *App) previewImage(ctx *ui.Context, l catalog.Listing, height float32) u
 	t := ctx.Theme()
 	if len(l.Screenshots) == 0 {
 		icon := icons.Images
-		if l.Kind == catalog.KindCursorTheme {
+		switch l.Kind {
+		case catalog.KindCursorTheme:
 			icon = icons.MousePointer2
+		case catalog.KindGTKTheme:
+			icon = icons.AppWindow
 		}
 		return ui.Icon(icon).Size(28).Color(t.TextSubtle)
 	}
@@ -471,7 +493,7 @@ func (a *App) lookInstalledSections(ctx *ui.Context, lk ui.QueryResult[looks], q
 				wallpaper = true
 				continue
 			}
-			rows = append(rows, a.savedRow(ctx, s, d.current[s.Key]))
+			rows = append(rows, a.savedRow(ctx, s, d.current[s.Key], d))
 		}
 		var all []ui.Element
 		if len(rows) > 1 {
@@ -492,26 +514,28 @@ func (a *App) lookInstalledSections(ctx *ui.Context, lk ui.QueryResult[looks], q
 		out = append(out, section(sectionHeader(ctx, "Installed by uas",
 			"Fonts and themes uas installed for your account. It keeps them updated."), settingsList(ctx, mine...)))
 	}
-	for _, kind := range []catalog.Kind{catalog.KindIconTheme, catalog.KindCursorTheme} {
+	for _, kind := range []catalog.Kind{catalog.KindGTKTheme, catalog.KindIconTheme, catalog.KindCursorTheme} {
 		var rows []ui.Element
-		for _, th := range d.themes {
-			if ((kind == catalog.KindIconTheme && th.Icons) || (kind == catalog.KindCursorTheme && th.Cursors)) &&
-				match(th.Name, th.Title) {
+		themes := d.themes
+		if kind == catalog.KindGTKTheme {
+			themes = d.gtkThemes
+		}
+		for _, th := range themes {
+			if ((kind == catalog.KindIconTheme && th.Icons) || (kind == catalog.KindCursorTheme && th.Cursors) ||
+				(kind == catalog.KindGTKTheme && th.GTK)) && match(th.Name, th.Title) {
 				rows = append(rows, a.themeRow(ctx, th, kind, d))
 			}
 		}
 		if len(rows) == 0 {
 			continue
 		}
-		title, sub := "Icon themes", "Every icon theme on this system, whichever app installed it."
-		if kind == catalog.KindCursorTheme {
-			title, sub = "Cursor themes", "Every cursor theme on this system, whichever app installed it."
-		}
+		title := upperFirst(kindPlural(kind))
+		sub := "Every " + kindSingular(kind) + " on this system, whichever app installed it."
 		out = append(out, section(sectionHeader(ctx, title, sub), settingsList(ctx, rows...)))
 	}
 	if len(d.recs) == 0 && len(words) == 0 {
 		out = append([]ui.Element{ui.Alert("uas hasn't installed any fonts or themes yet").
-			Description("Browse Fonts, Icons and Cursors to add some. Themes already on this system are below.")}, out...)
+			Description("Browse Fonts, Icons, Cursors and GTK themes to add some. Themes already on this system are below.")}, out...)
 	}
 	if len(out) == 0 {
 		out = append(out, ui.Empty("Nothing installed matches").Icon(icons.ListFilter).
@@ -521,15 +545,24 @@ func (a *App) lookInstalledSections(ctx *ui.Context, lk ui.QueryResult[looks], q
 }
 
 // savedRow is a setting uas changed, with Revert.
-func (a *App) savedRow(ctx *ui.Context, s state.SavedSetting, now string) ui.Element {
+func (a *App) savedRow(ctx *ui.Context, s state.SavedSetting, now string, d looks) ui.Element {
 	t := ctx.Theme()
 	_, busy := a.running("revert:" + s.Key)
 	was := orDefault(appearance.ValueLabel(s.Key, s.Previous))
 	now = appearance.ValueLabel(s.Key, now)
+	before := "Before uas: " + was
+	if s.Key == appearance.KeyGTKTheme && d.gtk4 != nil && len(d.gtk4.Written) > 0 {
+		// What uas copied for GTK 4 apps goes with it.
+		before += " · GTK 4 files from " + d.gtk4.Theme + " in ~/.config/gtk-4.0"
+		if len(d.gtk4.BackedUp) > 0 {
+			before += ", yours kept aside"
+		}
+	}
 	return ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(56)).PaddingX(space4).PaddingY(space2).
 		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
 			Child(ui.Text(appearance.KeyLabel(s.Key) + ": " + now).FontSize(14).Medium().Truncate()).
-			Child(ui.Text("Before uas: " + was).FontSize(12).TextColor(t.TextSubtle).Truncate())).
+			Child(ui.Div().MinWidth(ui.Px(0)).Tooltip(before).
+				Child(ui.Text(before).FontSize(12).TextColor(t.TextSubtle).Truncate()))).
 		Child(ui.Button("Revert").Icon(icons.Undo2).Secondary().Small().Loading(busy).
 			Tooltip("Go back to " + was).OnClick(func() { a.revertLook(ctx, s.Key) }))
 }
@@ -545,6 +578,8 @@ func (a *App) lookRecRow(ctx *ui.Context, r state.AppearanceInstall, d looks) ui
 		what, icon = strings.Join(r.Families, ", "), icons.Type
 	case catalog.KindCursorTheme:
 		icon = icons.MousePointer2
+	case catalog.KindGTKTheme:
+		icon = icons.AppWindow
 	}
 	parts := []ui.Element{ui.Text(what).FontSize(12).TextColor(t.TextSubtle).Truncate()}
 	if r.Version != "" {
@@ -559,7 +594,7 @@ func (a *App) lookRecRow(ctx *ui.Context, r state.AppearanceInstall, d looks) ui
 			Child(ui.Text(r.Name).FontSize(14).Medium().Truncate()).
 			Child(metaLine(ctx, parts...)))
 	for _, key := range d.using(r) {
-		row = row.Child(statusChip(ctx, "In use: "+strings.ToLower(appearance.KeyLabel(key)), t.Success))
+		row = row.Child(statusChip(ctx, "In use: "+appearance.KeyWord(key), t.Success))
 	}
 	return row.Child(ui.IconButton(icons.Trash).Ghost().Small().Label("Remove " + r.Name).Tooltip("Remove").
 		Disabled(busy).OnClick(func() { rr := r; a.lookRemoving.Set(&rr) }))
@@ -568,10 +603,7 @@ func (a *App) lookRecRow(ctx *ui.Context, r state.AppearanceInstall, d looks) ui
 // themeRow is a theme on the system, with Use, or its In use mark.
 func (a *App) themeRow(ctx *ui.Context, th appearance.Theme, kind catalog.Kind, d looks) ui.Element {
 	t := ctx.Theme()
-	key := appearance.KeyIconTheme
-	if kind == catalog.KindCursorTheme {
-		key = appearance.KeyCursorTheme
-	}
+	key := lookKey(kind)
 	where := a.s.SystemAppLabel()
 	switch {
 	case th.By != "":
@@ -582,6 +614,9 @@ func (a *App) themeRow(ctx *ui.Context, th appearance.Theme, kind catalog.Kind, 
 	title := th.Name
 	if th.Title != "" && th.Title != th.Name {
 		title += " · " + th.Title
+	}
+	if th.GTK && !th.GTK4 {
+		where += " · No GTK 4 files"
 	}
 	row := ui.Div().Row().Align(ui.Center).Gap(space3).MinHeight(ui.Px(52)).PaddingX(space4).PaddingY(space2).
 		Child(ui.Div().Column().Gap(3).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
@@ -599,6 +634,19 @@ func (a *App) themeRow(ctx *ui.Context, th appearance.Theme, kind catalog.Kind, 
 	return row
 }
 
+// lookKey is the setting a theme of a kind is used for; "" for a font, which has several.
+func lookKey(kind catalog.Kind) string {
+	switch kind {
+	case catalog.KindIconTheme:
+		return appearance.KeyIconTheme
+	case catalog.KindCursorTheme:
+		return appearance.KeyCursorTheme
+	case catalog.KindGTKTheme:
+		return appearance.KeyGTKTheme
+	}
+	return ""
+}
+
 // useLook sets a desktop setting to a theme or font family, saving the old value for Revert.
 func (a *App) useLook(ctx *ui.Context, key, value string) {
 	a.startJob(ctx, "use:"+key, "Using "+value, false,
@@ -608,7 +656,7 @@ func (a *App) useLook(ctx *ui.Context, key, value string) {
 
 // revertLook puts a setting back to what it was before uas changed it.
 func (a *App) revertLook(ctx *ui.Context, key string) {
-	a.startJob(ctx, "revert:"+key, "Reverting "+strings.ToLower(appearance.KeyLabel(key)), false,
+	a.startJob(ctx, "revert:"+key, "Reverting "+appearance.KeyWord(key), false,
 		appearance.KeyLabel(key)+" is back to what it was",
 		func(c context.Context, _ func(backend.Progress)) error { return a.s.Looks.Revert(c, key) })
 }
@@ -646,6 +694,9 @@ func (a *App) lookRemoveDialog(ctx *ui.Context) ui.Element {
 		what = "uas removes " + strings.Join(r.Themes, ", ") + " from your account."
 	}
 	what += " If it is in use, the setting goes back to what it was first."
+	if r.Kind == string(catalog.KindGTKTheme) {
+		what += " Its GTK 4 files in ~/.config/gtk-4.0 go too, and yours come back."
+	}
 	return ui.AlertDialog("Remove "+r.Name+"?", what).Intent(ui.AlertDialogDestructive).
 		Confirm("Remove", func() {
 			a.lookRemoving.Set(nil)

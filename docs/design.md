@@ -44,19 +44,25 @@ Every page starts with `pageHeader`: a title, a line about the page, and control
   a side panel with Source, License and Developer as label and value rows, then the install notes, "Why
   <source>?" and the Report an issue and Source code links, all in one icon-and-text row style; and "More in
   <category>" cards.
-- **Appearance:** the header, then tabs (a segmented control): Presets, Fonts, Icons, Cursors and Installed.
+- **Appearance:** the header, then tabs (a segmented control): Presets, Fonts, Icons, Cursors, GTK themes and
+  Installed.
   Presets, the first tab once there are any, is a grid of preset cards: a preview panel in the preset's
   light or dark style with three icons of its icon theme (or "Aa") and its accent as a dot, set as a small
   window in front of its wallpaper when it has one, the name with an "In use" chip, its themes and fonts as
   quiet words, an outlined Apply and a ⋯ menu. Save current look (teal) and New preset sit in the header; its
   dialog lists the wallpaper with a small thumbnail. A preset's page lists its parts in two bordered lists,
-  Look and Fonts, each row with "Leave as is"; the Wallpaper row, last in Look, has the fit select at the
+  Look (style, accent, GTK theme, icons, cursor, wallpaper) and Fonts, each row with "Leave as is"; the GTK
+  theme row, once it is set, has one quiet line under its description about GTK 4 apps (the only place it is
+  said besides a GTK theme's page). The Wallpaper row, last in Look, has the fit select at the
   right and two 16:9 slots under it, Light and Dark, each a bordered thumbnail with its name and Choose…
   (From a file, System wallpapers), and "Same for dark" under the dark one. System wallpapers is a modal grid
   of thumbnails with names, a moon on the ones with their own dark picture and the chosen one outlined in
   teal. A picture that can't be drawn is a quiet tile with its file's name. "Changed by uas" shows the
   wallpaper as one row, with a thumbnail and one Revert. Applying asks first only when it downloads or skips something, and an
-  alert with Undo follows it. Fonts, Icons and Cursors are grids of cards from the catalog.
+  alert with Undo follows it. Fonts, Icons, Cursors and GTK themes are grids of cards from the catalog; a GTK
+  theme's card and page show its Pling previews, never a preview uas draws, and uas's own window keeps its
+  look. Installed lists the system's GTK themes first (a theme without GTK 4 files says "No GTK 4 files"),
+  then icon and cursor themes; the GTK theme's "Changed by uas" row names the GTK 4 files uas copied.
 - **Installed and Updates:** the same list for installed apps, with Update where there is one (outlined, with
   a teal icon), Update all, and Remove.
 

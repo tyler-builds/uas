@@ -152,7 +152,7 @@ func TestPresetWallpaper(t *testing.T) {
 	gs.values["bg picture-uri"] = appearance.PathURI(mine)
 	gs.values["bg picture-uri-dark"] = appearance.PathURI(mine)
 	gs.values["bg picture-options"] = "zoom"
-	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Home: home, SystemData: []string{usr},
+	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Config: filepath.Join(dir, "config"), Home: home, SystemData: []string{usr},
 		Cache: filepath.Join(dir, "cache"), State: state.Store{Path: filepath.Join(dir, "data", "uas", "state.json")},
 		Runner: gs, Desktop: &appearance.GNOME{Runner: gs}, Limits: archives.DefaultLimits}
 	store := appearance.NewPresets(filepath.Join(dir, "config"), filepath.Join(dir, "data"))

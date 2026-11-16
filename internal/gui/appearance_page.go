@@ -134,6 +134,8 @@ func kindLabel(k catalog.Kind) string {
 		return "Icon theme"
 	case catalog.KindCursorTheme:
 		return "Cursor theme"
+	case catalog.KindGTKTheme:
+		return "GTK theme"
 	}
 	return "Font"
 }
@@ -235,11 +237,8 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 	if a.s.Looks != nil {
 		desk = a.s.Looks.Desktop
 	}
-	key := appearance.KeyIconTheme
-	switch app.Kind {
-	case catalog.KindCursorTheme:
-		key = appearance.KeyCursorTheme
-	case catalog.KindFont:
+	key := lookKey(app.Kind)
+	if app.Kind == catalog.KindFont {
 		key = useAs.Get()
 	}
 	canUse := desk != nil && desk.Supports(key)
@@ -255,7 +254,7 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 		var opts []ui.Option[string]
 		for _, k := range appearance.FontKeys {
 			if desk.Supports(k) {
-				opts = append(opts, ui.Option[string]{Value: k, Label: "Use for " + strings.ToLower(appearance.KeyLabel(k))})
+				opts = append(opts, ui.Option[string]{Value: k, Label: "Use for " + appearance.KeyWord(k)})
 			}
 		}
 		if len(opts) > 0 {
@@ -329,6 +328,9 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 	}
 	if desk == nil {
 		col = col.Child(caption(ctx, "This desktop's settings can't be changed from uas: choose it in its own settings."))
+	}
+	if app.Kind == catalog.KindGTKTheme && canUse {
+		col = col.Child(caption(ctx, appearance.GTKNote))
 	}
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).

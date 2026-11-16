@@ -269,7 +269,7 @@ func TestInspectRefuses(t *testing.T) {
 			"program or script"},
 		{"no theme left", []member{file("Good/index.theme", "[Icon Theme]\nName=Good\n"),
 			symlink("Good/cursors/default", "../install.sh"), file("Good/install.sh", "#!/bin/sh"),
-			file("Good/cursors.tar.gz", "x")}, DefaultLimits, "no icon or cursor theme"},
+			file("Good/cursors.tar.gz", "x")}, DefaultLimits, "holds no theme"},
 		{"left out twice", append(good, file("Good/x.sh", "a"), file("Good/x.sh", "b")), DefaultLimits, "twice"},
 		{"too many files", append(good, file("Good/a", ""), file("Good/b", ""), file("Good/c", "")), small,
 			"more than 8 files"},
@@ -279,7 +279,7 @@ func TestInspectRefuses(t *testing.T) {
 			"unpacks to more than"},
 		{"duplicate entry", append(good, file("Good/cursors/default", "again")), DefaultLimits, "twice"},
 		{"nothing to install", []member{file("README", "hi"), file("preview.png", "png")}, DefaultLimits,
-			"no icon or cursor theme"},
+			"holds no theme"},
 		{"theme at the top", cursorTheme(".")[1:], DefaultLimits, "top of the archive"},
 		{"theme in a theme", append(good, file("Good/Inner/index.theme", iconIndex("Inner"))), DefaultLimits,
 			"another theme inside"},
@@ -490,6 +490,137 @@ func TestExtractFonts(t *testing.T) {
 	} {
 		if _, err := ExtractFonts(writeTar(t, tc.members, false), t.TempDir(), DefaultLimits); !IsRefused(err) {
 			t.Errorf("%s: %v", tc.name, err)
+		}
+	}
+}
+
+// gtkTheme is a GTK theme in a folder as Pling's come: GTK 3 and 4 styles, with GTK 2, GNOME Shell and xfwm4
+// folders and a metatheme index.theme beside them.
+func gtkTheme(dir string) []member {
+	return []member{
+		file(dir+"/index.theme", "[Desktop Entry]\nType=X-GNOME-Metatheme\nName="+dir+"\n\n[X-GNOME-Metatheme]\nGtkTheme="+dir+"\n"),
+		file(dir+"/gtk-2.0/gtkrc", "style \"x\" {}"),
+		file(dir+"/gtk-3.0/gtk.css", "@import url(\"gtk-main.css\");"),
+		file(dir+"/gtk-3.0/gtk-main.css", "window {}"),
+		file(dir+"/gtk-3.0/assets/check.png", "PNG"),
+		file(dir+"/gtk-4.0/gtk.css", "window {}"),
+		file(dir+"/gnome-shell/gnome-shell.css", "stage {}"),
+		file(dir+"/xfwm4/themerc", "x=1"),
+		file(dir+"/assets/sed.sh", "#!/bin/sh\nsed -i s/a/b/ ../gtk-3.0/gtk.css\n"),
+	}
+}
+
+func TestInspectGTKThemes(t *testing.T) {
+	// Variants side by side, one's gtk-4.0 a link to another's and one with GTK 4 alone; in a zip, as many are.
+	members := append(gtkTheme("Orchis"), file("Orchis-Dark/gtk-3.0/gtk-dark.css", "window {}"),
+		symlink("Orchis-Dark/gtk-4.0", "../Orchis/gtk-4.0"), file("Orchis-Four/gtk-4.0/gtk.css", "window {}"),
+		file("README.md", "hi"))
+	p := writeZip(t, members)
+	c, err := Inspect(p, DefaultLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, th := range c.Of(catalog.KindGTKTheme) {
+		names = append(names, th.Name)
+	}
+	if !slices.Equal(names, []string{"Orchis", "Orchis-Dark", "Orchis-Four"}) || len(c.Of(catalog.KindIconTheme)) != 0 {
+		t.Fatalf("GTK themes = %v (%+v)", names, c.Themes)
+	}
+	// Extracting writes each theme's whole folder (GNOME Shell, GTK 2 and xfwm4 too), with links made files,
+	// and leaves the script out.
+	dst := t.TempDir()
+	got, err := Extract(p, catalog.KindGTKTheme, dst, DefaultLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Themes) != 3 || !slices.Equal(got.LeftOut, []string{"Orchis/assets/sed.sh"}) {
+		t.Errorf("extracted %+v", got)
+	}
+	for _, f := range []string{"Orchis/gnome-shell/gnome-shell.css", "Orchis/gtk-2.0/gtkrc", "Orchis/xfwm4/themerc",
+		"Orchis/gtk-3.0/assets/check.png", "Orchis-Dark/gtk-4.0/gtk.css", "Orchis-Four/gtk-4.0/gtk.css"} {
+		fi, err := os.Lstat(filepath.Join(dst, f))
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode()&0o111 != 0 {
+			t.Errorf("%s: %v %v", f, fi, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "Orchis/assets/sed.sh")); err == nil {
+		t.Error("the script was written")
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "README.md")); err == nil {
+		t.Error("a file outside the themes was written")
+	}
+	// An icon theme's archive holds no GTK theme, and the other way round.
+	if _, err := Extract(p, catalog.KindIconTheme, t.TempDir(), DefaultLimits); !IsRefused(err) ||
+		!strings.Contains(err.Error(), "no icon theme") {
+		t.Errorf("icon theme from a GTK archive: %v", err)
+	}
+	if _, err := Extract(writeTar(t, cursorTheme("Cur"), false), catalog.KindGTKTheme, t.TempDir(), DefaultLimits); !IsRefused(err) ||
+		!strings.Contains(err.Error(), "no GTK theme") {
+		t.Errorf("GTK theme from a cursor archive: %v", err)
+	}
+}
+
+func TestInspectGTKWithOthers(t *testing.T) {
+	// A GTK theme and an icon theme side by side: each is found, and extracted for its own kind.
+	p := writeTar(t, append(gtkTheme("Nordic"), file("Nordic-icons/index.theme", iconIndex("Nordic")),
+		file("Nordic-icons/48x48/apps/a.svg", "<svg/>")), false)
+	c, err := Inspect(p, DefaultLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, i := c.Of(catalog.KindGTKTheme), c.Of(catalog.KindIconTheme); len(g) != 1 || g[0].Name != "Nordic" ||
+		len(i) != 1 || i[0].Name != "Nordic-icons" {
+		t.Errorf("themes = %+v", c.Themes)
+	}
+	dst := t.TempDir()
+	if got, err := Extract(p, catalog.KindGTKTheme, dst, DefaultLimits); err != nil || len(got.Themes) != 1 {
+		t.Errorf("extract GTK: %+v %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "Nordic-icons")); err == nil {
+		t.Error("the icon theme was written with the GTK theme")
+	}
+
+	// An icon theme inside a GTK theme's folder isn't a theme inside another: they install to different
+	// places. Installing the GTK theme writes it along with the rest of the folder.
+	p = writeTar(t, append(gtkTheme("Mac"), file("Mac/icons/MacIcons/index.theme", iconIndex("MacIcons")),
+		file("Mac/icons/MacIcons/48x48/apps/a.svg", "<svg/>")), false)
+	if c, err := Inspect(p, DefaultLimits); err != nil || len(c.Themes) != 2 {
+		t.Errorf("icon theme in a GTK theme: %v %+v", err, c)
+	}
+
+	// A folder that is both an icon theme and a GTK theme is one theme of both kinds.
+	p = writeTar(t, []member{file("Both/index.theme", iconIndex("Both")), file("Both/48x48/apps/a.svg", "<svg/>"),
+		file("Both/gtk-3.0/gtk.css", "window {}")}, false)
+	if c, err := Inspect(p, DefaultLimits); err != nil || len(c.Themes) != 1 || !c.Themes[0].Icons || !c.Themes[0].GTK {
+		t.Errorf("icon and GTK theme in one folder: %v %+v", err, c)
+	}
+
+	// An icon theme archive with a GTK layout uas can't tell apart (a gtk-3.0 at the top) keeps its icon
+	// theme, as before GTK themes, and lists no GTK theme.
+	p = writeTar(t, []member{file("Pap/index.theme", iconIndex("Pap")), file("Pap/48x48/apps/a.svg", "<svg/>"),
+		file("gtk-3.0/gtk.css", "window {}")}, false)
+	if c, err := Inspect(p, DefaultLimits); err != nil || len(c.Themes) != 1 || c.Themes[0].GTK {
+		t.Errorf("icon theme with a stray gtk-3.0: %v %+v", err, c)
+	}
+}
+
+func TestInspectGTKRefuses(t *testing.T) {
+	for name, members := range map[string][]member{
+		"at the top":           {file("gtk-3.0/gtk.css", "window {}"), file("index.theme", "[Desktop Entry]\n")},
+		"built in":             gtkTheme("Adwaita"),
+		"built in, other case": {file("highcontrast/gtk-3.0/gtk.css", "window {}")},
+		// A theme's source code: styles to build, no gtk.css.
+		"no theme": {file("Orchis-main/src/gtk-3.0/_common.scss", "window {}"),
+			file("Orchis-main/src/gtk-3.0/gtk.scss", "@import 'common';"), file("Orchis-main/install.sh", "#!/bin/sh\n")},
+		"a Shell theme alone": {file("Shell/gnome-shell/gnome-shell.css", "stage {}")},
+		"nested":              append(gtkTheme("Outer"), file("Outer/extra/Inner/gtk-3.0/gtk.css", "window {}")),
+		"gtk.css a script":    {file("Bad/gtk-3.0/gtk.css", "#!/bin/sh\n")},
+		"two of a name":       {file("a/T/gtk-3.0/gtk.css", "x"), file("b/T/gtk-3.0/gtk.css", "x")},
+		"gtk.css a link out":  {symlink("Out/gtk-3.0/gtk.css", "/usr/share/themes/Adwaita/gtk-3.0/gtk.css")},
+	} {
+		if c, err := Inspect(writeTar(t, members, false), DefaultLimits); !IsRefused(err) {
+			t.Errorf("%s: %v %+v", name, err, c)
 		}
 	}
 }

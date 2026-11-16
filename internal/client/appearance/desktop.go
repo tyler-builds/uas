@@ -17,8 +17,11 @@ import (
 // Setting keys: what "Use" changes. They are GNOME's names for its settings; other desktops map them to
 // their own.
 const (
-	KeyIconTheme     = "icon-theme"
-	KeyCursorTheme   = "cursor-theme"
+	KeyIconTheme   = "icon-theme"
+	KeyCursorTheme = "cursor-theme"
+	// KeyGTKTheme is the GTK theme, by its folder's name: what GTK 3 apps, and GTK 4 apps that don't use
+	// libadwaita, are drawn with. uas sets only this setting (see Installer.Use).
+	KeyGTKTheme      = "gtk-theme"
 	KeyFont          = "font-name"           // the interface font
 	KeyDocumentFont  = "document-font-name"  // the font of documents
 	KeyMonospaceFont = "monospace-font-name" // the fixed-width font, as terminals use
@@ -69,7 +72,7 @@ var FontKeys = []string{KeyFont, KeyDocumentFont, KeyMonospaceFont}
 
 // SettingKeys are every setting uas can change, in the order they are listed and applied: the style and
 // accent first, as everything else is seen in them.
-var SettingKeys = []string{KeyColorScheme, KeyAccentColor, KeyIconTheme, KeyCursorTheme, KeyFont,
+var SettingKeys = []string{KeyColorScheme, KeyAccentColor, KeyGTKTheme, KeyIconTheme, KeyCursorTheme, KeyFont,
 	KeyDocumentFont, KeyMonospaceFont, KeyWallpaper, KeyWallpaperDark, KeyWallpaperFit}
 
 // The values of KeyColorScheme.
@@ -98,14 +101,14 @@ func Choices(key string) []string {
 // CheckValue refuses a value a setting can't take.
 func CheckValue(key, value string) error {
 	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("%s: give a value", strings.ToLower(KeyLabel(key)))
+		return fmt.Errorf("%s: give a value", KeyWord(key))
 	}
 	if c := Choices(key); c != nil && !slices.Contains(c, value) {
 		names := make([]string, len(c))
 		for i, v := range c {
 			names[i] = ValueName(key, v)
 		}
-		return fmt.Errorf("%s: %q isn't %s", strings.ToLower(KeyLabel(key)), value, strings.Join(names, ", "))
+		return fmt.Errorf("%s: %q isn't %s", KeyWord(key), value, strings.Join(names, ", "))
 	}
 	return nil
 }
@@ -117,6 +120,8 @@ func KeyLabel(key string) string {
 		return "Icons"
 	case KeyCursorTheme:
 		return "Cursor"
+	case KeyGTKTheme:
+		return "GTK theme"
 	case KeyFont:
 		return "Interface text"
 	case KeyDocumentFont:
@@ -135,6 +140,20 @@ func KeyLabel(key string) string {
 		return "Wallpaper fit"
 	}
 	return key
+}
+
+// KeyWord is KeyLabel in a sentence: lower case, but for a name such as GTK.
+func KeyWord(key string) string { return lowerWords(KeyLabel(key)) }
+
+// lowerWords puts a label in lower case, but its words that are names in capitals ("GTK theme").
+func lowerWords(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if w != strings.ToUpper(w) || len(w) == 1 {
+			words[i] = strings.ToLower(w)
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // ValueLabel names a setting's value for people: "Dark" for prefer-dark, "Teal" for teal. Names of themes
@@ -251,6 +270,7 @@ var gnomeKeys = map[string]struct {
 }{
 	KeyIconTheme:     {gnomeSchema, "icon-theme", false},
 	KeyCursorTheme:   {gnomeSchema, "cursor-theme", false},
+	KeyGTKTheme:      {gnomeSchema, "gtk-theme", false},
 	KeyFont:          {gnomeSchema, "font-name", false},
 	KeyDocumentFont:  {gnomeSchema, "document-font-name", false},
 	KeyMonospaceFont: {gnomeSchema, "monospace-font-name", false},
@@ -399,7 +419,8 @@ func quoteGVariant(s string) string {
 }
 
 // Plasma changes KDE Plasma's icon and cursor themes with the commands its settings use, which tell running
-// apps. It has no command for fonts, so fonts are installed only.
+// apps. It has no command for fonts or GTK themes, so those are installed only: Plasma sets the GTK theme
+// through a module of its own (kde-gtk-config) that writes GTK's files itself, which uas leaves alone.
 type Plasma struct {
 	Runner run.Runner
 	// ChangeIcons is plasma-changeicons, which lives outside $PATH; empty finds it.

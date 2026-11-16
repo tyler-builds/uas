@@ -85,8 +85,10 @@ CREATE VIRTUAL TABLE extensions_fts USING fts5(
 	tokenize = 'porter unicode61 remove_diacritics 2'
 );
 
--- Fonts, icon themes and cursor themes (apps.kind 'font', 'icon-theme', 'cursor-theme') are indexed here,
--- apart from apps and extensions, for the same reasons; no schema version change either.
+-- Fonts, icon themes, cursor themes and GTK themes (apps.kind 'font', 'icon-theme', 'cursor-theme',
+-- 'gtk-theme') are indexed here, apart from apps and extensions, for the same reasons; no schema version
+-- change either. A uas from before GTK themes searches apps in apps_fts and lists them with AppsOnly or by
+-- kind, so it doesn't show them.
 CREATE VIRTUAL TABLE appearance_fts USING fts5(
 	app_id UNINDEXED,
 	name,

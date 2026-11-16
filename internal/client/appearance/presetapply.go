@@ -31,7 +31,7 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 		}
 		v, err := in.Desktop.Get(ctx, key)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(key)), err))
+			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(key), err))
 			continue
 		}
 		if v == "" {
@@ -157,6 +157,11 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 	if err != nil {
 		return nil, err
 	}
+	gtkThemes, err := in.GTKThemes()
+	if err != nil {
+		return nil, err
+	}
+	gtk4, _ := in.GTK4()
 	recs, _ := in.Records()
 	var fams []string
 	famsRead := false
@@ -186,7 +191,7 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 			continue
 		}
 		cur, err := in.Desktop.Get(ctx, key)
-		if err == nil && sameValue(key, cur, part.Value) {
+		if err == nil && sameValue(key, cur, part.Value) && !in.gtk4Due(key, part, gtk4) {
 			it.Step = StepSame
 			items = append(items, it)
 			continue
@@ -198,6 +203,9 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 			present = slices.ContainsFunc(themes, func(t Theme) bool {
 				return t.Name == part.Value && ((key == KeyIconTheme && t.Icons) || (key == KeyCursorTheme && t.Cursors))
 			})
+		case key == KeyGTKTheme:
+			present = slices.Contains(builtinGTKThemes, part.Value) ||
+				slices.ContainsFunc(gtkThemes, func(t Theme) bool { return t.Name == part.Value })
 		case slices.Contains(FontKeys, key):
 			if !famsRead {
 				_, fams = in.fontFamilies(ctx)
@@ -267,6 +275,15 @@ func (in *Installer) planWallpaper(ctx context.Context, it PlanItem, part Part) 
 	return it
 }
 
+// gtk4Due reports whether a GTK theme part that the setting already has still has files to copy into
+// ~/.config/gtk-4.0, which uas hasn't: applying it then does that, so it is set rather than already so.
+func (in *Installer) gtk4Due(key string, part Part, have *state.GTK4Files) bool {
+	if key != KeyGTKTheme || (part.GTK4 != nil && !*part.GTK4) {
+		return false
+	}
+	return (have == nil || have.Theme != part.Value) && in.HasGTK4Files(part.Value)
+}
+
 // sameWallpaper reports whether the desktop's wallpaper is w, by path, leaving out what the desktop doesn't
 // have.
 func sameWallpaper(cur, w Wallpaper) bool {
@@ -291,7 +308,8 @@ func installable(l catalog.Listing, key string, part Part) bool {
 	switch {
 	case slices.Contains(FontKeys, key):
 		return l.Kind == catalog.KindFont
-	case key == KeyIconTheme && l.Kind != catalog.KindIconTheme, key == KeyCursorTheme && l.Kind != catalog.KindCursorTheme:
+	case key == KeyIconTheme && l.Kind != catalog.KindIconTheme, key == KeyCursorTheme && l.Kind != catalog.KindCursorTheme,
+		key == KeyGTKTheme && l.Kind != catalog.KindGTKTheme:
 		return false
 	}
 	v := part.Value
@@ -408,6 +426,7 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 	// The look to go back to: the values of every setting about to change.
 	prev := Preset{Format: PresetFormat, Name: "Previous look", Parts: map[string]Part{}}
 	recs, _ := in.Records()
+	gtk4, _ := in.GTK4()
 	for _, o := range out {
 		if o.Err != nil || (o.Step != StepSet && o.Step != StepInstall) {
 			continue
@@ -424,12 +443,18 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		}
 		cur, err := in.Desktop.Get(ctx, o.Key)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", strings.ToLower(KeyLabel(o.Key)), err)
+			return nil, fmt.Errorf("reading %s: %w", KeyWord(o.Key), err)
 		}
 		if cur == "" {
 			continue
 		}
-		prev.Parts[o.Part] = Part{Value: cur, From: OriginOf(recs, o.Key, cur)}
+		pp := Part{Value: cur, From: OriginOf(recs, o.Key, cur)}
+		if o.Key == KeyGTKTheme && gtk4 == nil {
+			// uas had no files in ~/.config/gtk-4.0: Undo takes its files away and puts the user's back,
+			// rather than copying in the earlier theme's.
+			pp.GTK4 = new(bool)
+		}
+		prev.Parts[o.Part] = pp
 	}
 	if len(prev.Parts) > 0 && store != nil {
 		if err := store.saveUndo(Undo{Applied: p.Name, At: store.now(), Look: prev}); err != nil {
@@ -442,7 +467,7 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			out[i].Done = o.Step == StepSame
 			continue
 		}
-		progress(backend.Progress{Message: "Setting " + strings.ToLower(KeyLabel(o.Key)) + "…"})
+		progress(backend.Progress{Message: "Setting " + KeyWord(o.Key) + "…"})
 		if o.Part == PartWallpaper {
 			if err := in.setWallpaper(ctx, o.Wallpaper); err != nil {
 				out[i].Err = err
@@ -451,7 +476,8 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			out[i].Done = true
 			continue
 		}
-		if err := in.Use(ctx, o.Key, o.Value); err != nil {
+		gtk4 := p.Parts[o.Part].GTK4 == nil || *p.Parts[o.Part].GTK4
+		if err := in.use(ctx, o.Key, o.Value, gtk4); err != nil {
 			out[i].Err = err
 			continue
 		}
@@ -465,7 +491,7 @@ func Failed(outcomes []Outcome) error {
 	var errs []error
 	for _, o := range outcomes {
 		if o.Err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(PartLabel(o.Part)), o.Err))
+			errs = append(errs, fmt.Errorf("%s: %w", PartWord(o.Part), o.Err))
 		}
 	}
 	return errors.Join(errs...)

@@ -74,7 +74,7 @@ type AppearanceInstall struct {
 	ID     string `json:"id"` // the catalog's ID for it, such as "pling:1411743"
 	Source string `json:"source"`
 	Ref    string `json:"ref"`
-	Kind   string `json:"kind"` // "font", "icon-theme" or "cursor-theme"
+	Kind   string `json:"kind"` // "font", "icon-theme", "cursor-theme" or "gtk-theme"
 	Name   string `json:"name"`
 	// Version is the catalog's version when it was installed, which may be empty.
 	Version string `json:"version,omitempty"`
@@ -83,8 +83,8 @@ type AppearanceInstall struct {
 	// SHA256 is the SHA-256 of that file, or for a family of font files, the digest of their SHA-256s (see
 	// appearance.Digest). An update is a catalog listing whose file has another.
 	SHA256 string `json:"sha256"`
-	// Themes are the theme folders it put in ~/.local/share/icons, by name; Families the font families it
-	// installed.
+	// Themes are the theme folders it put in ~/.local/share/icons (or for GTK themes, ~/.local/share/themes),
+	// by name; Families the font families it installed.
 	Themes   []string `json:"themes,omitempty"`
 	Families []string `json:"families,omitempty"`
 	// LeftOut counts the files of a theme archive that could be run (scripts, launchers, archives inside it)
@@ -112,6 +112,23 @@ type State struct {
 	AppImages  []FileAppImage      `json:"appimages,omitempty"`
 	Appearance []AppearanceInstall `json:"appearance,omitempty"`
 	Saved      []SavedSetting      `json:"saved_settings,omitempty"`
+	// GTK4 are the files uas put in ~/.config/gtk-4.0 for the GTK theme in use, or nil.
+	GTK4 *GTK4Files `json:"gtk4_files,omitempty"`
+}
+
+// GTK4Files are the files uas copied from a GTK theme's gtk-4.0 folder into ~/.config/gtk-4.0, where GTK 4
+// and libadwaita apps load them, and the user's own files they took the place of. Only the names in Written
+// are uas's: it deletes or replaces nothing else there. The user's files under those names were moved to
+// Backup first, and are put back when uas's go.
+type GTK4Files struct {
+	Theme string `json:"theme"` // the GTK theme they came from
+	Dir   string `json:"dir"`   // $XDG_CONFIG_HOME/gtk-4.0
+	// Written are the names in Dir that uas wrote: gtk.css, gtk-dark.css, assets and the like.
+	Written []string `json:"written,omitempty"`
+	// Backup is the folder the user's files were moved to, and BackedUp their names, in Dir and in Backup.
+	Backup   string    `json:"backup,omitempty"`
+	BackedUp []string  `json:"backed_up,omitempty"`
+	At       time.Time `json:"at"`
 }
 
 // FindAppearance returns the appearance install with a catalog ID.

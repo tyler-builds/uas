@@ -40,7 +40,8 @@ const (
 	// they are listed and searched apart from apps. It is not in SourcePrecedence.
 	SourceGNOMEExtensions SourceID = "gnome-extensions"
 	// SourcePling is the Pling store family (gnome-look.org, store.kde.org, pling.com), read through
-	// OpenDesktop's OCS API. Its listings are icon and cursor themes (KindIconTheme, KindCursorTheme).
+	// OpenDesktop's OCS API. Its listings are icon, cursor and GTK themes (KindIconTheme, KindCursorTheme,
+	// KindGTKTheme).
 	SourcePling SourceID = "pling"
 	// SourceGoogleFonts is the github.com/google/fonts repo; its listings are font families (KindFont).
 	SourceGoogleFonts SourceID = "google-fonts"
@@ -132,20 +133,22 @@ const (
 	// KindShellExtension is a GNOME Shell extension. Extensions are in the catalog's app tables but have their
 	// own search index, and Search and Browse return them only when asked (see SearchOptions.Extensions).
 	KindShellExtension Kind = "shell-extension"
-	// KindFont, KindIconTheme and KindCursorTheme are appearance items: a font family, an icon theme and a
-	// cursor theme, installed for the user. Like extensions they are in the catalog's app tables with their
-	// own search index (appearance_fts), and Search and Browse return them only when asked for by kind.
+	// KindFont, KindIconTheme, KindCursorTheme and KindGTKTheme are appearance items: a font family, an icon
+	// theme, a cursor theme and a GTK theme, installed for the user. Like extensions they are in the catalog's
+	// app tables with their own search index (appearance_fts), and Search and Browse return them only when
+	// asked for by kind.
 	KindFont        Kind = "font"
 	KindIconTheme   Kind = "icon-theme"
 	KindCursorTheme Kind = "cursor-theme"
+	KindGTKTheme    Kind = "gtk-theme"
 )
 
 // AppearanceKinds are the kinds of appearance items.
-var AppearanceKinds = []Kind{KindFont, KindIconTheme, KindCursorTheme}
+var AppearanceKinds = []Kind{KindFont, KindIconTheme, KindCursorTheme, KindGTKTheme}
 
-// Appearance reports whether k is an appearance item: a font, an icon theme or a cursor theme.
+// Appearance reports whether k is an appearance item: a font, an icon theme, a cursor theme or a GTK theme.
 func (k Kind) Appearance() bool {
-	return k == KindFont || k == KindIconTheme || k == KindCursorTheme
+	return k == KindFont || k == KindIconTheme || k == KindCursorTheme || k == KindGTKTheme
 }
 
 // App reports whether k is an app, not a shell extension or an appearance item.

@@ -158,12 +158,16 @@ All endpoints below need confirming during the first spike.
   listed, so all are kept. Listings are `Kind` `shell-extension` with the UUID as their ref; icons and the
   one screenshot link to the site.
 
-- **Icon and cursor themes** (`fetch/pling`): the Pling store family (gnome-look.org, store.kde.org) through
-  OpenDesktop's OCS API at `api.opendesktop.org/ocs/v1` (the same paths under gnome-look.org answer 410
-  Gone), no key: categories 132 (icon themes) and 107 (cursor themes), most downloaded first, 100 a page,
-  down to a floor of 10,000 downloads for icon themes and 3,000 for cursor themes (about 300 of each in
-  November 2026; `-pling-min-downloads`, `-pling-min-cursor-downloads`). Items Pling's moderators exclude
-  (`ghns_excluded`) are left out. Listings are `Kind` `icon-theme` or `cursor-theme`, ref the item ID, with
+- **Icon, cursor and GTK themes** (`fetch/pling`): the Pling store family (gnome-look.org, store.kde.org)
+  through OpenDesktop's OCS API at `api.opendesktop.org/ocs/v1` (the same paths under gnome-look.org answer
+  410 Gone), no key: categories 132 (icon themes), 107 (cursor themes) and 135 ("GTK3/4 Themes"), most
+  downloaded first, 100 a page, down to a floor of 10,000 downloads for icon themes, 3,000 for cursor themes
+  and 10,000 for GTK themes (about 300, 300 and 270 in November 2026; `-pling-min-downloads`,
+  `-pling-min-cursor-downloads`, `-pling-min-gtk-downloads`). GTK 2 themes (136), GNOME Shell themes (134)
+  and Cinnamon themes (133) are categories of their own and aren't read; most GTK3/4 items carry their
+  `gnome-shell`, `gtk-2.0`, `xfwm4` and `cinnamon` folders anyway, inside each theme's folder. Items Pling's
+  moderators exclude (`ghns_excluded`) are left out. Listings are `Kind` `icon-theme`, `cursor-theme` or
+  `gtk-theme`, ref the item ID, with
   downloads (`Installs`; Pling's counts are rough, its list and item views disagree), its rating (`Score`,
   where Pling gives an unrated item 50, which uas never shows as a rating), the licence from its tags, its
   preview pictures (linked, like screenshots) and a trust score (`trust.Pling`). Each of an item's files
@@ -173,7 +177,9 @@ All endpoints below need confirming during the first spike.
   leaves out of it for being runnable (`Asset.LeftOut`), or refuses it. A refused file is left out, and an
   item with none left is too. Each refused file and each item left out is logged (`pling file refused`,
   `pling item left out`, with the item ID, name and reason), so a theme missing from the catalog can be
-  traced from the run's log. In the November 2026 sample, a theme nested inside another (Layan) was refused;
+  traced from the run's log. In a November 2026 sample of the 16 most downloaded GTK items, 14 were listed:
+  Ant Themes' files hold two themes of one name each (`Ant-Bloody` and `Ant-Bloody-alt-style/Ant-Bloody`), and
+  X-Arc-Collection links to a web page. In the November 2026 sample, a theme nested inside another (Layan) was refused;
   until rules version 3, so were Kora and about 30 other files of the first production run, for a helper
   script such as `create-new-icon-theme.cache.sh`. What was found is kept per item, file
   name and MD5 (`pling/pins` in the indexer cache), so a file is read again only when its author replaces it,
@@ -182,10 +188,18 @@ All endpoints below need confirming during the first spike.
   catalog holds none: the client asks for a fresh one at install time. New files are downloaded within a
   per-run budget (`-pling-pin-files`, `-pling-pin-mb`), and an item waits for a later run until all its
   files are read, so the first runs fill the catalog in over a day. Each category first gets an equal share
-  of what the budget has left (icon themes half, cursor themes the rest), since icon themes come first and
-  are far larger: without shares, the first run spent its 3.3 GB on icon themes and listed no cursor theme.
+  of what the budget has left (icon themes a third, cursor themes half of what is left, GTK themes the rest),
+  since icon themes come first and are far larger: without shares, the first run spent its 3.3 GB on icon
+  themes and listed no cursor theme. GTK themes come last, so icon and cursor themes are read as before; their
+  files are small (Orchis's is 220 KB, 30 files of the 16 most downloaded items were 18 MB).
   What the shares leave then goes to the items still waiting, most downloaded first within each category. Pling publishes no rate limit; pages and
   downloads are spaced a second apart, with a generic User-Agent.
+  GTK themes needed no schema change: they are apps of kind `gtk-theme`, searched in `appearance_fts`. A uas
+  from before them searches apps in `apps_fts` and lists them by category (`AppsOnly`) or by an appearance
+  kind it knows, so it never shows one; only `uas info pling:<id>` finds one by its ID, and installing it
+  says no source here offers it. A uas with them and a catalog from before them shows "No GTK themes in the
+  catalog yet" with Check for a newer catalog. The cached Pling result's key names the GTK floor, so the
+  first scheduled run with this indexer reads Pling again rather than reusing a result without GTK themes.
 - **Fonts from Google Fonts** (`fetch/googlefonts`): the github.com/google/fonts repo at the commit `main`
   points at, not the Google Fonts Developer API (it needs a key, and its terms forbid embedding one in an
   open-source project). One GitHub API call reads the recursive tree; each family's `METADATA.pb` (a text
@@ -621,7 +635,7 @@ anything off, and it says why for the rest ("no version for GNOME 51", "came wit
 own settings (dconf) aren't exported. Older versions of uas ignore the field, so the export format is still
 version 1.
 
-### Fonts, icon themes and cursor themes
+### Fonts, icon themes, cursor themes and GTK themes
 
 **Reading archives** (`internal/appearance`, shared by the indexer and the client). A theme archive
 (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar.zst` or `.zip`; 7-Zip and RAR are refused) is read entry by entry
@@ -638,9 +652,18 @@ folder that looks runnable refuses the archive, and so does an archive left with
 the client run the same checks, so the themes the catalog pins are the ones installed, without the same
 files; the client records how many it left out, and an item whose file holds some says so before install.
 Themes are found by folder: an `index.theme` whose `[Icon Theme]` section lists icon folders is an icon
-theme, a `cursors` folder a cursor theme. The archive is refused when none is found, or they can't be told
-apart cleanly: a theme with no folder of its own, one inside another, two of one name, or a name that would
-take over the desktop's own (`default`, `hicolor`). Themes rely on links (a cursor theme names one cursor
+theme, a `cursors` folder a cursor theme, and a `gtk-3.0` or `gtk-4.0` folder with a `gtk.css` or
+`gtk-dark.css` (a file, or a link to one in the archive) a GTK theme. That is what GTK 3 and 4 load, so a
+theme's source code (`src/gtk-3.0/*.scss`) or a GNOME Shell style alone is no theme. What else a GTK theme's
+folder holds (`gnome-shell`, `gtk-2.0`, `metacity-1`, `xfwm4`, `cinnamon`, `plank`, `assets`) is written
+with it as part of the theme, after the same checks; uas uses only the GTK 3 and 4 styles. The archive is
+refused when none is found, or they can't be told apart cleanly: a theme with no folder of its own, one
+inside another, two of one name, or a name that would take over the desktop's own (`default`, `hicolor`;
+for GTK themes `Default` and the ones GTK has built in, `Adwaita`, `Adwaita-dark`, `HighContrast`,
+`HighContrastInverse`, `Emacs`). Icon and cursor themes are judged apart from GTK themes, since they install
+to other folders: an icon theme inside a GTK theme's folder is no theme inside another, and an archive whose
+icon or cursor themes are clean keeps them, as before GTK themes, when its GTK themes aren't (those are left
+out of it). So no icon or cursor archive the catalog had changes, and `RulesVersion` stays 3. Themes rely on links (a cursor theme names one cursor
 many ways, Papirus-Dark links most of its folders to Papirus's), so links are allowed but never written: a
 link to a file or folder inside the archive becomes hard links between files the package wrote (or copies),
 and a link that leads anywhere else (out of the archive, to an absolute path, to nothing) is left out, with
@@ -654,20 +677,23 @@ A theme's file is chosen by the variant picked; the client asks Pling's API for 
 (`/content/data/<id>`), finds the file by name and MD5 (an author can reorder files; a changed MD5 means the
 file changed since the catalog was built, and it stops there), takes its fresh link (only on Pling's own
 hosts, over HTTPS), downloads it into a new folder under `~/.local/share/uas/staging`, and refuses it unless
-its size and SHA-256 are the catalog's. Every theme in the file is installed, as `~/.local/share/icons/<name>`
-(not `~/.icons`, which Flatpak apps can't see), since variants inherit from each other. A name that would
-replace a theme uas didn't install, hide one in `~/.icons`, or hide one of the system's is refused before
-the download. Google fonts are downloaded file by file from the pinned commit (`raw.githubusercontent.com`
+its size and SHA-256 are the catalog's. Every theme of the listing's kind in the file is installed, as
+`~/.local/share/icons/<name>` for icon and cursor themes (not `~/.icons`, which Flatpak apps can't see) and
+`$XDG_DATA_HOME/themes/<name>` (`~/.local/share/themes`, not `~/.themes`) for GTK themes, since variants
+inherit from each other. A name that would replace a theme uas didn't install, hide one in `~/.icons` (or
+`~/.themes`), or hide one of the system's (`icons`, or `themes`, under each of `$XDG_DATA_DIRS`) is refused
+before the download. Icon and cursor themes share their folder's names; GTK themes have their own, so an icon
+theme and a GTK theme may both be called Orchis. Google fonts are downloaded file by file from the pinned commit (`raw.githubusercontent.com`
 only), checked against their SHA-256 and as fonts; Nerd Fonts' archive from its GitHub release. Fonts go to
 `~/.local/share/fonts/uas/<source>-<family>/`, then `fc-cache` runs. uas creates `~/.local/share/fonts` when
 it starts, since Flatpak shows apps the user's fonts only if the folder exists when the app starts. Each
 install is recorded in the state file (`appearance`: catalog ID, version, file, SHA-256, themes or font
 families, paths written), which removal and updates use; removal deletes only those paths, and only under
-the two folders uas installs to.
+the three folders uas installs to.
 
 **Using.** Settings have desktop-neutral keys (`appearance.SettingKeys`), and each `Desktop` maps them to its
-own and says which it `Supports`. On GNOME, `gsettings` sets `org.gnome.desktop.interface`'s `icon-theme`,
-`cursor-theme`, `font-name`, `document-font-name` and `monospace-font-name` (a family alone keeps the
+own and says which it `Supports`. On GNOME, `gsettings` sets `org.gnome.desktop.interface`'s `gtk-theme`,
+`icon-theme`, `cursor-theme`, `font-name`, `document-font-name` and `monospace-font-name` (a family alone keeps the
 setting's size; a font with a size is set as it is), `color-scheme` (default, light or dark) and
 `accent-color`; the last two are offered only when `gsettings list-keys` has them (GNOME 42 and 47). The
 wallpaper is three settings, `wallpaper`, `wallpaper-dark` and `wallpaper-fit`: `org.gnome.desktop.background`'s
@@ -678,18 +704,50 @@ a file URI is kept as it is. Setting the wallpaper sets `org.gnome.desktop.scree
 GNOME's settings do, and one picture with no dark variant is used for both styles. Font
 settings are Pango descriptions, read from the end as Pango does (`fontname.go`), so `Fira Code weight=450
 10` is the family Fira Code. On KDE Plasma, `plasma-changeicons` and `plasma-apply-cursortheme` change icons
-and cursors (fonts are installed only; the wallpaper isn't set). Other desktops install only. Before the first change of a setting
+and cursors (fonts and GTK themes are installed only, and the wallpaper isn't set: Plasma sets the GTK theme
+through its own `kde-gtk-config` module, which writes GTK's files itself and has no command uas could test).
+Other desktops install only. Before the first change of a setting
 the state file saves its value (`saved_settings`); Revert puts it back (Revert all puts back every one), a
 change back to that value forgets it, and removing a font or theme that is in use reverts first (or resets
 the setting when uas didn't change it). The wallpaper's three settings are listed and reverted as one,
 "Wallpaper": `revert wallpaper` puts back each of them uas changed (or resets all three when it changed none).
 
+**GTK 4 files** (`client/appearance/gtk4.go`). GTK 4 apps, libadwaita's above all, don't draw themselves with
+the `gtk-theme` setting; they load the user's own style, `$XDG_CONFIG_HOME/gtk-4.0/gtk.css`, when they start.
+So using a GTK theme (`Use`, Install and use, a preset's `gtk` part) also copies the files of the theme's
+`gtk-4.0` folder, when it has a `gtk.css` there, into `~/.config/gtk-4.0`: `gtk.css`, `gtk-dark.css`, `assets`
+and whatever else is in it (Marwaita's `gtk-base.css`, adw-gtk3's `libadwaita.css`). The theme is found as
+GTK finds it (`~/.local/share/themes`, `~/.themes`, then the system's), so a theme uas didn't install works the
+same. They are copies, not links into the theme as WhiteSur's and Colloid's install scripts make (Colloid
+links `gtk.css`, `gtk-dark.css` and `assets`; WhiteSur compiles into the folder and links `gtk.css` to a
+light or dark file): Bazzite lets every Flatpak app read `~/.config/gtk-4.0` (a system-wide override,
+`xdg-config/gtk-4.0:ro`) but not `~/.local/share/themes`, so a link would lead nowhere in a sandbox, and a
+copy stays whole when the theme is updated or removed. Links inside the theme's own folder are followed;
+anything leading out of it is left out, and no file is written executable. A theme's dark look is whatever
+its own `gtk.css` is: a dark variant that is a folder of its own (Orchis-Dark) is chosen as that theme, and
+`gtk-dark.css` comes along as it is (GTK 4 itself loads only `gtk.css` from the folder). Only the names uas
+wrote are its own (`gtk4_files` in the state file: the theme, the folder, the names written, and where the
+user's are kept). Before writing a name the user has there (a file, a folder or a link), uas moves it to
+`$XDG_DATA_HOME/uas/gtk-4.0-yours-<n>/` and records it; nothing else in the folder (`settings.ini`, the
+user's other files) is touched. Using another theme takes uas's files away and copies the new theme's (a
+user's file whose name the new theme doesn't have comes back); a theme without GTK 4 files, Revert,
+`revert all` and removing the theme (in use, or the source of the files even after the setting was changed
+elsewhere) take uas's files away and put the user's back as they were, then remove the empty backup folder.
+While uas's files are there, `gtk-theme` stays in "Changed by uas", even when the setting already had the
+theme. An update of the theme copies its files again. The record matches the disk after every step, even one
+that fails part-way, and a name in it that isn't one plain folder entry is ignored. Open apps load the new
+files when they start again. Nothing sets `GTK_THEME` or changes libadwaita itself.
+
 **Presets** (`client/appearance/preset.go`, `presetapply.go`, `session/presets.go`, `gui/presets.go`) are looks
 saved under a name, one JSON file each in `~/.config/uas/presets/<slug>.json` (`uas_preset` format version,
 name, times, and `parts`). A part is optional and is left alone when missing; it holds the setting's `value`
 and, for a font or theme uas installed, `from` (its catalog ID and variant), so it can be installed elsewhere.
-The parts are `scheme`, `accent`, `icons`, `cursor`, `interface`, `document`, `monospace` and `wallpaper`; the
-format keeps room for `gtk` and `shell`, and parts and fields this version doesn't know survive a rewrite. The
+The parts are `scheme`, `accent`, `gtk`, `icons`, `cursor`, `interface`, `document`, `monospace` and
+`wallpaper`; the format keeps room for `shell`, and parts and fields this version doesn't know survive a
+rewrite. The `gtk` part is the GTK theme by name, as the format reserved it, so files from before it (with no
+`gtk` part, or one a hand wrote) read as they are; applying one copies its GTK 4 files as Use does. Its
+optional `gtk4: false` leaves them out and puts back what uas moved aside: a Previous look has it when uas
+had no GTK 4 files in place before the apply, so Undo restores `~/.config/gtk-4.0` as it was. The
 **wallpaper** part has `light`, an optional `dark` (none is the light picture) and `fit` (zoom when missing) in
 place of `value`. A picture of the user's (jpg, jpeg, png, webp, jxl or svg) is copied into the wallpaper
 store, `$XDG_DATA_HOME/uas/wallpapers/<sha256>.<ext>`, and named `sha256:<hex>`, so moving or deleting the
@@ -705,9 +763,10 @@ removed when any of those can't be read. Names are unique whatever their case; a
 when it is the user's. **Applying** plans each part (set, already so, install from the catalog first, or
 skipped: missing (a wallpaper whose picture can't be found), unsupported here, or a newer uas's), installs what
 is missing before anything changes, saves the values it is about to change to
-`~/.local/share/uas/previous-look.json` for Undo, then sets the parts in order (style, accent, icons, cursor,
-fonts, the wallpaper last) through `Use`, so Revert still goes back to the values from before uas. A part that
-fails is reported and the rest are still set. "In use" is worked out by comparing a preset's parts with the
+`~/.local/share/uas/previous-look.json` for Undo, then sets the parts in order (style, accent, GTK theme,
+icons, cursor, fonts, the wallpaper last) through `Use`, so Revert still goes back to the values from before uas. A part that
+fails is reported and the rest are still set. A GTK theme the setting already has is "already so" unless it has
+GTK 4 files uas hasn't copied, which applying copies. "In use" is worked out by comparing a preset's parts with the
 settings, the wallpaper's pictures and fit too. CLI: `uas appearance preset`, and `uas appearance use wallpaper
 <file> [-dark <file>] [-fit <mode>]`.
 
@@ -723,10 +782,13 @@ URI>.png`, when its `Thumb::MTime` is the picture's), else the file decoded (two
 down to 520 pixels wide; an SVG is drawn as vectors, a slideshow by its first picture. JPEG, PNG, WebP and
 GIF decode with Go's decoders; JPEG XL with the pure-Go decoder already in the build, which can't read many
 of GNOME's own (they use features it lacks), so those show a quiet tile with the file's name unless GNOME
-has thumbnailed them. Its other tabs are Fonts, Icons and Cursors, each a grid of cards, most
-popular first (or recently updated, or by name), searched from the top bar, and Installed: what uas
-installed with what it's in use for, the settings it changed with Revert, and every icon and cursor theme
-on the system, the one in use marked and the others with Use. A theme's page shows its preview pictures
+has thumbnailed them. Its other tabs are Fonts, Icons, Cursors and GTK themes, each a grid of cards, most
+popular first (or recently updated, or by name), searched from the top bar (a catalog from before GTK themes
+says so, with Check for a newer catalog), and Installed: what uas installed with what it's in use for, the
+settings it changed with Revert (the GTK theme's row names the GTK 4 files uas copied), and every GTK, icon
+and cursor theme on the system, the one in use marked and the others with Use. uas draws no preview of a
+GTK theme and its own window keeps its look; one short line on a GTK theme's page and on a preset's GTK
+theme row says that GTK 4 apps change only with themes that have GTK 4 files, and open apps after a restart. A theme's page shows its preview pictures
 (linked from Pling, as screenshots are), downloads, rating (or "Not rated"), last change, version, trust
 score, the variant picker, and Install, Install and use, Use, Remove and Revert. **Font previews**: Jamb
 draws text only in fonts registered when the app starts and the desktop's own families, so a font that
@@ -861,7 +923,7 @@ uas/
 │   │   │   ├── homebrew/
 │   │   │   ├── github/
 │   │   │   ├── gnome/       # extensions.gnome.org
-│   │   │   ├── pling/       # icon and cursor themes from Pling
+│   │   │   ├── pling/       # icon, cursor and GTK themes from Pling
 │   │   │   ├── googlefonts/ # github.com/google/fonts
 │   │   │   └── nerdfonts/   # Nerd Fonts releases
 │   │   ├── merge/           # dedupe and linking

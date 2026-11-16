@@ -128,7 +128,7 @@ type SearchOptions struct {
 	// Shell, with Extensions, keeps only the extensions that have a version for this GNOME Shell release, by
 	// major version ("51").
 	Shell string
-	// Kind, an appearance kind (KindFont, KindIconTheme or KindCursorTheme), searches the fonts or themes of
+	// Kind, an appearance kind (KindFont, KindIconTheme, KindCursorTheme or KindGTKTheme), searches the fonts or themes of
 	// that kind instead of apps.
 	Kind Kind
 }
@@ -149,7 +149,7 @@ func (o SearchOptions) table() string {
 func kindFilter(param string) string { return `(` + param + ` = '' OR a.kind = ` + param + `)` }
 
 // appKinds is a WHERE term that keeps the apps a that are apps: not shell extensions, fonts or themes.
-const appKinds = `a.kind NOT IN ('shell-extension', 'font', 'icon-theme', 'cursor-theme')`
+const appKinds = `a.kind NOT IN ('shell-extension', 'font', 'icon-theme', 'cursor-theme', 'gtk-theme')`
 
 // shellFilter is a WHERE term that keeps the apps a with a listing for the GNOME Shell release bound to
 // param ("?6"), or everything when that is empty.

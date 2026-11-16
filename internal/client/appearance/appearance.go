@@ -1,8 +1,9 @@
-// Package appearance installs fonts and icon and cursor themes for the user, from the catalog, and uses them
-// on the desktop.
+// Package appearance installs fonts and icon, cursor and GTK themes for the user, from the catalog, and uses
+// them on the desktop.
 //
 // Everything goes into the user's own folders, with no root: fonts into ~/.local/share/fonts/uas/<item>/,
-// themes into ~/.local/share/icons/<theme>/ (not ~/.icons, which Flatpak apps can't see). Every download is
+// icon and cursor themes into ~/.local/share/icons/<theme>/ (not ~/.icons, which Flatpak apps can't see),
+// GTK themes into ~/.local/share/themes/<theme>/ (not ~/.themes, for the same reason). Every download is
 // checked against the SHA-256 the catalog pins before anything is unpacked, and archives are unpacked by
 // internal/appearance, which refuses anything that isn't plainly a theme or a font; nothing from an archive
 // is ever run. Each install is recorded in uas's state file, with what it wrote, so it can be removed and
@@ -42,12 +43,17 @@ const PlingAPI = "https://api.opendesktop.org/ocs/v1"
 
 // Installer installs and removes fonts and themes and uses them on the desktop.
 type Installer struct {
-	// Data is $XDG_DATA_HOME (~/.local/share): fonts go in Data/fonts/uas, themes in Data/icons.
+	// Data is $XDG_DATA_HOME (~/.local/share): fonts go in Data/fonts/uas, icon and cursor themes in
+	// Data/icons, GTK themes in Data/themes.
 	Data string
-	// Home is the user's home folder, for ~/.icons, which hides a theme of the same name in Data/icons.
+	// Home is the user's home folder, for ~/.icons and ~/.themes, which hide a theme of the same name in
+	// Data/icons and Data/themes.
 	Home string
-	// SystemData are $XDG_DATA_DIRS, whose icons folders hold the system's themes.
+	// SystemData are $XDG_DATA_DIRS, whose icons and themes folders hold the system's themes.
 	SystemData []string
+	// Config is $XDG_CONFIG_HOME (~/.config), whose gtk-4.0 folder GTK 4 apps load the user's style from
+	// (see GTK4Dir).
+	Config string
 	// Cache is where font files downloaded for previews are kept, by SHA-256, so installing reuses them.
 	Cache  string
 	State  state.Store
@@ -77,6 +83,10 @@ func New(r run.Runner, desktop Desktop) (*Installer, error) {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return nil, err
+	}
 	cache := ""
 	if c, err := os.UserCacheDir(); err == nil {
 		cache = filepath.Join(c, "uas", "fonts")
@@ -85,7 +95,7 @@ func New(r run.Runner, desktop Desktop) (*Installer, error) {
 	if len(sys) == 0 {
 		sys = []string{"/usr/local/share", "/usr/share"}
 	}
-	return &Installer{Data: data, Home: home, SystemData: sys, Cache: cache, State: state.Store{Path: statePath},
+	return &Installer{Data: data, Home: home, SystemData: sys, Config: config, Cache: cache, State: state.Store{Path: statePath},
 		Client: &http.Client{Timeout: 30 * time.Minute}, Runner: r, Desktop: desktop, PlingAPI: PlingAPI,
 		Limits: looks.DefaultLimits}, nil
 }
@@ -97,8 +107,21 @@ func (in *Installer) now() time.Time {
 	return time.Now()
 }
 
-// IconsDir is where themes are installed: ~/.local/share/icons.
+// IconsDir is where icon and cursor themes are installed: ~/.local/share/icons.
 func (in *Installer) IconsDir() string { return filepath.Join(in.Data, "icons") }
+
+// ThemesDir is where GTK themes are installed: ~/.local/share/themes.
+func (in *Installer) ThemesDir() string { return filepath.Join(in.Data, "themes") }
+
+// themeFolders are where themes of a kind go, and where the desktop finds them: the folder uas installs to,
+// the one in the home folder that hides it (~/.icons, ~/.themes), and the system's under each of
+// SystemData, by its folder name.
+func (in *Installer) themeFolders(kind catalog.Kind) (install, home, system string) {
+	if kind == catalog.KindGTKTheme {
+		return in.ThemesDir(), ".themes", "themes"
+	}
+	return in.IconsDir(), ".icons", "icons"
+}
 
 // FontsDir is where fonts are installed: ~/.local/share/fonts/uas.
 func (in *Installer) FontsDir() string { return filepath.Join(in.Data, "fonts", "uas") }
@@ -209,7 +232,7 @@ func (in *Installer) Install(ctx context.Context, l catalog.Listing, variant str
 	rec := state.AppearanceInstall{ID: id, Source: string(l.Source), Ref: l.Ref, Kind: string(l.Kind), Name: l.Name,
 		Version: l.Version, InstalledAt: in.now().UTC()}
 	switch l.Kind {
-	case catalog.KindIconTheme, catalog.KindCursorTheme:
+	case catalog.KindIconTheme, catalog.KindCursorTheme, catalog.KindGTKTheme:
 		err = in.installTheme(ctx, st, l, variant, stage, &rec, progress)
 	case catalog.KindFont:
 		err = in.installFont(ctx, l, stage, &rec, progress)
@@ -228,8 +251,16 @@ func (in *Installer) Install(ctx context.Context, l catalog.Listing, variant str
 		}
 	}
 	st.PutAppearance(rec)
+	// An update of the GTK theme whose GTK 4 files uas copied: the copies are made again from it.
+	var syncErr error
+	if st.GTK4 != nil && l.Kind == catalog.KindGTKTheme && slices.Contains(rec.Themes, st.GTK4.Theme) {
+		syncErr = in.syncGTK4Locked(&st, st.GTK4.Theme, true)
+	}
 	if err := in.State.Save(st); err != nil {
 		return state.AppearanceInstall{}, err
+	}
+	if syncErr != nil {
+		return rec, fmt.Errorf("installed, but its GTK 4 files couldn't be copied again: %w", syncErr)
 	}
 	if l.Kind == catalog.KindFont {
 		in.fcCache(ctx, progress)
@@ -257,7 +288,7 @@ func (in *Installer) stage() (string, error) {
 
 // owned reports whether p is somewhere uas installs to, so removing it can't touch anything else.
 func (in *Installer) owned(p string) bool {
-	for _, base := range []string{in.IconsDir(), in.FontsDir()} {
+	for _, base := range []string{in.IconsDir(), in.ThemesDir(), in.FontsDir()} {
 		if rel, err := filepath.Rel(base, p); err == nil && filepath.IsLocal(rel) && !strings.Contains(rel, string(filepath.Separator)) {
 			return true
 		}
@@ -281,7 +312,7 @@ func (in *Installer) installTheme(ctx context.Context, st state.State, l catalog
 	}
 	// Check the names before downloading: a theme of the same name that uas didn't install is never replaced.
 	for _, name := range a.Themes {
-		if err := in.checkThemeName(st, rec.ID, name); err != nil {
+		if err := in.checkThemeName(st, kind, rec.ID, name); err != nil {
 			return err
 		}
 	}
@@ -307,7 +338,7 @@ func (in *Installer) installTheme(ctx context.Context, st state.State, l catalog
 	var names []string
 	for _, t := range got.Themes {
 		names = append(names, t.Name)
-		if err := in.checkThemeName(st, rec.ID, t.Name); err != nil {
+		if err := in.checkThemeName(st, kind, rec.ID, t.Name); err != nil {
 			return err
 		}
 	}
@@ -315,11 +346,12 @@ func (in *Installer) installTheme(ctx context.Context, st state.State, l catalog
 		return fmt.Errorf("%s holds other themes than the catalog says (%s, not %s)", a.Name,
 			strings.Join(names, ", "), strings.Join(a.Themes, ", "))
 	}
-	if err := os.MkdirAll(in.IconsDir(), 0o755); err != nil {
+	dir, _, _ := in.themeFolders(kind)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	for _, name := range names {
-		dst := filepath.Join(in.IconsDir(), name)
+		dst := filepath.Join(dir, name)
 		if _, err := os.Lstat(dst); err == nil {
 			// Ours (checkThemeName said so): an earlier install of this item.
 			if err := os.RemoveAll(dst); err != nil {
@@ -342,29 +374,32 @@ func sameSet(a, b []string) bool {
 	return slices.Equal(a, b)
 }
 
-// checkThemeName refuses a theme name that would replace or hide a theme uas didn't install for this item.
-func (in *Installer) checkThemeName(st state.State, id, name string) error {
+// checkThemeName refuses a theme name that would replace or hide a theme uas didn't install for this item,
+// among the themes of the folders kind installs to: icon and cursor themes share theirs, GTK themes have
+// their own, so an icon theme and a GTK theme may have one name.
+func (in *Installer) checkThemeName(st state.State, kind catalog.Kind, id, name string) error {
 	if !looks.ThemeName.MatchString(name) {
 		return fmt.Errorf("a theme is called %q, which uas won't use as a folder name", name)
 	}
 	for _, other := range st.Appearance {
-		if other.ID != id && slices.Contains(other.Themes, name) {
+		if other.ID != id && looks.SameFolders(kind, catalog.Kind(other.Kind)) && slices.Contains(other.Themes, name) {
 			return fmt.Errorf("%s is installed already, from %s; remove that first", name, other.Name)
 		}
 	}
-	if _, err := os.Lstat(filepath.Join(in.IconsDir(), name)); err == nil {
+	dir, home, system := in.themeFolders(kind)
+	if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
 		if mine, ok := st.FindAppearance(id); !ok || !slices.Contains(mine.Themes, name) {
 			return fmt.Errorf("a theme called %s is already in %s, and uas doesn't replace what it didn't install",
-				name, in.IconsDir())
+				name, dir)
 		}
 	}
 	if in.Home != "" {
-		if _, err := os.Lstat(filepath.Join(in.Home, ".icons", name)); err == nil {
-			return fmt.Errorf("a theme called %s is already in ~/.icons, where it would hide this one", name)
+		if _, err := os.Lstat(filepath.Join(in.Home, home, name)); err == nil {
+			return fmt.Errorf("a theme called %s is already in ~/%s, where it would hide this one", name, home)
 		}
 	}
 	for _, d := range in.SystemData {
-		if _, err := os.Lstat(filepath.Join(d, "icons", name)); err == nil {
+		if _, err := os.Lstat(filepath.Join(d, system, name)); err == nil {
 			return fmt.Errorf("the system has a theme called %s; installing this one would hide it", name)
 		}
 	}
@@ -701,10 +736,18 @@ func (in *Installer) Remove(ctx context.Context, id string, progress func(backen
 			if err != nil || !inUse(rec, key, cur) {
 				continue
 			}
-			progress(backend.Progress{Message: "Switching " + strings.ToLower(KeyLabel(key)) + " back…"})
+			progress(backend.Progress{Message: "Switching " + KeyWord(key) + " back…"})
 			if err := in.revertLocked(ctx, &st, key); err != nil {
 				return err
 			}
+		}
+	}
+	// GTK 4 files copied from one of its themes go too, even when the GTK theme setting was changed since.
+	if st.GTK4 != nil && catalog.Kind(rec.Kind) == catalog.KindGTKTheme && slices.Contains(rec.Themes, st.GTK4.Theme) {
+		progress(backend.Progress{Message: "Taking its GTK 4 files away…"})
+		err := in.syncGTK4Locked(&st, "", false)
+		if serr := in.State.Save(st); err != nil || serr != nil {
+			return errors.Join(err, serr)
 		}
 	}
 	progress(backend.Progress{Message: "Removing " + rec.Name + "…"})
@@ -726,6 +769,9 @@ func (in *Installer) Remove(ctx context.Context, id string, progress func(backen
 	return nil
 }
 
+// KeysOf are the settings an install can be in use for: its kind's.
+func KeysOf(rec state.AppearanceInstall) []string { return keysOf(rec) }
+
 // keysOf are the settings an install can be in use for.
 func keysOf(rec state.AppearanceInstall) []string {
 	switch catalog.Kind(rec.Kind) {
@@ -733,6 +779,8 @@ func keysOf(rec state.AppearanceInstall) []string {
 		return []string{KeyIconTheme}
 	case catalog.KindCursorTheme:
 		return []string{KeyCursorTheme}
+	case catalog.KindGTKTheme:
+		return []string{KeyGTKTheme}
 	case catalog.KindFont:
 		return FontKeys
 	}
@@ -747,12 +795,22 @@ func inUse(rec state.AppearanceInstall, key, value string) bool {
 	return slices.Contains(rec.Themes, value)
 }
 
-// Use sets a desktop setting: a theme's name for KeyIconTheme or KeyCursorTheme, a font for a font key, or
-// one of Choices for a setting that has them. A font given as a family alone ("Inter") keeps the size the
-// setting has; one with a size ("Inter 12") is set as it is. The value it replaces is saved for Revert,
-// unless uas changed the setting before, in which case the value from before that stays saved; setting it
-// back to that value forgets it.
+// Use sets a desktop setting: a theme's name for KeyIconTheme, KeyCursorTheme or KeyGTKTheme, a font for a
+// font key, or one of Choices for a setting that has them. A font given as a family alone ("Inter") keeps
+// the size the setting has; one with a size ("Inter 12") is set as it is. The value it replaces is saved for
+// Revert, unless uas changed the setting before, in which case the value from before that stays saved;
+// setting it back to that value forgets it.
+//
+// A GTK theme with files for GTK 4 apps has them copied into ~/.config/gtk-4.0 too, whether the setting
+// changes or not, and one without takes away the files of uas's that are there (see syncGTK4Locked). While
+// uas's files are there, the setting stays saved, so Revert takes them away.
 func (in *Installer) Use(ctx context.Context, key, value string) error {
+	return in.use(ctx, key, value, true)
+}
+
+// use is Use. For KeyGTKTheme, without gtk4 the theme's GTK 4 files are left out and uas's go, as when
+// going back to a look from before uas put any there.
+func (in *Installer) use(ctx context.Context, key, value string, gtk4 bool) error {
 	if in.Desktop == nil || !in.Desktop.Supports(key) {
 		return ErrUnsupported
 	}
@@ -772,40 +830,53 @@ func (in *Installer) Use(ctx context.Context, key, value string) error {
 	if slices.Contains(FontKeys, key) && FontSize(value) == "" {
 		value = FontValue(cur, value)
 	}
+	gtk := key == KeyGTKTheme
 	saved, ok := st.FindSaved(in.Desktop.Name(), key)
 	old := saved
 	if !ok {
 		saved = state.SavedSetting{Desktop: in.Desktop.Name(), Key: key, Previous: cur}
 	}
-	if value == cur && !ok {
+	if value == cur && !ok && !gtk {
 		return nil // nothing changes, and nothing is saved
 	}
-	saved.Value, saved.At = value, in.now().UTC()
-	if value == saved.Previous && saved.Previous != "" {
-		st.DeleteSaved(in.Desktop.Name(), key) // back to where it was before uas
-	} else {
-		st.PutSaved(saved)
+	if value != cur || ok {
+		saved.Value, saved.At = value, in.now().UTC()
+		if value == saved.Previous && saved.Previous != "" {
+			st.DeleteSaved(in.Desktop.Name(), key) // back to where it was before uas
+		} else {
+			st.PutSaved(saved)
+		}
+		// Saved first: if the change works and the save didn't, Revert would have nothing to go back to.
+		if err := in.State.Save(st); err != nil {
+			return err
+		}
 	}
-	// Saved first: if the change works and the save didn't, Revert would have nothing to go back to.
-	if err := in.State.Save(st); err != nil {
-		return err
+	if value != cur {
+		if err := in.Desktop.Set(ctx, key, value); err != nil {
+			// Nothing changed, so what was saved before stays as it was.
+			if ok {
+				st.PutSaved(old)
+			} else {
+				st.DeleteSaved(in.Desktop.Name(), key)
+			}
+			if serr := in.State.Save(st); serr != nil {
+				return errors.Join(err, serr)
+			}
+			return err
+		}
 	}
-	if value == cur {
+	if !gtk {
 		return nil
 	}
-	if err := in.Desktop.Set(ctx, key, value); err != nil {
-		// Nothing changed, so what was saved before stays as it was.
-		if ok {
-			st.PutSaved(old)
-		} else {
-			st.DeleteSaved(in.Desktop.Name(), key)
-		}
-		if serr := in.State.Save(st); serr != nil {
-			return errors.Join(err, serr)
-		}
-		return err
+	err = in.syncGTK4Locked(&st, value, gtk4)
+	if _, ok := st.FindSaved(in.Desktop.Name(), key); !ok && st.GTK4 != nil {
+		st.PutSaved(state.SavedSetting{Desktop: in.Desktop.Name(), Key: key, Previous: saved.Previous,
+			Value: value, At: in.now().UTC()})
 	}
-	return nil
+	if serr := in.State.Save(st); serr != nil {
+		return errors.Join(err, serr)
+	}
+	return err
 }
 
 // Revert puts a setting back to what it was before uas first changed it. Any of WallpaperKeys puts back the
@@ -848,7 +919,7 @@ func (in *Installer) revertWallpaperLocked(ctx context.Context, st *state.State)
 	var errs []error
 	for _, k := range keys {
 		if err := in.revertLocked(ctx, st, k); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(k)), err))
+			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(k), err))
 		}
 	}
 	return errors.Join(errs...)
@@ -869,6 +940,10 @@ func (in *Installer) revertLocked(ctx context.Context, st *state.State, key stri
 		return err
 	}
 	st.DeleteSaved(in.Desktop.Name(), key)
+	if key == KeyGTKTheme {
+		// uas's GTK 4 files go and the user's come back, as they were before uas.
+		return in.syncGTK4Locked(st, "", false)
+	}
 	return nil
 }
 
@@ -890,7 +965,12 @@ func (in *Installer) RevertAll(ctx context.Context) error {
 			continue
 		}
 		if err := in.revertLocked(ctx, &st, s.Key); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(KeyLabel(s.Key)), err))
+			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(s.Key), err))
+		}
+	}
+	if st.GTK4 != nil {
+		if err := in.syncGTK4Locked(&st, "", false); err != nil {
+			errs = append(errs, fmt.Errorf("GTK 4 files: %w", err))
 		}
 	}
 	if err := in.State.Save(st); err != nil {

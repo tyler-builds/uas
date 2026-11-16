@@ -28,7 +28,7 @@ func TestPresets(t *testing.T) {
 		t.Fatal(err)
 	}
 	gs := newFakeGNOME()
-	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Cache: filepath.Join(dir, "cache"),
+	in := &appearance.Installer{Data: filepath.Join(dir, "data"), Config: filepath.Join(dir, "config"), Cache: filepath.Join(dir, "cache"),
 		State:  state.Store{Path: filepath.Join(dir, "data", "uas", "state.json")},
 		Runner: gs, Desktop: &appearance.GNOME{Runner: gs}, Limits: archives.DefaultLimits}
 	store := appearance.NewPresets(filepath.Join(dir, "config"), filepath.Join(dir, "data"))
@@ -64,7 +64,7 @@ func TestPresets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.Parts[appearance.PartAccent].Value != "blue" || p.Parts[appearance.PartMonospace].Value != "Adwaita Mono 11" ||
-		len(p.Parts) != 7 {
+		p.Parts[appearance.PartGTK].Value != "Adwaita" || len(p.Parts) != 8 {
 		t.Errorf("saved %+v", p.Parts)
 	}
 	waitText(t, u, "preset-card:Mine", "In use")
