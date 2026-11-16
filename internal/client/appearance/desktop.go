@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/tyler-builds/uas/internal/client/run"
@@ -215,27 +214,4 @@ func (p *Plasma) Reset(ctx context.Context, key string) error {
 		return p.Set(ctx, key, d)
 	}
 	return ErrUnsupported
-}
-
-// FontValue is a font setting with its family replaced and its size kept: ("Cantarell 11", "Inter") is
-// "Inter 11".
-func FontValue(current, family string) string {
-	fields := strings.Fields(current)
-	if n := len(fields); n > 1 {
-		if _, err := strconv.ParseFloat(fields[n-1], 64); err == nil {
-			return family + " " + fields[n-1]
-		}
-	}
-	return family + " 11"
-}
-
-// FontFamily is the family of a font setting: "Inter" of "Inter 11".
-func FontFamily(value string) string {
-	fields := strings.Fields(value)
-	if n := len(fields); n > 1 {
-		if _, err := strconv.ParseFloat(fields[n-1], 64); err == nil {
-			return strings.Join(fields[:n-1], " ")
-		}
-	}
-	return strings.TrimSpace(value)
 }

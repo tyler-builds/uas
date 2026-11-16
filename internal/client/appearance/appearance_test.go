@@ -540,3 +540,35 @@ func TestDetectDesktop(t *testing.T) {
 		}
 	}
 }
+
+func TestFontNames(t *testing.T) {
+	for value, want := range map[string][2]string{
+		"Inter 11":                            {"Inter", "11"},
+		"Fira Code weight=450 10":             {"Fira Code", "10"},
+		"Cantarell Italic Light 15 @wght=200": {"Cantarell", "15"},
+		"Source Code Pro Semi-Bold 10.5 #tnum=1 @wght=600,wdth=90": {"Source Code Pro", "10.5"},
+		"JetBrainsMono Nerd Font Mono 10.5":                        {"JetBrainsMono Nerd Font Mono", "10.5"},
+		"Noto Sans, Bold 12":                                       {"Noto Sans", "12"},
+		"Inter":                                                    {"Inter", ""},
+		"Bold":                                                     {"Bold", ""},
+		"Monospace 14px":                                           {"Monospace", "14px"},
+	} {
+		if got := FontFamily(value); got != want[0] {
+			t.Errorf("FontFamily(%q) = %q, want %q", value, got, want[0])
+		}
+		if got := FontSize(value); got != want[1] {
+			t.Errorf("FontSize(%q) = %q, want %q", value, got, want[1])
+		}
+	}
+	if got := FontValue("Fira Code weight=450 10", "Inter"); got != "Inter 10" {
+		t.Errorf("FontValue = %q", got)
+	}
+	if got := FontValue("Inter", "Fira Code"); got != "Fira Code 11" {
+		t.Errorf("FontValue without a size = %q", got)
+	}
+	// A font with variations is in use.
+	rec := state.AppearanceInstall{Kind: string(catalog.KindFont), Families: []string{"Fira Code"}}
+	if !inUse(rec, KeyMonospaceFont, "Fira Code weight=450 10") {
+		t.Error("Fira Code weight=450 10 isn't seen as Fira Code")
+	}
+}
