@@ -27,6 +27,9 @@ const presetsKey = "presets"
 type presetsData struct {
 	list []appearance.Preset
 	undo *appearance.Undo
+	// remembered is the preset last applied or saved from the current look, for its Changed mark; nil when
+	// there is none.
+	remembered *appearance.Remembered
 	// bad says which files couldn't be read, if any.
 	bad error
 }
@@ -50,6 +53,9 @@ func (a *App) presets(ctx *ui.Context) ui.QueryResult[presetsData] {
 		d.list, d.bad = a.s.Presets.List()
 		if u, ok, _ := a.s.Presets.Undo(); ok {
 			d.undo = &u
+		}
+		if r, ok, _ := a.s.Presets.Remembered(); ok {
+			d.remembered = &r
 		}
 		return d, nil
 	}, ui.QueryStaleTime(5*time.Second))
@@ -124,7 +130,7 @@ func (a *App) presetsTab(ctx *ui.Context, q string) []ui.Element {
 			continue
 		}
 		n++
-		grid = grid.Child(a.presetCard(ctx, p, lk.Data))
+		grid = grid.Child(a.presetCard(ctx, p, appearance.StatusOf(p, d.remembered, lk.Data.current)))
 	}
 	if n == 0 {
 		return append(out, ui.Empty("No preset matches").Icon(icons.ListFilter).
@@ -158,18 +164,16 @@ func accentColor(name string) (ui.Color, bool) {
 	return c, err == nil
 }
 
-// presetCard is a preset in the grid: a preview of its look, its name and parts, and Apply.
-func (a *App) presetCard(ctx *ui.Context, p appearance.Preset, lk looks) ui.Element {
+// presetCard is a preset in the grid: a preview of its look, its name and parts, and Apply; or, when the look
+// changed since it was applied, Update and Apply again.
+func (a *App) presetCard(ctx *ui.Context, p appearance.Preset, st appearance.PresetStatus) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
 		t := ctx.Theme()
 		id := "preset:" + strings.ToLower(p.Name)
 		job, busy := a.running(id)
-		inUse := appearance.InUse(p, lk.current)
 		name := ui.Div().Row().Align(ui.Center).Gap(space2).MinWidth(ui.Px(0)).Height(ui.Px(24)).
-			Child(ui.Text(p.Name).FontSize(14).Medium().Truncate().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)))
-		if inUse {
-			name = name.Child(statusChip(ctx, "In use", t.Success))
-		}
+			Child(ui.Text(p.Name).FontSize(14).Medium().Truncate().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0))).
+			Child(presetStatusChip(ctx, st))
 		open := ui.Div().Column().Gap(space2).Cursor(ui.CursorPointer).Role(access.RoleLink).
 			Label(p.Name + ", change it").TabIndex(0).OnClick(func() { a.openPreset(p.Name) }).
 			Child(a.presetPreview(ctx, p, 116)).
@@ -177,12 +181,20 @@ func (a *App) presetCard(ctx *ui.Context, p appearance.Preset, lk looks) ui.Elem
 			Child(ui.Text(presetSummary(p)).FontSize(12).TextColor(t.TextSubtle).Truncate())
 		apply := ui.Button("Apply").Icon(icons.Check).Secondary().Small().Loading(busy).
 			Disabled(len(p.Parts) == 0).OnClick(func() { a.applyPreset(ctx, p) })
-		if inUse {
+		var update ui.Element
+		switch st {
+		case appearance.StatusInUse:
 			apply = ui.Button("Apply again").Icon(icons.Check).Ghost().Small().Loading(busy).
 				Tooltip("It is in use; applying it again sets anything that changed since").
 				OnClick(func() { a.applyPreset(ctx, p) })
+		case appearance.StatusChanged:
+			update = ui.Button("Update").Icon(icons.Save).Secondary().Small().Disabled(busy).
+				Tooltip("Save your current look into " + p.Name).OnClick(func() { a.updatePreset(ctx, p.Name) })
+			apply = ui.Button("Apply again").Ghost().Small().Loading(busy).
+				Tooltip("Go back to " + p.Name + "'s look").OnClick(func() { a.applyPreset(ctx, p) })
 		}
 		actions := ui.Div().Row().Align(ui.Center).Gap(space2).
+			Child(update).
 			Child(apply).
 			Child(ui.Div().Grow(1).MinWidth(ui.Px(0)).Child(ui.If(busy, caption(ctx, job.status).Truncate()))).
 			Child(a.presetMenu(ctx, p))
@@ -216,6 +228,15 @@ func presetSummary(p appearance.Preset) string {
 			fam := appearance.FontFamily(part.Value)
 			if !slices.Contains(words, fam) {
 				words = append(words, fam)
+			}
+		case appearance.PartShell:
+			// Often the GTK theme's name too, said once.
+			w := part.Value
+			if w == "" {
+				w = "Default Shell"
+			}
+			if !slices.Contains(words, w) {
+				words = append(words, w)
 			}
 		default:
 			if part.Value != "" {
@@ -327,7 +348,6 @@ func (a *App) openPreset(name string) { a.open(view{page: pageLookPreset, arg: n
 // presetPage is a preset's page, where each part is changed, or left as it is.
 func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 	return ui.Component(func(ctx *ui.Context) ui.Element {
-		t := ctx.Theme()
 		res := a.presets(ctx)
 		lk := a.looks(ctx)
 		page := pageBody(detailMaxWidth).Gap(space6)
@@ -345,10 +365,11 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 		}
 		id := "preset:" + strings.ToLower(p.Name)
 		_, busy := a.running(id)
-		inUse := appearance.InUse(p, lk.Data.current)
-		trailing := ui.Div().Row().Align(ui.Center).Gap(space2)
-		if inUse {
-			trailing = trailing.Child(statusChip(ctx, "In use", t.Success))
+		st := appearance.StatusOf(p, res.Data.remembered, lk.Data.current)
+		trailing := ui.Div().Row().Align(ui.Center).Gap(space2).Child(presetStatusChip(ctx, st))
+		if st == appearance.StatusChanged && a.canApply() {
+			trailing = trailing.Child(ui.Button("Update").Icon(icons.Save).Secondary().Disabled(busy).
+				Tooltip("Save your current look into " + p.Name).OnClick(func() { a.updatePreset(ctx, p.Name) }))
 		}
 		if a.canApply() {
 			trailing = trailing.Child(ui.Button("Apply").Icon(icons.Check).Primary().Loading(busy).
@@ -367,7 +388,7 @@ func (a *App) presetPage(ctx *ui.Context, name string) ui.Element {
 		}
 		var look, fonts []ui.Element
 		for _, part := range []string{appearance.PartScheme, appearance.PartAccent, appearance.PartGTK,
-			appearance.PartIcons, appearance.PartCursor} {
+			appearance.PartShell, appearance.PartIcons, appearance.PartCursor} {
 			if shown(part) {
 				look = append(look, a.presetPartRow(ctx, p, part, lk.Data))
 			}
@@ -437,24 +458,36 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			row = row.Child(sw)
 		}
 		control = row
-	case appearance.PartGTK, appearance.PartIcons, appearance.PartCursor:
+	case appearance.PartGTK, appearance.PartShell, appearance.PartIcons, appearance.PartCursor:
 		switch part {
 		case appearance.PartGTK:
 			desc = "How GTK apps draw windows, buttons and menus"
+		case appearance.PartShell:
+			desc = "The top bar, the overview and the Shell's menus"
 		case appearance.PartIcons:
 			desc = "The icons apps and the desktop draw"
 		default:
 			desc = "The mouse pointer"
 		}
 		themes := lk.themes
-		if part == appearance.PartGTK {
+		switch part {
+		case appearance.PartGTK:
 			themes = lk.gtkThemes
+		case appearance.PartShell:
+			themes = lk.shellThemes
 		}
 		opts := []ui.Option[string]{{Value: "", Label: "Leave as is"}}
-		have := false
+		value := cur.Value
+		if part == appearance.PartShell {
+			opts = append(opts, ui.Option[string]{Value: shellDefault, Label: "Default (GNOME's own look)"})
+			if p.Sets(part) && value == "" {
+				value = shellDefault
+			}
+		}
+		have := value == shellDefault
 		for _, th := range themes {
 			if (part == appearance.PartIcons && th.Icons) || (part == appearance.PartCursor && th.Cursors) ||
-				(part == appearance.PartGTK && th.GTK) {
+				(part == appearance.PartGTK && th.GTK) || (part == appearance.PartShell && th.Shell) {
 				label := th.Name
 				if th.Title != "" && th.Title != th.Name {
 					label += " · " + th.Title
@@ -470,9 +503,9 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			}
 			opts = append(opts, ui.Option[string]{Value: cur.Value, Label: label})
 		}
-		sig := ui.Local(ctx, "part:"+p.Name+":"+part, cur.Value)
-		if sig.Peek() != cur.Value {
-			sig.Set(cur.Value)
+		sig := ui.Local(ctx, "part:"+p.Name+":"+part, value)
+		if sig.Peek() != value {
+			sig.Set(value)
 		}
 		control = ui.Select(sig, opts...).Small().Width(ui.Px(320)).Label(appearance.PartLabel(part)).
 			Key("part-select:" + part).OnChange(set)
@@ -489,6 +522,12 @@ func (a *App) presetPartRow(ctx *ui.Context, p appearance.Preset, part string, l
 			TextColor(t.Warning))
 	} else if part == appearance.PartGTK && p.Sets(part) {
 		left = left.Child(caption(ctx, appearance.GTKNote))
+	} else if part == appearance.PartShell && cur.Value != "" {
+		note := appearance.ShellNote
+		if !lk.userThemes.Ready() {
+			note = "Needs GNOME's User Themes extension, which isn't running here; applying asks before turning it on."
+		}
+		left = left.Child(caption(ctx, note))
 	}
 	return ui.Div().Row().Align(ui.Center).Gap(space4).MinHeight(ui.Px(64)).PaddingX(space4).PaddingY(space2).
 		Child(left).Child(ui.Div().Shrink(0).Child(control))
@@ -556,6 +595,9 @@ func (a *App) presetFontControl(ctx *ui.Context, p appearance.Preset, part strin
 	}).Key("font-control:" + p.Name + ":" + part)
 }
 
+// shellDefault is the Shell theme part's choice of the Shell's own look, which the part holds as no value.
+const shellDefault = "\x00default"
+
 // setPresetPart changes one part of a preset, or with an empty value leaves it out. A theme or font uas
 // installed keeps where it came from, so the preset can install it elsewhere.
 func (a *App) setPresetPart(ctx *ui.Context, name, part, value string) {
@@ -572,6 +614,10 @@ func (a *App) setPresetPart(ctx *ui.Context, name, part, value string) {
 	_, err := a.s.Presets.Update(name, func(p *appearance.Preset) error {
 		if value == "" {
 			delete(p.Parts, part)
+			return nil
+		}
+		if part == appearance.PartShell && value == shellDefault {
+			p.Parts[part] = appearance.Part{} // the Shell's own look
 			return nil
 		}
 		old := p.Parts[part]
@@ -610,6 +656,8 @@ func (a *App) openNaming(mode, from string) {
 type presetNaming struct {
 	mode string // "" for New preset, "rename"
 	from string // the preset renamed
+	// add is the font or theme a new preset is made with, from an "Add to preset" menu.
+	add *presetItem
 }
 
 // presetApply is an apply waiting for the user's OK, with its plan.
@@ -712,6 +760,11 @@ func (a *App) presetSaveDialog(ctx *ui.Context) ui.Element {
 				return
 			}
 			close()
+			// Saved from the look it has: the one in use now, which Changed then follows.
+			go func() {
+				_ = a.s.Looks.RememberPreset(context.Background(), a.s.Presets, p)
+				ctx.Post(func() { refreshPresets(ctx) })
+			}()
 			a.lookTab.Set(lookPresets)
 			refreshPresets(ctx)
 			ctx.Toast(ui.ToastSuccess, "Apply it from Appearance to come back to this look.").Title("Saved " + p.Name)
@@ -751,6 +804,10 @@ func (a *App) presetNamingDialog(ctx *ui.Context) ui.Element {
 	if n.mode == "rename" {
 		title, label, msg = "Rename "+n.from, "Rename", ""
 	}
+	if n.add != nil {
+		msg = "A preset with " + n.add.name + " as its " + appearance.PartWord(n.add.part) + ". Add the rest " +
+			"from the preset's page; parts you leave as they are keep whatever the desktop has."
+	}
 	body := ui.Div().Column().Gap(space3)
 	if msg != "" {
 		body = body.Child(muted(ctx, msg))
@@ -763,9 +820,13 @@ func (a *App) presetNamingDialog(ctx *ui.Context) ui.Element {
 	ok := ui.Button(label).Primary().OnClick(func() {
 		var p appearance.Preset
 		var err error
-		if n.mode == "rename" {
+		switch {
+		case n.mode == "rename":
 			p, err = a.s.Presets.Rename(n.from, a.presetName.Peek())
-		} else {
+		case n.add != nil:
+			p, err = a.s.Presets.Save(appearance.Preset{Name: a.presetName.Peek(),
+				Parts: map[string]appearance.Part{n.add.part: n.add.value}}, false)
+		default:
 			p, err = a.s.Presets.Save(appearance.Preset{Name: a.presetName.Peek()}, false)
 		}
 		var exists *appearance.ExistsError
@@ -781,6 +842,10 @@ func (a *App) presetNamingDialog(ctx *ui.Context) ui.Element {
 		refreshPresets(ctx)
 		if n.mode == "rename" {
 			a.renamedPreset(n.from, p.Name)
+			return
+		}
+		if n.add != nil {
+			a.addedToPreset(ctx, p, *n.add)
 			return
 		}
 		a.lookTab.Set(lookPresets)
@@ -828,19 +893,21 @@ func (a *App) applyPreset(ctx *ui.Context, p appearance.Preset) {
 			if len(appearance.Downloads(plan)) > 0 || slices.ContainsFunc(plan, func(it appearance.PlanItem) bool {
 				return it.Step.Skipped()
 			}) {
+				a.presetUserThemes.Set(false)
 				a.presetApplying.Set(&presetApply{p: p, plan: plan})
 				return
 			}
-			a.runPresetApply(ctx, p, plan)
+			a.runPresetApply(ctx, p, plan, false)
 		})
 	}()
 }
 
-// runPresetApply applies a preset by its plan, as a job.
-func (a *App) runPresetApply(ctx *ui.Context, p appearance.Preset, plan []appearance.PlanItem) {
+// runPresetApply applies a preset by its plan, as a job. userThemes is the user's yes to turning on User
+// Themes for its Shell theme.
+func (a *App) runPresetApply(ctx *ui.Context, p appearance.Preset, plan []appearance.PlanItem, userThemes bool) {
 	a.startJob(ctx, "preset:"+strings.ToLower(p.Name), "Applying "+p.Name, false, p.Name+" is applied",
 		func(c context.Context, progress func(backend.Progress)) error {
-			out, err := a.s.ApplyPreset(c, p, plan, false, progress)
+			out, err := a.s.ApplyPreset(c, p, plan, false, userThemes, progress)
 			if err != nil {
 				return err
 			}
@@ -926,6 +993,10 @@ func (a *App) presetApplyDialog(ctx *ui.Context) ui.Element {
 	}
 	var skipped []ui.Element
 	for _, it := range ap.plan {
+		if it.Step == appearance.StepUserThemes {
+			body = body.Child(a.applyUserThemes(ctx, it))
+			continue
+		}
 		if it.Step.Skipped() {
 			v := appearance.ValueLabel(it.Key, it.Value)
 			title := appearance.PartLabel(it.Part)
@@ -954,9 +1025,41 @@ func (a *App) presetApplyDialog(ctx *ui.Context) ui.Element {
 	return ui.AlertDialog("Apply "+ap.p.Name+"?", msg).Icon(icon).Body(body).Width(ui.Px(500)).
 		Confirm(label, func() {
 			close()
-			a.runPresetApply(ctx, ap.p, ap.plan)
+			a.runPresetApply(ctx, ap.p, ap.plan, a.presetUserThemes.Peek())
 		}).
 		Cancel("", close)
+}
+
+// applyUserThemes is the apply dialog's part for a Shell theme while User Themes isn't running: what it
+// needs, and the box that agrees to turning it on. Left unticked, the Shell theme is skipped.
+func (a *App) applyUserThemes(ctx *ui.Context, it appearance.PlanItem) ui.Element {
+	t := ctx.Theme()
+	u := a.looks(ctx).Data.userThemes
+	fix := u.Fix()
+	note := upperFirst(it.Note)
+	if it.Listing.Ref != "" {
+		note += " " + it.Listing.Name + " is installed first (" + installNoteText(it) + ")."
+	}
+	col := ui.Div().Column().Gap(space2).
+		Child(ui.Text("Needs User Themes").FontSize(13).Semibold()).
+		Child(ui.Div().Row().Align(ui.Start).Gap(space3).
+			Child(ui.Div().PaddingTop(2).Child(ui.Icon(icons.PanelTop).Size(15).Color(t.TextMuted))).
+			Child(ui.Div().Column().Gap(2).Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).
+				Child(ui.Text("Shell theme: " + appearance.ValueLabel(it.Key, it.Value)).FontSize(13).Medium()).
+				Child(ui.Text(note).FontSize(12).TextColor(t.TextSubtle))))
+	if fix == "" {
+		return col.Child(caption(ctx, "It is skipped."))
+	}
+	return col.Child(ui.Checkbox(fix+" for it", a.presetUserThemes).Key("apply-user-themes")).
+		Child(caption(ctx, "Left unticked, the Shell theme is skipped and nothing else changes."))
+}
+
+// installNoteText is where a plan item installs from, for a sentence.
+func installNoteText(it appearance.PlanItem) string {
+	if it.Note != "" && strings.HasPrefix(it.Note, "from ") {
+		return it.Note
+	}
+	return "from " + it.Listing.Source.Name()
 }
 
 func upperFirst(s string) string {

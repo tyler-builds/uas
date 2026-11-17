@@ -19,8 +19,8 @@ import (
 const appearanceUsage = `usage: uas appearance [command]
 
 Fonts, icon themes, cursor themes and GTK themes, installed for your account: fonts from Google Fonts and
-Nerd Fonts, themes from Pling (gnome-look.org). Also the light or dark style, the accent color and the
-wallpaper.
+Nerd Fonts, themes from Pling (gnome-look.org). Also the GNOME Shell theme, the light or dark style, the
+accent color and the wallpaper.
 
 commands:
   list                          what uas installed, and what the desktop uses (the default)
@@ -30,12 +30,13 @@ commands:
   install [-variant V] [-use S] <id>
                                 install one; -use also uses it for S (see use)
   remove <id>                   remove one uas installed
-  use <S> <value>               set S: gtk, icons or cursor (a theme), interface, document or monospace (a
+  use <S> <value>               set S: gtk, shell, icons or cursor (a theme), interface, document or monospace (a
                                 font family, or a family and size such as "Inter 11"), scheme (default,
                                 light or dark) or accent (blue, teal, green, yellow, orange, red, pink,
                                 purple, slate). A GTK theme's files for GTK 4 apps, when it has them, are
                                 copied into ~/.config/gtk-4.0 too; yours there are kept aside and put
-                                back by revert
+                                back by revert. A GNOME Shell theme (shell, or "default" for the Shell's
+                                own look) needs the User Themes extension; uas asks before turning it on
   use wallpaper <file> [-dark <file>] [-fit F]
                                 set the wallpaper (GNOME): a picture (jpg, png, webp, jxl or svg; your own
                                 are copied into uas's wallpaper folder) or one of the system's, a second
@@ -43,7 +44,7 @@ commands:
                                 spanned, wallpaper (tiled) or none. "use wallpaper -fit F" changes the fit
   revert <S>|wallpaper|all      put S, the wallpaper, or every setting uas changed, back to what it was
                                 before uas
-  themes                        the icon, cursor and GTK themes on this system
+  themes                        the icon, cursor, GTK and GNOME Shell themes on this system
   updates                       fonts and themes uas installed that have a newer version
   update <id>                   install one's newer version
   presets                       your presets: looks saved under a name (see "uas appearance preset")
@@ -52,14 +53,15 @@ commands:
 
 // settingKeys are the names "use" and "revert" take for each setting, which are also the names of a
 // preset's parts.
-var settingKeys = map[string]string{"gtk": appearance.KeyGTKTheme, "icons": appearance.KeyIconTheme,
+var settingKeys = map[string]string{"gtk": appearance.KeyGTKTheme, "shell": appearance.KeyShellTheme,
+	"icons":     appearance.KeyIconTheme,
 	"cursor":    appearance.KeyCursorTheme,
 	"interface": appearance.KeyFont, "document": appearance.KeyDocumentFont, "monospace": appearance.KeyMonospaceFont,
 	"scheme": appearance.KeyColorScheme, "style": appearance.KeyColorScheme, "accent": appearance.KeyAccentColor,
 	"wallpaper": appearance.KeyWallpaper}
 
 // settingNames lists the names of settingKeys for messages.
-const settingNames = "gtk, icons, cursor, interface, document, monospace, scheme, accent or wallpaper"
+const settingNames = "gtk, shell, icons, cursor, interface, document, monospace, scheme, accent or wallpaper"
 
 // lookKinds are the names -kind takes.
 var lookKinds = map[string]catalog.Kind{"fonts": catalog.KindFont, "font": catalog.KindFont,
@@ -166,6 +168,9 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if key == appearance.KeyGTKTheme {
 			printGTK4(w, e)
 		}
+		if key != "" {
+			presetHint(ctx, w, e)
+		}
 	case "update":
 		id, err := one("ID (see updates)")
 		if err != nil {
@@ -208,13 +213,25 @@ func runAppearance(ctx context.Context, w io.Writer, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := e.Looks.Use(ctx, key, appearance.ParseValue(key, rest[1])); err != nil {
+		value := appearance.ParseValue(key, rest[1])
+		err = e.Looks.Use(ctx, key, value)
+		var need *appearance.NeedsUserThemesError
+		if errors.As(err, &need) {
+			if err = offerUserThemes(ctx, w, e, need.UserThemes); err == nil {
+				err = e.Looks.Use(ctx, key, value)
+			}
+		}
+		if err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "%s: %s\n", appearance.KeyLabel(key), appearance.ValueLabel(key, e.Looks.Current(ctx)[key]))
 		if key == appearance.KeyGTKTheme {
 			printGTK4(w, e)
 		}
+		if key == appearance.KeyShellTheme && value != "" {
+			fmt.Fprintln(w, appearance.ShellNote)
+		}
+		presetHint(ctx, w, e)
 	case "revert":
 		name, err := one("setting, or all")
 		if err != nil {
@@ -484,6 +501,7 @@ func useWallpaper(ctx context.Context, w io.Writer, e *session.Session, rest []s
 		}
 	}
 	fmt.Fprintf(w, "Wallpaper: %s\n", settingValue(e, e.Looks.Current(ctx), appearance.KeyWallpaper))
+	presetHint(ctx, w, e)
 	return nil
 }
 
@@ -536,7 +554,81 @@ func listThemes(ctx context.Context, w io.Writer, e *session.Session) error {
 		}
 		row(t, []string{kind}, inUse)
 	}
-	return tw.Flush()
+	desk := e.Looks.Desktop
+	if desk == nil || !desk.Supports(appearance.KeyShellTheme) {
+		return tw.Flush()
+	}
+	shell, err := e.Looks.ShellThemes()
+	if err != nil {
+		return err
+	}
+	u := e.Looks.UserThemes(ctx)
+	shellInUse := func(name string) []string {
+		if v, ok := cur[appearance.KeyShellTheme]; ok && v == name && (u.Ready() || name == "") {
+			return []string{"shell"}
+		}
+		if _, ok := cur[appearance.KeyShellTheme]; (!ok || !u.Ready()) && name == "" {
+			return []string{"shell"} // without User Themes running, the Shell has its own look
+		}
+		return nil
+	}
+	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", "Default", "shell", "GNOME", strings.Join(shellInUse(""), ", "))
+	for _, t := range shell {
+		row(t, []string{"shell"}, shellInUse(t.Name))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if why := u.Why(); why != "" {
+		fmt.Fprintf(w, "\n%s Using one offers to fix that.\n", why)
+	}
+	return nil
+}
+
+// presetHint says, after a font or theme was used, when the look no longer matches the preset applied last,
+// and how to save it into it. The preset itself is left as it is.
+func presetHint(ctx context.Context, w io.Writer, e *session.Session) {
+	if p, ok := e.Looks.ChangedPreset(ctx, e.Presets); ok {
+		fmt.Fprintf(w, "Your look no longer matches %s; to save it into the preset: uas appearance preset update %q\n",
+			p.Name, p.Name)
+	}
+}
+
+// offerUserThemes asks to get the User Themes extension running for a Shell theme, and does it when the
+// user says yes. It never does anything without asking.
+func offerUserThemes(ctx context.Context, w io.Writer, e *session.Session, u appearance.UserThemes) error {
+	fix := u.Fix()
+	if fix == "" {
+		return errors.New(u.Why())
+	}
+	fmt.Fprintln(w, u.Why())
+	if !u.Installed {
+		fmt.Fprintln(w, "GNOME asks you before it installs it from extensions.gnome.org.")
+	}
+	ok, err := confirm(fix + "?")
+	if err != nil {
+		return fmt.Errorf("%s %s first, or run this on a terminal to be asked", u.Why(), userThemesHint(u))
+	}
+	if !ok {
+		return errors.New("nothing was changed")
+	}
+	if err := e.Looks.EnableUserThemes(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "User Themes is on.")
+	return nil
+}
+
+// userThemesHint says how to get User Themes running from the command line.
+func userThemesHint(u appearance.UserThemes) string {
+	if !u.Installed {
+		return "Install it with: uas extensions install " + appearance.UserThemesUUID + ","
+	}
+	if !u.ExtensionsOn {
+		return "Turn extensions on in GNOME's Extensions app, and User Themes with: uas extensions enable " +
+			appearance.UserThemesUUID + ","
+	}
+	return "Turn it on with: uas extensions enable " + appearance.UserThemesUUID + ","
 }
 
 // printGTK4 says what is in ~/.config/gtk-4.0 after a GTK theme was used.

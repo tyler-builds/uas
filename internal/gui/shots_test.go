@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-builds/jamb/access"
 	"github.com/tyler-builds/jamb/ui"
 	"github.com/tyler-builds/jamb/ui/uitest"
 
@@ -220,6 +221,65 @@ func TestShots(t *testing.T) {
 			a.goTo(view{page: pageAppearance})
 			a.openLook(catalog.AppearanceAppID(catalog.SourceGoogleFonts, "inter"))
 		}, 1000, "", 0},
+		// GNOME Shell themes: the ones on the system with User Themes on, and off; the question before turning
+		// it on; and an installed GTK theme's page with its Shell theme.
+		{"appearance-shell", func(a *App) {
+			shotShellThemes(t, a, true)
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookShell)
+		}, 800, "", 0},
+		{"appearance-shell-off", func(a *App) {
+			shotShellThemes(t, a, false)
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookShell)
+		}, 800, "", 0},
+		{"user-themes-dialog", func(a *App) {
+			shotShellThemes(t, a, false)
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookShell)
+			name := "Nordic"
+			a.userThemesAsk.Set(&name)
+		}, 800, "", 0},
+		{"look-gtk-installed", func(a *App) {
+			shotPresets(t, a)
+			shotShellThemes(t, a, true)
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookGTK)
+			a.openLook(catalog.AppearanceAppID(catalog.SourcePling, "1357889")) // Orchis
+		}, 1200, "", 0},
+		// Add to preset: the menu on a font's page, and what picking a preset says.
+		{"add-to-preset-menu", func(a *App) {
+			shotPresets(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.openLook(catalog.AppearanceAppID(catalog.SourceGoogleFonts, "inter"))
+		}, 1000, "", 0},
+		{"added-to-preset", func(a *App) {
+			shotPresets(t, a)
+			a.goTo(view{page: pageAppearance})
+			a.openLook(catalog.AppearanceAppID(catalog.SourceGoogleFonts, "inter"))
+		}, 1000, "", 0},
+		// Evening was applied, then the accent changed: its card says Changed, with Update.
+		{"appearance-presets-changed", func(a *App) {
+			ev := shotPresets(t, a)["Evening"]
+			if err := a.s.Looks.RememberPreset(context.Background(), a.s.Presets, ev); err != nil {
+				t.Fatal(err)
+			}
+			gs := a.s.Looks.Runner.(*fakeGNOME)
+			gs.mu.Lock()
+			gs.values[appearance.KeyAccentColor] = "orange"
+			gs.mu.Unlock()
+			a.goTo(view{page: pageAppearance})
+			a.lookTab.Set(lookPresets)
+		}, 900, "", 0},
+	}
+	// What is done on screen before a shot is taken: opening a menu, picking from it.
+	acts := map[string]func(u *uitest.UI){
+		"add-to-preset-menu": func(u *uitest.UI) { u.ByRole(access.RoleButton, "Add to preset").Click() },
+		"added-to-preset": func(u *uitest.UI) {
+			u.ByRole(access.RoleButton, "Add to preset").Click()
+			u.Settle()
+			u.ByRole(access.RoleMenuItemCheck, "Evening").Click()
+		},
 	}
 	only := map[string]bool{}
 	for _, n := range strings.Split(os.Getenv("UAS_SHOTS_ONLY"), ",") {
@@ -243,6 +303,7 @@ func TestShots(t *testing.T) {
 				Extensions: &shellext.Manager{Bus: shotShell(), UpdatesDir: updatesDir},
 				Backends: map[catalog.SourceID]backend.Backend{catalog.SourceFlathub: fp,
 					catalog.SourceHomebrew: hb, catalog.SourceGitHub: gh, catalog.SourceAppImage: files}}
+			s.Looks.Shell = s.Extensions
 			a := New(s)
 			a.icons.dir = filepath.Join(os.TempDir(), "uas-shot-images")
 			a.startup.Do(func() {})
@@ -262,6 +323,14 @@ func TestShots(t *testing.T) {
 				time.Sleep(60 * time.Millisecond)
 			}
 			u.Settle()
+			if act, ok := acts[sh.name]; ok {
+				act(u)
+				for i := 0; i < 6; i++ {
+					u.Advance(100 * time.Millisecond)
+					time.Sleep(60 * time.Millisecond)
+				}
+				u.Settle()
+			}
 			f, err := os.Create(filepath.Join(out, theme.name+"-"+sh.name+".png"))
 			if err != nil {
 				t.Fatal(err)
@@ -501,6 +570,32 @@ func shotGTK(t *testing.T, a *App) {
 	if _, err := a.s.InstallLook(ctx, app.Listings[0], "Orchis-Green-Dark", appearance.KeyGTKTheme, nil); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// shotShellThemes puts GNOME Shell themes on the temporary system (one of the user's in ~/.themes, two of the
+// system's) and installs Orchis, whose GTK themes carry Shell themes, from the catalog; GNOME Shell has User
+// Themes, which came with the system, on or off.
+func shotShellThemes(t *testing.T, a *App, on bool) {
+	dir := t.TempDir()
+	a.s.Looks.Home = filepath.Join(dir, "home")
+	sys := filepath.Join(dir, "share")
+	a.s.Looks.SystemData = append(a.s.Looks.SystemData, sys)
+	for _, d := range []string{filepath.Join(a.s.Looks.Home, ".themes", "Nordic"), filepath.Join(sys, "themes", "Yaru"),
+		filepath.Join(sys, "themes", "WhiteSur-Dark")} {
+		os.MkdirAll(filepath.Join(d, "gnome-shell"), 0o755)
+		os.WriteFile(filepath.Join(d, "gnome-shell", "gnome-shell.css"), []byte("stage {}"), 0o644)
+	}
+	shotGTK(t, a)
+	shell := a.s.Extensions.Bus.(*fakeShell)
+	shell.mu.Lock()
+	state := 1.0
+	if !on {
+		state = 2.0
+	}
+	shell.extensions[appearance.UserThemesUUID] = map[string]any{"uuid": appearance.UserThemesUUID,
+		"name": "User Themes", "description": "Load shell themes from user directory.", "type": 1.0,
+		"state": state, "enabled": on, "canChange": true, "version": 51.0}
+	shell.mu.Unlock()
 }
 
 // shotPicture is a picture of the user's: a soft gradient, as a photo would be in a preset's preview.

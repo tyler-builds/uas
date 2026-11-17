@@ -13,7 +13,7 @@ import (
 	"github.com/tyler-builds/uas/internal/client/state"
 )
 
-// Theme is an icon, cursor or GTK theme on this system, whoever installed it.
+// Theme is an icon, cursor, GTK or GNOME Shell theme on this system, whoever installed it.
 type Theme struct {
 	Name    string // its folder name, which the desktop's settings use
 	Title   string // what its index.theme calls it, if anything
@@ -23,6 +23,8 @@ type Theme struct {
 	// GTK is true for a GTK theme (from GTKThemes), and GTK4 when it has files for GTK 4 apps too.
 	GTK  bool
 	GTK4 bool
+	// Shell is true for a GNOME Shell theme (from ShellThemes), and for a GTK theme whose folder has one.
+	Shell bool
 	// User is true for a theme in the user's own folders; the others came with the system.
 	User bool
 	// By is the catalog ID of the uas install it came from, or "".
@@ -149,7 +151,7 @@ func (in *Installer) GTKThemes() ([]Theme, error) {
 			if !gtk3 && !gtk4 {
 				continue
 			}
-			t := Theme{Name: name, Dir: dir, User: r.user, GTK: true, GTK4: gtk4}
+			t := Theme{Name: name, Dir: dir, User: r.user, GTK: true, GTK4: gtk4, Shell: hasShellCSS(dir)}
 			if r.user && filepath.Dir(dir) == in.ThemesDir() {
 				t.By = by[name]
 			}

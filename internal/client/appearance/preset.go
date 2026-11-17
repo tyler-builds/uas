@@ -14,17 +14,19 @@ import (
 	"unicode/utf8"
 )
 
-// A preset is a look saved under a name: a GTK theme, a theme for icons and cursors, fonts, the light or dark
-// style, the accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
+// A preset is a look saved under a name: a GTK theme, a GNOME Shell theme, a theme for icons and cursors,
+// fonts, the light or dark style, the accent color and the wallpaper, each optional. Applying it sets every part it has and leaves the rest alone. Presets are
 // the user's own, so they live with uas's settings, one JSON file each in ~/.config/uas/presets; the look
 // from before the last apply, for Undo, is uas's, and lives with its state.
 
 // Part names: the keys of Preset.Parts, which are also the setting names the command line takes.
 const (
-	PartScheme    = "scheme"
-	PartAccent    = "accent"
-	PartGTK       = "gtk"   // a GTK theme, by name
-	PartShell     = "shell" // a GNOME Shell theme, by name (a later version of uas)
+	PartScheme = "scheme"
+	PartAccent = "accent"
+	PartGTK    = "gtk" // a GTK theme, by name
+	// PartShell is a GNOME Shell theme, by name; an empty value is the Shell's own look. It stores only the
+	// theme (and where it came from), never the User Themes extension or its other settings.
+	PartShell     = "shell"
 	PartIcons     = "icons"
 	PartCursor    = "cursor"
 	PartInterface = "interface"
@@ -45,6 +47,7 @@ var partKeys = map[string]string{
 	PartScheme:    KeyColorScheme,
 	PartAccent:    KeyAccentColor,
 	PartGTK:       KeyGTKTheme,
+	PartShell:     KeyShellTheme,
 	PartIcons:     KeyIconTheme,
 	PartCursor:    KeyCursorTheme,
 	PartInterface: KeyFont,
@@ -76,8 +79,6 @@ func PartLabel(part string) string {
 		return KeyLabel(k)
 	}
 	switch part {
-	case PartShell:
-		return "Shell theme"
 	case PartWallpaper:
 		return "Wallpaper"
 	}
@@ -104,7 +105,8 @@ type Preset struct {
 
 // Part is one part of a preset.
 type Part struct {
-	// Value is what the setting is set to: a theme's name, a font ("Inter 11"), or one of Choices.
+	// Value is what the setting is set to: a theme's name, a font ("Inter 11"), or one of Choices. For the
+	// Shell theme, "" (a part with no value) is the Shell's own look.
 	Value string `json:"value,omitempty"`
 	// From is where it can be installed from when it isn't on the system; nil for one that came with the
 	// system.
@@ -255,6 +257,9 @@ type Presets struct {
 	Dir string
 	// UndoFile holds the look from before the last apply.
 	UndoFile string
+	// CurrentFile holds the preset last applied or saved from the current look (see Remembered); "" keeps
+	// none.
+	CurrentFile string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// Changed, when set, is called after a preset is saved, changed or deleted: the session removes the
@@ -263,10 +268,11 @@ type Presets struct {
 }
 
 // NewPresets returns the user's presets: $XDG_CONFIG_HOME/uas/presets, with the look to undo to in
-// $XDG_DATA_HOME/uas/previous-look.json.
+// $XDG_DATA_HOME/uas/previous-look.json and the preset last applied in $XDG_DATA_HOME/uas/current-preset.json.
 func NewPresets(configDir, dataDir string) *Presets {
 	return &Presets{Dir: filepath.Join(configDir, "uas", "presets"),
-		UndoFile: filepath.Join(dataDir, "uas", "previous-look.json")}
+		UndoFile:    filepath.Join(dataDir, "uas", "previous-look.json"),
+		CurrentFile: filepath.Join(dataDir, "uas", "current-preset.json")}
 }
 
 func (s *Presets) now() time.Time {
@@ -429,7 +435,7 @@ func (s *Presets) Rename(name, to string) (Preset, error) {
 			return p, err
 		}
 	}
-	return p, nil
+	return p, s.renamed(name, p.Name)
 }
 
 // Copy makes a copy of a preset under a new name, or when to is empty, under the first free name of
@@ -474,7 +480,7 @@ func (s *Presets) Delete(name string) error {
 		return err
 	}
 	s.changed()
-	return nil
+	return s.deleted(p.Name)
 }
 
 // write writes a preset to its file, or to a new file named for it.
@@ -564,6 +570,9 @@ type Undo struct {
 	At      time.Time `json:"at"`
 	// Look holds the values the apply changed, as they were before it.
 	Look Preset `json:"look"`
+	// Remembered is the preset that was remembered as in use before the apply, which Undo brings back; nil
+	// when there was none.
+	Remembered *Remembered `json:"remembered,omitempty"`
 }
 
 // Undo returns the look from before the last apply, and false when there is none.

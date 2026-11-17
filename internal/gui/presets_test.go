@@ -64,7 +64,7 @@ func TestPresets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.Parts[appearance.PartAccent].Value != "blue" || p.Parts[appearance.PartMonospace].Value != "Adwaita Mono 11" ||
-		p.Parts[appearance.PartGTK].Value != "Adwaita" || len(p.Parts) != 8 {
+		p.Parts[appearance.PartGTK].Value != "Adwaita" || !p.Sets(appearance.PartShell) || len(p.Parts) != 9 {
 		t.Errorf("saved %+v", p.Parts)
 	}
 	waitText(t, u, "preset-card:Mine", "In use")

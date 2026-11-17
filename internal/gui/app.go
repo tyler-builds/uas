@@ -123,25 +123,30 @@ type App struct {
 	extSearchOrder *ui.Signal[catalog.Order]
 	extRemoving    *ui.Signal[*shellext.Extension] // an extension's removal waiting for the user's OK
 
-	// lookTab is the Appearance page's tab: lookPresets, lookFonts, lookIcons, lookCursors or lookInstalled, or
+	// lookTab is the Appearance page's tab: lookPresets, lookFonts, lookIcons, lookCursors, lookGTK, lookShell
+	// or lookInstalled, or
 	// "" until one is picked (see lookTabNow).
 	lookTab   *ui.Signal[string]
 	lookOrder *ui.Signal[catalog.Order] // how its grids are sorted
 	// lookSearchOrder is how its grids are sorted while the top bar has a search.
 	lookSearchOrder *ui.Signal[catalog.Order]
 	lookRemoving    *ui.Signal[*state.AppearanceInstall] // a font's or theme's removal waiting for the user's OK
+	// userThemesAsk is the Shell theme waiting for the user's OK to turn the User Themes extension on.
+	userThemesAsk *ui.Signal[*string]
 
 	// presetSaving counts the openings of the Save current look dialog: positive while it is open, the
 	// opening's number negated once it is closed.
 	presetSaving   *ui.Signal[int]
-	presetNaming   *ui.Signal[*presetNaming]      // the New preset or Rename dialog
-	presetName     *ui.Signal[string]             // the name in those dialogs
-	presetErr      *ui.Signal[string]             // why the name can't be used
-	presetReplace  *ui.Signal[bool]               // Save current look replaces the preset of its name
-	presetApplying *ui.Signal[*presetApply]       // an apply waiting for the user's OK
-	presetDeleting *ui.Signal[*appearance.Preset] // a preset's deletion waiting for the user's OK
-	presetApplied  *ui.Signal[*presetApplied]     // what the last apply did, for its note with Undo
-	wallChooser    *ui.Signal[*wallSlot]          // the slot the system wallpapers chooser fills
+	presetNaming   *ui.Signal[*presetNaming] // the New preset or Rename dialog
+	presetName     *ui.Signal[string]        // the name in those dialogs
+	presetErr      *ui.Signal[string]        // why the name can't be used
+	presetReplace  *ui.Signal[bool]          // Save current look replaces the preset of its name
+	presetApplying *ui.Signal[*presetApply]  // an apply waiting for the user's OK
+	// presetUserThemes is the apply dialog's "Turn on User Themes" box, for a Shell theme that needs it.
+	presetUserThemes *ui.Signal[bool]
+	presetDeleting   *ui.Signal[*appearance.Preset] // a preset's deletion waiting for the user's OK
+	presetApplied    *ui.Signal[*presetApplied]     // what the last apply did, for its note with Undo
+	wallChooser      *ui.Signal[*wallSlot]          // the slot the system wallpapers chooser fills
 
 	// catalogGen changes when a refreshed catalog replaces the open one, so queries keyed by it reload.
 	catalogGen *ui.Signal[int]
@@ -184,26 +189,28 @@ func New(s *session.Session) *App {
 			_, err := s.Migrate(ctx, m, p)
 			return err
 		},
-		clearLeftovers:  func(l []gearlever.Entry) error { return s.ClearLeftovers(context.Background(), l) },
-		extTab:          ui.NewSignal(extInstalled),
-		extOrder:        ui.NewSignal(catalog.OrderPopular),
-		extSearchOrder:  ui.NewSignal(catalog.OrderRelevance),
-		extRemoving:     ui.NewSignal[*shellext.Extension](nil),
-		lookTab:         ui.NewSignal(""),
-		lookOrder:       ui.NewSignal(catalog.OrderPopular),
-		lookSearchOrder: ui.NewSignal(catalog.OrderRelevance),
-		lookRemoving:    ui.NewSignal[*state.AppearanceInstall](nil),
-		presetSaving:    ui.NewSignal(0),
-		presetNaming:    ui.NewSignal[*presetNaming](nil),
-		presetName:      ui.NewSignal(""),
-		presetErr:       ui.NewSignal(""),
-		presetReplace:   ui.NewSignal(false),
-		presetApplying:  ui.NewSignal[*presetApply](nil),
-		presetDeleting:  ui.NewSignal[*appearance.Preset](nil),
-		presetApplied:   ui.NewSignal[*presetApplied](nil),
-		wallChooser:     ui.NewSignal[*wallSlot](nil),
-		catalogGen:      ui.NewSignal(0),
-		icons:           newIconLoader(),
+		clearLeftovers:   func(l []gearlever.Entry) error { return s.ClearLeftovers(context.Background(), l) },
+		extTab:           ui.NewSignal(extInstalled),
+		extOrder:         ui.NewSignal(catalog.OrderPopular),
+		extSearchOrder:   ui.NewSignal(catalog.OrderRelevance),
+		extRemoving:      ui.NewSignal[*shellext.Extension](nil),
+		lookTab:          ui.NewSignal(""),
+		lookOrder:        ui.NewSignal(catalog.OrderPopular),
+		lookSearchOrder:  ui.NewSignal(catalog.OrderRelevance),
+		lookRemoving:     ui.NewSignal[*state.AppearanceInstall](nil),
+		userThemesAsk:    ui.NewSignal[*string](nil),
+		presetUserThemes: ui.NewSignal(false),
+		presetSaving:     ui.NewSignal(0),
+		presetNaming:     ui.NewSignal[*presetNaming](nil),
+		presetName:       ui.NewSignal(""),
+		presetErr:        ui.NewSignal(""),
+		presetReplace:    ui.NewSignal(false),
+		presetApplying:   ui.NewSignal[*presetApply](nil),
+		presetDeleting:   ui.NewSignal[*appearance.Preset](nil),
+		presetApplied:    ui.NewSignal[*presetApplied](nil),
+		wallChooser:      ui.NewSignal[*wallSlot](nil),
+		catalogGen:       ui.NewSignal(0),
+		icons:            newIconLoader(),
 	}
 }
 
@@ -347,6 +354,7 @@ func (a *App) Root(ctx *ui.Context) ui.Element {
 		Child(a.installLinkDialog(ctx)).
 		Child(a.extRemoveDialog(ctx)).
 		Child(a.lookRemoveDialog(ctx)).
+		Child(a.userThemesDialog(ctx)).
 		Child(a.presetSaveDialog(ctx)).
 		Child(a.presetNamingDialog(ctx)).
 		Child(a.presetApplyDialog(ctx)).

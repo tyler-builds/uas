@@ -260,8 +260,8 @@ func TestGNOMEGTKKey(t *testing.T) {
 	if k, ok := PartKey(PartGTK); !ok || k != KeyGTKTheme {
 		t.Error("the gtk part isn't the gtk-theme setting")
 	}
-	if _, ok := PartKey(PartShell); ok {
-		t.Error("Shell themes are set by a later uas")
+	if k, ok := PartKey(PartShell); !ok || k != KeyShellTheme {
+		t.Error("the shell part isn't the Shell theme setting")
 	}
 }
 
@@ -663,7 +663,8 @@ func TestGTKPresetFiles(t *testing.T) {
 	}
 	w, l := gtkWorld(t)
 	items, err := w.in.PlanPreset(context.Background(), p, func(id string) (catalog.Listing, bool) { return l, true })
-	if err != nil || len(items) != 2 || items[0].Step != StepInstall || items[1].Step != StepUnknown {
+	// The shell part is a Shell theme now: Orchis isn't on this system, and has nothing to install it from.
+	if err != nil || len(items) != 2 || items[0].Step != StepInstall || items[1].Step != StepMissing {
 		t.Errorf("plan = %+v %v", items, err)
 	}
 	if p, _ := s.Get("Old"); p.Sets(PartGTK) {

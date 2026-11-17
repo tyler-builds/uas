@@ -200,6 +200,7 @@ func TestCapture(t *testing.T) {
 		PartInterface: {Value: "Adwaita Sans 11"},
 		PartDocument:  {Value: "Adwaita Sans 12"},
 		PartMonospace: {Value: "Fira Code weight=450 10"},
+		PartShell:     {}, // the Shell's own look, which is a value of the Shell theme
 	}
 	gotJSON, _ := json.Marshal(parts)
 	wantJSON, _ := json.Marshal(want)
@@ -223,7 +224,7 @@ func TestPlanApplyUndo(t *testing.T) {
 		PartScheme:    {Value: SchemeDark},        // set
 		PartDocument:  {Value: "Adwaita Sans 12"}, // already so
 		PartInterface: {Value: "Inter"},           // a family alone: set, keeping the size
-		PartShell:     {Value: "Nordic"},          // a later uas's
+		PartShell:     {Value: "Nordic"},          // not on this system, nowhere to get it from: skipped
 	}}
 	lookup := func(id string) (catalog.Listing, bool) { return l, id == "pling:1166289" }
 	plan, err := w.in.PlanPreset(ctx, p, lookup)
@@ -234,7 +235,7 @@ func TestPlanApplyUndo(t *testing.T) {
 	for _, it := range plan {
 		steps = append(steps, it.Part+":"+string(it.Step))
 	}
-	wantSteps := []string{"scheme:set", "accent:set", "shell:unknown", "icons:install", "cursor:missing",
+	wantSteps := []string{"scheme:set", "accent:set", "shell:missing", "icons:install", "cursor:missing",
 		"interface:set", "document:same", "monospace:set"}
 	if !slices.Equal(steps, wantSteps) {
 		t.Errorf("plan = %v\nwant %v", steps, wantSteps)
@@ -323,9 +324,10 @@ func TestPlanApplyUndo(t *testing.T) {
 	if InUse(p, map[string]string{KeyCursorTheme: "Adwaita", KeyAccentColor: "teal"}) {
 		t.Error("in use with a part skipped")
 	}
-	// Without the cursor, and applied again with nothing failing, the preset is in use; the cursor is left
-	// alone.
+	// Without the cursor and the Shell theme, and applied again with nothing failing, the preset is in use;
+	// the cursor is left alone.
 	delete(p.Parts, PartCursor)
+	delete(p.Parts, PartShell)
 	w.gs.values[KeyCursorTheme] = "Mine"
 	plan, _ = w.in.PlanPreset(ctx, p, lookup)
 	if out, err := w.in.ApplyPreset(ctx, store, p, plan, ApplyOptions{}); err != nil || Failed(out) != nil {

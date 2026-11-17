@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	looks "github.com/tyler-builds/uas/internal/appearance"
 	"github.com/tyler-builds/uas/internal/catalog"
 	"github.com/tyler-builds/uas/internal/client/backend"
 	"github.com/tyler-builds/uas/internal/client/state"
@@ -34,7 +35,7 @@ func (in *Installer) Capture(ctx context.Context) (map[string]Part, error) {
 			errs = append(errs, fmt.Errorf("%s: %w", KeyWord(key), err))
 			continue
 		}
-		if v == "" {
+		if v == "" && !EmptyValue(key) {
 			continue
 		}
 		parts[KeyPart(key)] = Part{Value: v, From: OriginOf(recs, key, v)}
@@ -115,10 +116,16 @@ const (
 	StepMissing     Step = "missing"     // it isn't on the system and can't be installed, so it is skipped
 	StepUnsupported Step = "unsupported" // the desktop can't change the setting from uas, so it is skipped
 	StepUnknown     Step = "unknown"     // a part this version of uas can't apply, so it is skipped
+	// StepUserThemes is a Shell theme while the User Themes extension isn't running: it is skipped unless
+	// the user agrees to turn the extension on (ApplyOptions.UserThemes). Listing and Variant say what is
+	// installed first then.
+	StepUserThemes Step = "user-themes"
 )
 
 // Skipped reports whether the step leaves the setting as it is.
-func (s Step) Skipped() bool { return s == StepMissing || s == StepUnsupported || s == StepUnknown }
+func (s Step) Skipped() bool {
+	return s == StepMissing || s == StepUnsupported || s == StepUnknown || s == StepUserThemes
+}
 
 // PlanItem is what applying a preset does with one part.
 type PlanItem struct {
@@ -163,6 +170,7 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 	}
 	gtk4, _ := in.GTK4()
 	recs, _ := in.Records()
+	var userThemes *UserThemes // asked only for a preset with a Shell theme
 	var fams []string
 	famsRead := false
 	var items []PlanItem
@@ -183,6 +191,14 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 		it.Key = key
 		if name == PartWallpaper {
 			items = append(items, in.planWallpaper(ctx, it, part))
+			continue
+		}
+		if name == PartShell {
+			if userThemes == nil {
+				u := in.UserThemes(ctx)
+				userThemes = &u
+			}
+			items = append(items, in.planShell(ctx, it, part, lookup, check, *userThemes))
 			continue
 		}
 		if err := CheckValue(key, part.Value); err != nil {
@@ -247,6 +263,52 @@ func (in *Installer) plan(ctx context.Context, p Preset, lookup Lookup, check bo
 	return items, nil
 }
 
+// planShell decides what applying does with a Shell theme part. The Shell's own look needs nothing: without
+// User Themes running the Shell has it anyway. A theme is set when it is on the system, installed first when
+// it came with a GTK theme of the catalog, and in either case waits for the user's say (StepUserThemes) while
+// User Themes isn't running.
+func (in *Installer) planShell(ctx context.Context, it PlanItem, part Part, lookup Lookup, check bool,
+	u UserThemes) PlanItem {
+	cur, err := in.Desktop.Get(ctx, KeyShellTheme)
+	if part.Value == "" {
+		it.Step = StepSet
+		if err != nil || cur == "" || !u.Ready() {
+			it.Step = StepSame
+		}
+		return it
+	}
+	if !looks.ThemeName.MatchString(part.Value) {
+		it.Step, it.Note = StepMissing, fmt.Sprintf("%q isn't a theme name uas takes", part.Value)
+		return it
+	}
+	if err == nil && cur == part.Value && u.Ready() {
+		it.Step = StepSame
+		return it
+	}
+	it.Step = StepSet
+	if check && !in.HasShellTheme(part.Value) {
+		it.Step, it.Note = StepMissing, "isn't on this system"
+		switch {
+		case part.From == nil:
+			it.Note = "isn't on this system; it came with the system it was saved on"
+		default:
+			if l, ok := lookup(part.From.ID); ok && installable(l, KeyShellTheme, part) {
+				it.Step, it.Listing, it.Variant = StepInstall, l, part.From.Variant
+				if it.Variant == "" {
+					it.Variant = part.Value
+				}
+				it.Note = installNote(l, it.Variant)
+			} else {
+				it.Note = "isn't on this system, and the catalog no longer has it"
+			}
+		}
+	}
+	if !it.Step.Skipped() && !u.Ready() {
+		it.Step, it.Note = StepUserThemes, u.Why()
+	}
+	return it
+}
+
 // planWallpaper decides what applying does with a wallpaper part: it is skipped when a picture can't be
 // found.
 func (in *Installer) planWallpaper(ctx context.Context, it PlanItem, part Part) PlanItem {
@@ -309,7 +371,7 @@ func installable(l catalog.Listing, key string, part Part) bool {
 	case slices.Contains(FontKeys, key):
 		return l.Kind == catalog.KindFont
 	case key == KeyIconTheme && l.Kind != catalog.KindIconTheme, key == KeyCursorTheme && l.Kind != catalog.KindCursorTheme,
-		key == KeyGTKTheme && l.Kind != catalog.KindGTKTheme:
+		(key == KeyGTKTheme || key == KeyShellTheme) && l.Kind != catalog.KindGTKTheme:
 		return false
 	}
 	v := part.Value
@@ -363,6 +425,9 @@ type Outcome struct {
 type ApplyOptions struct {
 	// NoInstall skips the parts that would be installed first.
 	NoInstall bool
+	// UserThemes is the user's yes to getting the User Themes extension running (EnableUserThemes) for a
+	// Shell theme part that needs it (StepUserThemes); without it such a part is skipped.
+	UserThemes bool
 	// Install installs a listing; nil is Installer.Install. The session passes one that reports it.
 	Install func(ctx context.Context, l catalog.Listing, variant string,
 		progress func(backend.Progress)) (state.AppearanceInstall, error)
@@ -387,11 +452,30 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 	if install == nil {
 		install = in.Install
 	}
+	plan = slices.Clone(plan)
 	out := make([]Outcome, len(plan))
+	// A Shell theme that waits for User Themes: turned on when the user said so, before anything else.
+	if opt.UserThemes && slices.ContainsFunc(plan, func(it PlanItem) bool { return it.Step == StepUserThemes }) {
+		progress(backend.Progress{Message: "Turning on User Themes…"})
+		err := in.EnableUserThemes(ctx)
+		for i, it := range plan {
+			if it.Step != StepUserThemes {
+				continue
+			}
+			switch {
+			case err != nil:
+				out[i].Err = fmt.Errorf("turning on User Themes: %w", err)
+			case it.Listing.Ref != "":
+				plan[i].Step, plan[i].Note = StepInstall, installNote(it.Listing, it.Variant)
+			default:
+				plan[i].Step, plan[i].Note = StepSet, ""
+			}
+		}
+	}
 	installed := map[string]state.AppearanceInstall{} // by catalog ID and variant
 	for i, it := range plan {
 		out[i].PlanItem = it
-		if it.Step != StepInstall {
+		if it.Step != StepInstall || out[i].Err != nil {
 			continue
 		}
 		if opt.NoInstall {
@@ -420,6 +504,8 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			}
 		case !slices.Contains(FontKeys, it.Key) && !slices.Contains(rec.Themes, it.Value):
 			out[i].Err = fmt.Errorf("%s doesn't have a theme called %s", it.Listing.Name, it.Value)
+		case it.Key == KeyShellTheme && !in.HasShellTheme(it.Value):
+			out[i].Err = fmt.Errorf("%s doesn't have a GNOME Shell theme", it.Value)
 		}
 	}
 
@@ -445,7 +531,7 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", KeyWord(o.Key), err)
 		}
-		if cur == "" {
+		if cur == "" && !EmptyValue(o.Key) {
 			continue
 		}
 		pp := Part{Value: cur, From: OriginOf(recs, o.Key, cur)}
@@ -457,7 +543,11 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 		prev.Parts[o.Part] = pp
 	}
 	if len(prev.Parts) > 0 && store != nil {
-		if err := store.saveUndo(Undo{Applied: p.Name, At: store.now(), Look: prev}); err != nil {
+		u := Undo{Applied: p.Name, At: store.now(), Look: prev}
+		if r, ok, _ := store.Remembered(); ok {
+			u.Remembered = &r
+		}
+		if err := store.saveUndo(u); err != nil {
 			return nil, fmt.Errorf("saving the look to undo to: %w", err)
 		}
 	}
@@ -482,6 +572,11 @@ func (in *Installer) ApplyPreset(ctx context.Context, store *Presets, p Preset, 
 			continue
 		}
 		out[i].Done = true
+	}
+	// The preset is the one in use now, with the look it gave (an Undo's look isn't a preset).
+	// Not knowing it only loses the Changed mark, so a failure to write it doesn't fail the apply.
+	if store != nil && slices.ContainsFunc(out, func(o Outcome) bool { return o.Done }) {
+		_ = in.RememberPreset(ctx, store, p)
 	}
 	return out, nil
 }
@@ -517,7 +612,10 @@ func (in *Installer) UndoPreset(ctx context.Context, store *Presets) (Undo, []Ou
 		return u, out, err
 	}
 	if Failed(out) == nil {
-		err = store.clearUndo()
+		// The preset that was in use before the apply is again (or none, when there was none).
+		if err = store.remember(u.Remembered); err == nil {
+			err = store.clearUndo()
+		}
 	}
 	return u, out, err
 }

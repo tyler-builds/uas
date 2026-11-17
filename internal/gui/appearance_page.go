@@ -88,6 +88,9 @@ func (a *App) lookPage(ctx *ui.Context, id string) ui.Element {
 			mainW -= 290 + space6
 		}
 		main := ui.Div().Column().Gap(space6).MinWidth(ui.Px(0))
+		if _, installed := lk.Data.rec(id); app.Kind == catalog.KindGTKTheme && installed && !lk.Loading {
+			main = main.Child(a.shellLine(ctx, app, variant.Get(), lk.Data))
+		}
 		if app.Kind == catalog.KindFont {
 			col := ui.Div().Column().Gap(space4).Padding(space5).Radius(radiusL).Border(1, t.Border).
 				Background(t.Surface).ClipContent()
@@ -251,10 +254,13 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 		col = col.Child(ui.Select(variant, opts...).Label("Variant").Width(ui.Full).Key("variant"))
 	}
 	if app.Kind == catalog.KindFont && desk != nil {
+		// The role is the setting Use sets and the part Add to preset sets.
 		var opts []ui.Option[string]
 		for _, k := range appearance.FontKeys {
 			if desk.Supports(k) {
 				opts = append(opts, ui.Option[string]{Value: k, Label: "Use for " + appearance.KeyWord(k)})
+			} else if a.s.Presets != nil {
+				opts = append(opts, ui.Option[string]{Value: k, Label: appearance.KeyLabel(k)})
 			}
 		}
 		if len(opts) > 0 {
@@ -326,18 +332,36 @@ func (a *App) lookAction(ctx *ui.Context, app *catalog.App, l catalog.Listing, l
 				OnClick(func() { a.revertLook(ctx, key) }))
 		}
 	}
+	if !lk.Loading {
+		recs := lk.Data.recs
+		part := appearance.KeyPart(key)
+		if app.Kind == catalog.KindFont {
+			part = appearance.KeyPart(useAs.Get())
+		}
+		col = col.Child(a.addToPresetMenu(ctx, presetItem{part: part, value: appearance.ItemPart(l, variant.Get(), recs),
+			name: itemName(app, variant.Get())}, false))
+	}
 	if desk == nil {
 		col = col.Child(caption(ctx, "This desktop's settings can't be changed from uas: choose it in its own settings."))
 	}
 	if app.Kind == catalog.KindGTKTheme && canUse {
 		col = col.Child(caption(ctx, appearance.GTKNote))
 	}
+
 	if busy {
 		col = col.Child(ui.Div().Row().Gap(space2).Align(ui.Center).
 			Child(ui.ProgressRing().Size(ui.RingSmall).Label(job.title)).
 			Child(ui.Div().Grow(1).Basis(ui.Px(0)).MinWidth(ui.Px(0)).Child(caption(ctx, job.status).Truncate())))
 	}
 	return col
+}
+
+// itemName names a font or a theme's variant for people: "Papirus-Dark", "Inter".
+func itemName(app *catalog.App, variant string) string {
+	if app.Kind != catalog.KindFont && variant != "" {
+		return variant
+	}
+	return app.Name
 }
 
 func orDefault(s string) string {

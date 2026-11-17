@@ -635,7 +635,7 @@ anything off, and it says why for the rest ("no version for GNOME 51", "came wit
 own settings (dconf) aren't exported. Older versions of uas ignore the field, so the export format is still
 version 1.
 
-### Fonts, icon themes, cursor themes and GTK themes
+### Fonts, icon themes, cursor themes, GTK themes and GNOME Shell themes
 
 **Reading archives** (`internal/appearance`, shared by the indexer and the client). A theme archive
 (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar.zst` or `.zip`; 7-Zip and RAR are refused) is read entry by entry
@@ -656,7 +656,8 @@ theme, a `cursors` folder a cursor theme, and a `gtk-3.0` or `gtk-4.0` folder wi
 `gtk-dark.css` (a file, or a link to one in the archive) a GTK theme. That is what GTK 3 and 4 load, so a
 theme's source code (`src/gtk-3.0/*.scss`) or a GNOME Shell style alone is no theme. What else a GTK theme's
 folder holds (`gnome-shell`, `gtk-2.0`, `metacity-1`, `xfwm4`, `cinnamon`, `plank`, `assets`) is written
-with it as part of the theme, after the same checks; uas uses only the GTK 3 and 4 styles. The archive is
+with it as part of the theme, after the same checks; uas uses the GTK 3 and 4 styles, and the `gnome-shell`
+folder as a GNOME Shell theme (below). The archive is
 refused when none is found, or they can't be told apart cleanly: a theme with no folder of its own, one
 inside another, two of one name, or a name that would take over the desktop's own (`default`, `hicolor`;
 for GTK themes `Default` and the ones GTK has built in, `Adwaita`, `Adwaita-dark`, `HighContrast`,
@@ -712,6 +713,35 @@ change back to that value forgets it, and removing a font or theme that is in us
 the setting when uas didn't change it). The wallpaper's three settings are listed and reverted as one,
 "Wallpaper": `revert wallpaper` puts back each of them uas changed (or resets all three when it changed none).
 
+**GNOME Shell themes** (`client/appearance/shell.go`). A Shell theme is a theme folder with
+`gnome-shell/gnome-shell.css`, found where GNOME's User Themes extension looks, in its order: `~/.themes/<name>`,
+`$XDG_DATA_HOME/themes/<name>`, then each system data folder's `themes/<name>`; a theme found first hides one
+of the same name (`ShellThemes`). User Themes also reads `<data dir>/gnome-shell/theme/<name>.css`, which
+uas doesn't list. Most GTK themes on Pling carry one, so a GTK theme uas installs is often a Shell theme too,
+listed with the GTK theme it came with; uas's GTK theme records are what Remove, `OriginOf` and a preset's
+`from` use for it. The setting is `KeyShellTheme`, GNOME's `org.gnome.shell.extensions.user-theme name`
+(`""` is the Shell's own look, which `use shell default` sets), and it has Use, Revert, `revert all`,
+"Changed by uas" and the revert before a removal like the others; Plasma and other desktops don't support it.
+GNOME applies it only while User Themes runs. `UserThemes` asks the Shell (`ListExtensions` and
+`UserExtensionsEnabled`, through `shellext`) whether the extension is installed, on, allowed to run (the main
+switch) and working. Use refuses a theme that isn't on the system, and while User Themes isn't running it
+changes nothing and returns a `NeedsUserThemesError`; the app and the CLI then say why and offer to fix it
+(install it from extensions.gnome.org, where the Shell asks in its own dialog; turn on the main switch; turn
+the extension on), and `EnableUserThemes` does only that, when the user agrees. Nothing is ever turned off.
+When the extension is installed for the user its schema is in its own folder
+(`<extensions>/user-theme@…/schemas`), which plain `gsettings` can't see: the GNOME layer then reads and writes
+the setting with `gsettings --schemadir <that folder>`. It looks for the folder under
+`$XDG_DATA_HOME/gnome-shell/extensions` and each `$XDG_DATA_DIRS`' `gnome-shell/extensions`, only when
+`gsettings list-keys` doesn't list the schema system-wide (as on Bazzite, where User Themes comes with the
+system and is on). Outside a GNOME session the Shell can't be asked and uas doesn't stop a change.
+Shell themes are written for particular GNOME versions; one short line says so where a Shell theme is chosen.
+**Where they come from:** only from theme folders already on the system, including GTK themes uas installs.
+Pling's "GNOME Shell Themes" category (134) stays out of the catalog: the popular Shell themes come with GTK
+themes uas already lists, a Shell-only item is an archive shape the unpacker refuses today (a folder whose
+only style is `gnome-shell`), and many are made for one GNOME release; adding it would be a new kind for the
+indexer, the catalog and older clients. The catalog doesn't record which GTK themes carry a Shell theme (that
+would mean reading every pinned archive again), so a GTK theme's page says so once it is installed.
+
 **GTK 4 files** (`client/appearance/gtk4.go`). GTK 4 apps, libadwaita's above all, don't draw themselves with
 the `gtk-theme` setting; they load the user's own style, `$XDG_CONFIG_HOME/gtk-4.0/gtk.css`, when they start.
 So using a GTK theme (`Use`, Install and use, a preset's `gtk` part) also copies the files of the theme's
@@ -742,9 +772,14 @@ files when they start again. Nothing sets `GTK_THEME` or changes libadwaita itse
 saved under a name, one JSON file each in `~/.config/uas/presets/<slug>.json` (`uas_preset` format version,
 name, times, and `parts`). A part is optional and is left alone when missing; it holds the setting's `value`
 and, for a font or theme uas installed, `from` (its catalog ID and variant), so it can be installed elsewhere.
-The parts are `scheme`, `accent`, `gtk`, `icons`, `cursor`, `interface`, `document`, `monospace` and
-`wallpaper`; the format keeps room for `shell`, and parts and fields this version doesn't know survive a
-rewrite. The `gtk` part is the GTK theme by name, as the format reserved it, so files from before it (with no
+The parts are `scheme`, `accent`, `gtk`, `shell`, `icons`, `cursor`, `interface`, `document`, `monospace` and
+`wallpaper`, and parts and fields this version doesn't know survive a rewrite. The `shell` part is the GNOME
+Shell theme by name, as the format reserved it (a part with no value is the Shell's own look), with `from`
+naming the GTK theme of the catalog it came with; it never holds the User Themes extension or extension
+settings, which presets don't save. Applying one plans it as set, already so, installed with its GTK theme
+first, or, while User Themes isn't running, `user-themes`: skipped unless the user agrees in the apply
+confirmation (the app's box, the CLI's question; never `-y` alone), when it is turned on first. The Shell's
+own look needs no extension. The `gtk` part is the GTK theme by name, as the format reserved it, so files from before it (with no
 `gtk` part, or one a hand wrote) read as they are; applying one copies its GTK 4 files as Use does. Its
 optional `gtk4: false` leaves them out and puts back what uas moved aside: a Previous look has it when uas
 had no GTK 4 files in place before the apply, so Undo restores `~/.config/gtk-4.0` as it was. The
@@ -764,16 +799,39 @@ when it is the user's. **Applying** plans each part (set, already so, install fr
 skipped: missing (a wallpaper whose picture can't be found), unsupported here, or a newer uas's), installs what
 is missing before anything changes, saves the values it is about to change to
 `~/.local/share/uas/previous-look.json` for Undo, then sets the parts in order (style, accent, GTK theme,
-icons, cursor, fonts, the wallpaper last) through `Use`, so Revert still goes back to the values from before uas. A part that
+Shell theme, icons, cursor, fonts, the wallpaper last) through `Use`, so Revert still goes back to the values from before uas. A part that
 fails is reported and the rest are still set. A GTK theme the setting already has is "already so" unless it has
 GTK 4 files uas hasn't copied, which applying copies. "In use" is worked out by comparing a preset's parts with the
-settings, the wallpaper's pictures and fit too. CLI: `uas appearance preset`, and `uas appearance use wallpaper
-<file> [-dark <file>] [-fit <mode>]`.
+settings, the wallpaper's pictures and fit too.
+**The preset in use, Changed and Update** (`client/appearance/presetcurrent.go`). uas remembers the preset last
+applied, or saved from the current look, in `~/.local/share/uas/current-preset.json`, with the look that gave:
+the desktop's settings of the preset's parts right after. A preset is **Changed** when it is that preset and
+a part's setting changed since and isn't the part's value now (so a part skipped when it was applied, such as
+a theme this system lacks, makes no Changed mark by itself, and neither does a part the user changed on the
+preset's page to match the look). "In use" comes first: a preset whose parts all match is in use whatever
+was remembered. **Update** (`UpdatePreset`) saves the current look into the preset: only the parts it has
+(it never gains a part), and of those, for the remembered preset, only the Changed ones; a skipped part keeps
+its value and `from`, and a font part without a size stays without one. For a preset that isn't the
+remembered one, every part it has that differs from the look is saved. uas never updates a preset by itself;
+Use and Install and use leave every preset as it was. What is remembered follows the preset: Rename keeps it
+under the new name, Delete forgets it, changing a part on the preset's page leaves it (the preset changed,
+not the look), and Undo of an apply brings back what was remembered before that apply (the Previous look
+file keeps it, as `remembered`), or none. **Add to preset** (`Presets.AddPart`, `ItemPart`) sets one part of a
+preset to a font or theme and nothing else: nothing is applied or installed, and the part keeps its catalog
+ID and variant in `from`, so applying the preset installs it. A font is added for a role (interface,
+document or monospace) without a size, keeping the size the preset's part had. CLI: `uas appearance preset` (`list` marks the changed preset, `update <name>` is Update), `uas appearance
+use wallpaper <file> [-dark <file>] [-fit <mode>]` and `uas appearance use shell <name>|default`; `use`
+says when the look no longer matches the preset applied last, and how to update it.
 
 **The Appearance page** (`gui/appearance.go`) opens on Presets once there are any: cards with a preview in
 the preset's style (its icon theme's icons, its accent, in front of its wallpaper when it has one), Apply and
 a menu (Change, Rename, Duplicate, Delete), Save current look and New preset; a preset's page
-(`gui/presets.go`) changes each part or leaves it as it is. Its Wallpaper row (`gui/wallpapers.go`) has a
+(`gui/presets.go`) changes each part or leaves it as it is. The preset applied last shows "Changed" in place of
+"In use" once the look no longer matches it, with Update and Apply again, on its card and its page; after Use
+or Install and use, the confirmation offers "Update <preset>" when that happened. A font's, icon, cursor, GTK
+or Shell theme's page, and the rows of the system's themes, have an "Add to preset" menu
+(`gui/addpreset.go`): the presets, a check on those that have the item for that part, and New preset…; a
+font's role is the page's "Use for" choice. Afterwards "Added to <preset>" says so, with Open. Its Wallpaper row (`gui/wallpapers.go`) has a
 light and a dark slot, each with Choose… (a file, through the portal's file chooser filtered to the kinds the
 store takes, or the system's wallpapers, a grid of thumbnails with names, where choosing a light picture takes
 its dark pair too), "Same for dark", the fit and Leave as is. **Wallpaper thumbnails** are made off the UI
@@ -786,7 +844,10 @@ has thumbnailed them. Its other tabs are Fonts, Icons, Cursors and GTK themes, e
 popular first (or recently updated, or by name), searched from the top bar (a catalog from before GTK themes
 says so, with Check for a newer catalog), and Installed: what uas installed with what it's in use for, the
 settings it changed with Revert (the GTK theme's row names the GTK 4 files uas copied), and every GTK, icon
-and cursor theme on the system, the one in use marked and the others with Use. uas draws no preview of a
+and cursor theme on the system, the one in use marked and the others with Use. On GNOME a Shell themes tab
+lists the Shell themes on the system as rows (Default, GNOME's own look, first), the one in use marked and
+the others with Use, under a note when User Themes isn't running with the button that fixes it; Use then asks
+first. An installed GTK theme with a Shell theme says so on its page, with Use for the Shell. uas draws no preview of a
 GTK theme and its own window keeps its look; one short line on a GTK theme's page and on a preset's GTK
 theme row says that GTK 4 apps change only with themes that have GTK 4 files, and open apps after a restart. A theme's page shows its preview pictures
 (linked from Pling, as screenshots are), downloads, rating (or "Not rated"), last change, version, trust

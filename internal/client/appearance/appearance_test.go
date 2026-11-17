@@ -52,6 +52,9 @@ type fakeGSettings struct {
 	fail map[string]bool
 	// fonts is what fc-list answers; "" makes it fail.
 	fonts string
+	// shellSchema is where User Themes' schema is: "" the system's, "user" only in the extension's own folder
+	// (gsettings sees it with --schemadir), "none" nowhere.
+	shellSchema string
 }
 
 func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ func(string)) (string, error) {
@@ -76,13 +79,29 @@ func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ fun
 	if name == "gsettings" && len(args) == 2 && args[0] == "list-keys" && args[1] == gnomeBackground {
 		return "picture-uri\npicture-uri-dark\npicture-options\nprimary-color\n", nil
 	}
+	if name == "gsettings" && len(args) == 2 && args[0] == "list-keys" && args[1] == userThemesSchema {
+		if f.shellSchema != "" {
+			return "", fmt.Errorf("No such schema “%s”", userThemesSchema)
+		}
+		return "name\n", nil
+	}
+	schemaDir := false
+	if len(args) > 2 && args[0] == "--schemadir" {
+		args, schemaDir = args[2:], true
+	}
+	if name == "gsettings" && len(args) >= 3 && args[1] == userThemesSchema &&
+		(f.shellSchema == "none" || (f.shellSchema == "user" && !schemaDir)) {
+		return "", fmt.Errorf("No such schema “%s”", userThemesSchema)
+	}
 	if name != "gsettings" || len(args) < 3 ||
-		(args[1] != gnomeSchema && args[1] != gnomeBackground && args[1] != gnomeScreensaver) {
+		(args[1] != gnomeSchema && args[1] != gnomeBackground && args[1] != gnomeScreensaver && args[1] != userThemesSchema) {
 		return "", fmt.Errorf("unexpected %s %v", name, args)
 	}
-	// The interface's keys by their name, the others' by schema and name (bg picture-uri).
+	// The interface's keys by their name, the others' by schema and name (bg picture-uri, shell name).
 	key := args[2]
 	switch args[1] {
+	case userThemesSchema:
+		key = "shell " + key
 	case gnomeBackground:
 		key = "bg " + key
 	case gnomeScreensaver:
@@ -98,6 +117,9 @@ func (f *fakeGSettings) Run(_ context.Context, name string, args []string, _ fun
 		f.values[key] = parseGVariantString(args[3])
 	case "reset":
 		f.values[key] = "default-" + args[2]
+		if args[1] == userThemesSchema {
+			f.values[key] = "" // the Shell's own look
+		}
 	}
 	return "", nil
 }
@@ -616,8 +638,8 @@ func TestNewSettings(t *testing.T) {
 			t.Errorf("GNOME doesn't support %s", key)
 		}
 	}
-	if g.Supports("shell-theme") || g.Supports("nonsense") {
-		t.Error("GNOME supports a setting uas doesn't change yet")
+	if !g.Supports(KeyShellTheme) || g.Supports("nonsense") {
+		t.Error("GNOME's Shell theme isn't supported, or a setting uas doesn't change is")
 	}
 	if err := g.Set(ctx, KeyColorScheme, SchemeDark); err != nil {
 		t.Fatal(err)
